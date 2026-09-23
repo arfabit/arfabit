@@ -34,6 +34,11 @@ Master, Delivery, Job, Library. Stage names are `SCAN PLAN RIP OCR PACKAGE DELIV
 EJECT`, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
 not "source" for Master.
 
+**Known shortcut.** `internal/config/toml.go` is a hand-written subset parser,
+written only because the machine this was built on could not reach the Go module
+proxy. Replace it with a real TOML library the moment that is possible; do not
+extend it.
+
 **Prefer boring code.** This is a wrapper around two external binaries. The value is
 in correctness and UX, not cleverness. Straight-line subprocess handling beats an
 abstraction almost every time.

@@ -4,7 +4,7 @@ Convert a disc to natively play on Apple TV.
 
 ARFABIT watches your disc drive. When you insert a DVD or Blu-ray, it reads the movie off the disc, converts it to a file your Apple TV understands, gives it a proper name, and puts it in your movie folder. You run it from your web browser, from any device in your house.
 
-> **Early days.** ARFABIT is being built right now and is not ready to use yet. This page describes what it will do.
+> **Early days.** ARFABIT works, but it is new. One thing is still missing: it cannot yet turn a disc's subtitles into text, so your movie will not have subtitles. Everything else below works. The original copy of the disc is kept, so nothing is lost by starting now.
 
 ## What you need
 

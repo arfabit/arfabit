@@ -568,20 +568,58 @@ nothing in the UI presents a scary choice. Word substitutions:
 
 ---
 
-## 16. Roadmap
+## 16. What is built
 
-**Phase 1 — day 1**
-Single node. One profile. Movies. MP4 / HEVC main10 / AAC stereo / OCR'd SRT.
-makemkvcon-based detection. Offline IMDb naming. Manual Transcode Lab. Autostart.
+**Working today.** Scan, Plan, Rip, Package, Deliver, Eject, running end to end
+from the web page on one machine.
 
-**Phase 2**
+| Piece | State |
+|---|---|
+| `makemkvcon` robot-mode parsing | built, tested against four real discs |
+| Main-feature selection and obfuscation detection | built, calibrated on a real obfuscated disc |
+| Rip with progress and cancellation | built |
+| HDR10 metadata extraction and propagation | built, tested |
+| Encoder argument construction, audio copy rule | built, tested |
+| Layered TOML settings with provenance | built, tested |
+| File-backed job store, atomic writes | built, tested |
+| Plex naming | built, tested |
+| Estimator keyed on drive and processor | built, tested |
+| Space check | built, tested |
+| Web page, log view, server-sent events | built, tested |
+| Doctor | built |
+| Autostart on all three platforms | built |
+| Eject on all three platforms | built |
+
+**Not built: subtitles.** Reading bitmap subtitles into text is the one day-one
+piece still missing, and it is a subsystem rather than a gap — PGS decoding,
+glyph clustering, a bundled recognition model and a context pass (§10). Until it
+exists the delivered file carries no subtitles, and the job log says so plainly
+rather than quietly leaving them out. The bitmap tracks are still in the master,
+so nothing is lost by ripping now.
+
+**Known shortcuts.**
+
+- The TOML reader is a deliberately small hand-written subset, because the
+  machine this was built on could not reach the Go module proxy. Replacing it
+  with a full implementation is a one-file change.
+- Offline IMDb naming (§11) is not wired up. Titles come from MakeMKV's own disc
+  name, which on all four test discs was already correct and human-readable.
+- The Transcode Lab (§14) is not built.
+
+## 17. Roadmap
+
+**Next**
+Subtitles end to end · offline IMDb naming · Transcode Lab · the encoder's own
+observed frame rate rather than an assumed 24.
+
+**Later**
 Multiple profiles and matchers · multichannel E-AC-3 · OS-level disc detection ·
-auto-sample Transcode Lab · "fix my subtitle file" standalone tool · TV series naming.
+"fix my subtitle file" as a standalone tool · TV series naming.
 
-**Phase 3**
-Music CDs (separate backend — MakeMKV cannot read CDDA; needs libcdio + MusicBrainz) ·
-Dolby Vision (P7 → P8.1 via `dovi_tool`) · HDR10+ · `arfabit-control` light web
-controller for NAS targets · local text LLM for the OCR context pass.
+**Eventually**
+Music CDs (a separate backend — MakeMKV cannot read CDDA; needs libcdio and
+MusicBrainz) · Dolby Vision (P7 to P8.1 via `dovi_tool`) · HDR10+ ·
+`arfabit-control` for NAS targets · a local text model for the OCR context pass.
 
 ---
 
