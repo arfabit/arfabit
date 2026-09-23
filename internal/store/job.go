@@ -127,10 +127,6 @@ type PlannedAudio struct {
 	SourceCodec string `json:"source_codec"`
 	SourceLabel string `json:"source_label,omitempty"`
 
-	// Downmixed marks surround that had to lose channels on the way, because
-	// the encoder writes at most 5.1.
-	Downmixed bool `json:"downmixed,omitempty"`
-
 	// Stereo marks a downmix ARFABIT adds itself rather than a track that
 	// exists on the disc.
 	Stereo bool `json:"stereo,omitempty"`

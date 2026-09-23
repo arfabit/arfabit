@@ -344,13 +344,11 @@ func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTra
 			Title:       shortTrackName(planned),
 			Default:     len(tracks) == 0,
 		}
-		switch {
-		case planned.Stereo, planned.Channels <= 2 && !planned.Copy:
+		// Only a stereo downmix asks for a channel count. Surround keeps the
+		// source's own layout, and the codec was chosen in the Plan to be one
+		// that can hold it.
+		if planned.Stereo || (planned.Channels <= 2 && !planned.Copy) {
 			track.Channels = 2
-		case planned.Downmixed:
-			// The encoder writes at most 5.1, so a 7.1 source is asked for
-			// explicitly rather than left to ffmpeg to decide.
-			track.Channels = maxEncodedChannels
 		}
 		tracks = append(tracks, track)
 	}
@@ -427,11 +425,7 @@ func surroundNote(plan *store.Plan) string {
 // shortTrackName is what the track is called in the player's own menu, where
 // there is no room for the Plan's full explanation.
 func shortTrackName(planned store.PlannedAudio) string {
-	layout := planned.Layout
-	if planned.Downmixed {
-		layout = "5.1"
-	}
-	return fmt.Sprintf("%s %s", languageName(planned.Lang), layout)
+	return fmt.Sprintf("%s %s", languageName(planned.Lang), planned.Layout)
 }
 
 func (r *Runner) hasSelectedSubtitles(job *Job) bool {

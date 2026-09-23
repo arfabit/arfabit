@@ -118,12 +118,12 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 	if byIndex[1].Copy {
 		t.Error("TrueHD marked as copyable; Apple TV cannot decode it")
 	}
-	if byIndex[1].Codec != surroundCodec {
-		t.Errorf("TrueHD converted to %q, want %q", byIndex[1].Codec, surroundCodec)
+	// A 7.1 source goes to AAC, which is the only one of the three encoders
+	// that writes eight channels.
+	if byIndex[1].Codec != wideCodec {
+		t.Errorf("7.1 TrueHD converted to %q, want %q", byIndex[1].Codec, wideCodec)
 	}
-	if !byIndex[1].Downmixed {
-		t.Error("a 7.1 source should be marked as losing channels; the encoder writes at most 5.1")
-	}
+
 	if !byIndex[2].Copy {
 		t.Error("AC-3 not marked as copyable; Apple TV decodes it natively")
 	}
@@ -398,7 +398,7 @@ func TestTrackLabelsAreReadable(t *testing.T) {
 	if got := tracks[0].Label; !strings.Contains(got, "English") ||
 		!strings.Contains(got, "7.1") ||
 		!strings.Contains(got, "Dolby TrueHD") ||
-		!strings.Contains(got, "Dolby Digital Plus") {
+		!strings.Contains(got, "AAC") {
 		t.Errorf("label does not explain the conversion: %q", got)
 	}
 	if got := tracks[0].Label; strings.Contains(got, "truehd") || strings.Contains(got, "eac3") {
@@ -431,6 +431,33 @@ func TestLayoutNames(t *testing.T) {
 	for _, tc := range tests {
 		if got := layoutName(tc.channels, tc.raw); got != tc.want {
 			t.Errorf("layoutName(%d, %q) = %q, want %q", tc.channels, tc.raw, got, tc.want)
+		}
+	}
+}
+
+// The three encoders differ in how many channels they will write, which was
+// measured rather than assumed: AAC writes eight, E-AC-3's ffmpeg encoder
+// stops at six and downmixes anything wider without saying so. The codec is
+// therefore chosen by how wide the source is.
+func TestSurroundCodecMatchesSourceWidth(t *testing.T) {
+	tests := []struct {
+		channels  int
+		wantCodec string
+	}{
+		{8, wideCodec},     // 7.1 — only AAC keeps all of it
+		{6, surroundCodec}, // 5.1 — E-AC-3, which a receiver can take whole
+		{2, "aac"},
+	}
+
+	for _, tc := range tests {
+		title := disc.Title{Streams: []disc.Stream{
+			{Index: 0, Kind: disc.StreamVideo},
+			{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: tc.channels, Lang: "eng"},
+		}}
+
+		tracks := planAudio(title, config.Defaults().Profile)
+		if tracks[0].Codec != tc.wantCodec {
+			t.Errorf("%d channels converted to %q, want %q", tc.channels, tracks[0].Codec, tc.wantCodec)
 		}
 	}
 }

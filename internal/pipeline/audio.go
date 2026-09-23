@@ -11,15 +11,29 @@ import (
 	"github.com/arfabit/arfabit/internal/store"
 )
 
-// Surround targets. Apple TV decodes AC-3 and E-AC-3, so a track it cannot
-// play is converted to one of them rather than flattened to stereo.
+// Surround targets.
+//
+// Apple TV decodes AC-3, E-AC-3 and AAC, so surround it cannot play is
+// converted to one of them rather than flattened to stereo. Which one depends
+// on how wide the source is, because the encoders differ:
+//
+//   - E-AC-3 is the better target. A receiver can take the bitstream whole,
+//     and it is what streaming services ship. But ffmpeg's encoder implements
+//     only up to 5.1 — the format itself allows 7.1 — and it downmixes a wider
+//     source silently.
+//   - AAC handles all eight channels, so it is used for 7.1 sources, where
+//     keeping every channel matters more than being bitstreamable.
 const (
+	// surroundCodec is used for sources up to 5.1.
 	surroundCodec   = "eac3"
 	surroundBitrate = "768k"
 
-	// ffmpeg's E-AC-3 encoder writes at most six channels, so a 7.1 source
-	// becomes 5.1. That is a real loss and the label says so.
-	maxEncodedChannels = 6
+	// wideCodec is used for sources wider than E-AC-3's encoder can manage.
+	wideCodec   = "aac"
+	wideBitrate = "640k"
+
+	// eac3MaxChannels is ffmpeg's E-AC-3 encoder limit, not the format's.
+	eac3MaxChannels = 6
 )
 
 // friendlyCodec names a codec the way a person would.
@@ -121,14 +135,14 @@ func describeTrack(s disc.Stream, profile config.Profile) store.PlannedAudio {
 		track.Copy = true
 		track.Codec = source
 
+	case s.Channels > eac3MaxChannels:
+		// Wider than E-AC-3's encoder manages, so AAC keeps every channel.
+		track.Codec = wideCodec
+		track.Bitrate = wideBitrate
+
 	case s.Channels > 2:
-		// Surround an Apple TV cannot decode is converted to Dolby Digital
-		// Plus, which keeps the surround rather than flattening it.
 		track.Codec = surroundCodec
 		track.Bitrate = surroundBitrate
-		if s.Channels > maxEncodedChannels {
-			track.Downmixed = true
-		}
 
 	default:
 		track.Codec = "aac"
@@ -148,10 +162,8 @@ func trackLabel(t store.PlannedAudio) string {
 	switch {
 	case t.Copy:
 		b.WriteString(" — kept exactly as it is")
-	case t.Downmixed:
-		fmt.Fprintf(&b, " — converted to %s 5.1 (from %s)", codecName(t.Codec), t.Layout)
 	case t.Channels > 2:
-		fmt.Fprintf(&b, " — converted to %s %s", codecName(t.Codec), t.Layout)
+		fmt.Fprintf(&b, " — converted to %s %s, all channels kept", codecName(t.Codec), t.Layout)
 	default:
 		fmt.Fprintf(&b, " — converted to %s", codecName(t.Codec))
 	}

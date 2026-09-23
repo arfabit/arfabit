@@ -363,11 +363,26 @@ track alongside the lossless one, so surround usually costs nothing.
 **An AAC stereo track is always added as a fallback**, whether or not a copy was
 available.
 
-| Target | Codec | Bitrate |
-| --- | --- | --- |
-| Stereo fallback (always present) | AAC-LC | 256k VBR |
-| 5.1 / 7.1 when encoding is required (later) | E-AC-3 | 768k |
-| 5.1 alternate (later) | AC-3 | 640k (format ceiling) |
+When a track must be encoded, the target depends on how wide it is, because the
+encoders differ in ways that were measured rather than assumed:
+
+| Source width | Target | Bitrate | Why |
+| --- | --- | --- | --- |
+| 7.1 (8 channels) | AAC | 640k | the only one of the three that writes eight channels |
+| 3.0 – 5.1 | E-AC-3 | 768k | a receiver can take the bitstream whole |
+| Stereo or mono | AAC | 256k | |
+
+**ffmpeg's E-AC-3 encoder stops at six channels** and downmixes anything wider
+without a word — the format allows 7.1, the encoder does not. Verified:
+
+```
+7.1 source → -c:a eac3 → eac3, 6 channels, 5.1(side)
+7.1 source → -c:a aac  → aac,  8 channels, 7.1
+```
+
+A stereo track is always delivered alongside: a real one from the disc where
+there is one, otherwise a downmix. It is listed last, since Apple TV takes the
+first track it understands.
 
 Track order matters: Apple TV selects the first compatible track, so multichannel
 is listed first when present, with the stereo fallback after it.
