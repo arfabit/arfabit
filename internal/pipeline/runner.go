@@ -80,6 +80,11 @@ func (r *Runner) Current() *Job {
 // Scan reads the disc and builds a Plan, stopping short of doing anything to
 // it. Nothing starts until the user says so (§8).
 func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
+	// A scan that was never started is finished with rather than left hanging
+	// as though it were still expecting an answer. Reading a disc again is
+	// how somebody says they have changed their mind.
+	r.retirePreviousScan()
+
 	rec := store.NewJob(store.NewJobID(time.Now(), drive.Label))
 	rec.DiscLabel = drive.Label
 	rec.Drive = drive.Device
@@ -568,6 +573,18 @@ func (r *Runner) stop(job *Job, note, detail string) error {
 
 // SetCurrentForTest installs a job without running a scan.
 func (r *Runner) SetCurrentForTest(job *Job) { r.setCurrent(job) }
+
+// retirePreviousScan closes off a Plan nobody acted on.
+func (r *Runner) retirePreviousScan() {
+	previous := r.Current()
+	if previous == nil || previous.State != store.StateWaiting {
+		return
+	}
+
+	previous.State = store.StateStopped
+	previous.Note = "Not started."
+	_ = r.Store.SaveJob(previous.Job)
+}
 
 func (r *Runner) setCurrent(job *Job) {
 	r.mu.Lock()

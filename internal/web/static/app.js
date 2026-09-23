@@ -514,6 +514,42 @@ function renderJob(job) {
   }
 }
 
+// jobOutcome says what became of a disc, in words rather than state names.
+function jobOutcome(job) {
+  switch (job.state) {
+    case "done":
+      return "Finished";
+    case "running":
+      return stageWords(job.stage);
+    case "waiting":
+      return "Waiting for you to start it";
+    default:
+      // A stopped job carries its own explanation, which is more useful than
+      // the word "stopped".
+      return job.note || "Stopped";
+  }
+}
+
+// whenText says when something happened, in the terms a person would use.
+function whenText(when) {
+  if (!when) return "";
+
+  const then = new Date(when);
+  if (Number.isNaN(then.getTime())) return "";
+
+  const today = new Date();
+  const sameDay = then.toDateString() === today.toDateString();
+  if (sameDay) return then.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (then.toDateString() === yesterday.toDateString()) {
+    return `yesterday, ${then.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+  }
+
+  return then.toLocaleDateString();
+}
+
 function renderRecent(jobs) {
   const box = $("recent");
   if (!jobs || jobs.length === 0) {
@@ -528,13 +564,11 @@ function renderRecent(jobs) {
     const name = document.createElement("span");
     name.textContent = job.title || job.disc_name || job.disc_label || "A disc";
 
-    const when = document.createElement("span");
-    when.className = "muted small";
-    when.textContent = job.state === "done"
-      ? new Date(job.started).toLocaleDateString()
-      : job.note || job.state;
+    const right = document.createElement("span");
+    right.className = "muted small";
+    right.textContent = `${jobOutcome(job)} · ${whenText(job.started)}`;
 
-    row.append(name, when);
+    row.append(name, right);
     return row;
   }));
 }

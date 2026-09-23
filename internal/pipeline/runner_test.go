@@ -96,3 +96,39 @@ func testStore(t *testing.T) *store.Store {
 	}
 	return s
 }
+
+// A Plan nobody acted on should not sit in the list as though it were still
+// expecting an answer. Reading a disc again is how somebody changes their mind.
+func TestScanRetiresAnUnstartedPlan(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
+
+	abandoned := &Job{Job: &store.Job{
+		ID:    "abandoned",
+		State: store.StateWaiting,
+		Stage: store.StagePlan,
+	}}
+	r.SetCurrentForTest(abandoned)
+
+	r.retirePreviousScan()
+
+	if abandoned.State != store.StateStopped {
+		t.Errorf("State = %q, want stopped", abandoned.State)
+	}
+	if abandoned.Note != "Not started." {
+		t.Errorf("Note = %q", abandoned.Note)
+	}
+}
+
+// A job that is actually running must not be retired by a new scan.
+func TestScanLeavesRunningJobsAlone(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
+
+	running := &Job{Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StageRip}}
+	r.SetCurrentForTest(running)
+
+	r.retirePreviousScan()
+
+	if running.State != store.StateRunning {
+		t.Errorf("State = %q; a running job was retired", running.State)
+	}
+}
