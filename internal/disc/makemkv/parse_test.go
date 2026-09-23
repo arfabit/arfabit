@@ -282,3 +282,33 @@ func TestParseScanSecondDisc(t *testing.T) {
 		t.Errorf("Japanese subtitle streams = %d, want %d", got, want)
 	}
 }
+
+// A third real disc, differing from the first two in ways that matter:
+// the feature is not at 00001.mpls, and a short junk title survives the
+// default length filter.
+func TestParseScanThirdDisc(t *testing.T) {
+	res := loadFixture(t, "scan-bd-3.txt")
+
+	if got, want := res.Disc.Name, "In the Grey"; got != want {
+		t.Errorf("Name = %q, want %q", got, want)
+	}
+	if got, want := len(res.Disc.Titles), 2; got != want {
+		t.Fatalf("got %d titles, want %d", got, want)
+	}
+
+	// The feature sits at a high playlist number. Anything keying on
+	// 00001.mpls to find the main feature would pick wrong here.
+	feature := res.Disc.Titles[0]
+	if got, want := feature.SourceFile, "01491.mpls"; got != want {
+		t.Errorf("SourceFile = %q, want %q", got, want)
+	}
+
+	// The second title is exactly at the default 120s filter and carries no
+	// audio at all, so it is not playable content despite surviving the scan.
+	junk := res.Disc.Titles[1]
+	for _, s := range junk.Streams {
+		if s.Kind == disc.StreamAudio {
+			t.Errorf("title 1 has an audio stream; expected none")
+		}
+	}
+}
