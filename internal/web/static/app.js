@@ -218,12 +218,24 @@ function renderDrives(list) {
     $("idle-detail").textContent = loaded.Name || "";
     scan.disabled = false;
     scan.textContent = "Read this disc";
-  } else {
-    $("idle-title").textContent = "Put a disc in";
-    $("idle-detail").textContent = "ARFABIT is watching the drive and will notice when you do.";
-    scan.disabled = true;
-    scan.textContent = "Read this disc";
+    return;
   }
+
+  // The drive is there, just not holding anything readable. Saying which is
+  // the difference between "put a disc in" and "wait a moment".
+  const drive = drives[0];
+  scan.disabled = true;
+  scan.textContent = "Read this disc";
+
+  const states = {
+    open: ["The drive is open", "Put a disc in and close it."],
+    loading: ["Reading the disc", "The drive is spinning up. This takes a few seconds."],
+    empty: ["Put a disc in", "ARFABIT is watching the drive and will notice when you do."],
+  };
+  const [title, detail] = states[drive.State] || states.empty;
+
+  $("idle-title").textContent = title;
+  $("idle-detail").textContent = `${detail}\n${drive.Name || ""}`;
 }
 
 // --- the plan -------------------------------------------------------------

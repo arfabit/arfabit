@@ -115,35 +115,65 @@ func ParseScanFunc(r io.Reader, onMessage func(Message)) (*ScanResult, error) {
 	return res, nil
 }
 
-// parseDrive converts a DRV record, reporting ok=false for empty slots.
+// MakeMKV's drive states, as reported in the second field of a DRV record.
 //
-// MakeMKV always prints sixteen DRV lines. Slots with no drive attached report
-// visible == 256; without this filter the UI shows sixteen phantom drives.
-func parseDrive(rec Record) (disc.Drive, bool) {
-	const slotEmpty = 256
+// Sixteen DRV lines are always printed; the ones with no drive attached report
+// 256, which is what separates a real drive from a phantom slot.
+const (
+	driveEmptyClosed = 0
+	driveEmptyOpen   = 1
+	driveInserted    = 2
+	driveLoading     = 3
+	driveNone        = 256
+	driveUnmounting  = 257
+)
 
+// parseDrive converts a DRV record, reporting ok=false for unused slots.
+//
+// A drive with nothing in it reports no device path and no label, so neither
+// can be required: doing so made the drive disappear from the page the moment
+// a disc was ejected.
+func parseDrive(rec Record) (disc.Drive, bool) {
 	index, err := rec.intField(0)
 	if err != nil {
 		return disc.Drive{}, false
 	}
-	visible, err := rec.intField(1)
-	if err != nil || visible == slotEmpty {
+
+	state, err := rec.intField(1)
+	if err != nil || state == driveNone {
 		return disc.Drive{}, false
 	}
 
-	device := rec.field(6)
-	if device == "" {
+	name := rec.field(4)
+	if name == "" {
+		// No name and not marked absent: nothing useful to show.
 		return disc.Drive{}, false
 	}
 
-	label := rec.field(5)
-	return disc.Drive{
+	drive := disc.Drive{
 		Index:  index,
-		Name:   rec.field(4),
-		Device: device,
-		Label:  label,
-		Loaded: label != "",
-	}, true
+		Name:   name,
+		Label:  rec.field(5),
+		Device: rec.field(6),
+	}
+
+	switch state {
+	case driveInserted:
+		drive.State = disc.DriveLoaded
+		drive.Loaded = true
+	case driveEmptyClosed:
+		drive.State = disc.DriveEmpty
+	case driveEmptyOpen:
+		drive.State = disc.DriveOpen
+	case driveLoading, driveUnmounting:
+		drive.State = disc.DriveLoading
+	default:
+		drive.State = disc.DriveUnknown
+		// An unrecognised state with a label still has a disc in it.
+		drive.Loaded = drive.Label != ""
+	}
+
+	return drive, true
 }
 
 // attr returns the attribute id and value from a CINFO/TINFO/SINFO record.

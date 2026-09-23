@@ -26,13 +26,25 @@ const (
 	StreamSubtitle StreamKind = "subtitle"
 )
 
+// DriveState is what a drive is currently doing.
+type DriveState string
+
+const (
+	DriveEmpty   DriveState = "empty"   // present, nothing in it
+	DriveOpen    DriveState = "open"    // tray is out
+	DriveLoaded  DriveState = "loaded"  // a disc is in and readable
+	DriveLoading DriveState = "loading" // spinning up
+	DriveUnknown DriveState = "unknown"
+)
+
 // Drive is one optical drive on this node.
 type Drive struct {
-	Index  int    // backend's drive index
-	Name   string // "BD-RE HL-DT-ST BD-RE BU40N 1.03"
-	Device string // "/dev/rdisk8"
-	Label  string // volume label of the loaded disc, empty when none
-	Loaded bool   // a disc is present
+	Index  int        // backend's drive index
+	Name   string     // "BD-RE HL-DT-ST BD-RE BU40N 1.03"
+	Device string     // "/dev/rdisk8", empty when no disc is in
+	Label  string     // volume label of the loaded disc, empty when none
+	State  DriveState // what the drive is doing
+	Loaded bool       // a disc is present and readable
 }
 
 // Disc is what a scan found.

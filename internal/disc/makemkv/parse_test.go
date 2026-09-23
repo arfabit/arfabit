@@ -352,3 +352,67 @@ func TestParseScanObfuscatedDisc(t *testing.T) {
 		t.Errorf("got %d titles at the feature's duration, want %d", got, want)
 	}
 }
+
+// A drive with nothing in it reports no device path and no label. Requiring
+// either made the drive vanish from the page the moment a disc was ejected.
+func TestParseDriveStates(t *testing.T) {
+	tests := []struct {
+		name      string
+		line      string
+		wantOK    bool
+		wantState disc.DriveState
+		loaded    bool
+	}{
+		{
+			"disc inserted",
+			`DRV:0,2,999,12,"BD-RE HL-DT-ST BU40N","CRIME_101","/dev/rdisk8"`,
+			true, disc.DriveLoaded, true,
+		},
+		{
+			"empty, tray closed",
+			`DRV:0,0,999,0,"BD-RE HL-DT-ST BU40N","",""`,
+			true, disc.DriveEmpty, false,
+		},
+		{
+			"tray open",
+			`DRV:0,1,999,0,"BD-RE HL-DT-ST BU40N","",""`,
+			true, disc.DriveOpen, false,
+		},
+		{
+			"spinning up",
+			`DRV:0,3,999,0,"BD-RE HL-DT-ST BU40N","",""`,
+			true, disc.DriveLoading, false,
+		},
+		{
+			"no drive in this slot",
+			`DRV:5,256,999,0,"","",""`,
+			false, "", false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, ok := ParseLine(tc.line)
+			if !ok {
+				t.Fatal("the line did not parse")
+			}
+
+			drive, ok := parseDrive(rec)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if drive.State != tc.wantState {
+				t.Errorf("State = %q, want %q", drive.State, tc.wantState)
+			}
+			if drive.Loaded != tc.loaded {
+				t.Errorf("Loaded = %v, want %v", drive.Loaded, tc.loaded)
+			}
+			if drive.Name == "" {
+				t.Error("the drive lost its name")
+			}
+		})
+	}
+}

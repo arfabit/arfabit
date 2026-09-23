@@ -689,8 +689,23 @@ Treating its trailing 5010 as an error is a bug.
 
 ### DRV
 
-Sixteen slots always print. **`visible == 256` means an empty slot, not a drive.**
-Filter on it or the UI shows sixteen phantom drives.
+Sixteen slots always print. The second field is the drive's state:
+
+| Value | Meaning |
+| --- | --- |
+| 0 | drive present, tray closed, empty |
+| 1 | drive present, tray open |
+| 2 | disc inserted |
+| 3 | loading |
+| 256 | no drive in this slot |
+| 257 | unmounting |
+
+**256 means an empty slot, not a drive.** Filter on it or the UI shows sixteen
+phantom drives.
+
+**A drive with nothing in it reports no device path and no label**, so neither
+can be required to recognise one. Requiring the device path made the drive
+disappear from the page the moment a disc was ejected.
 
 ### CINFO (disc)
 
