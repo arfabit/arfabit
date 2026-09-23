@@ -227,10 +227,12 @@ function renderDrives(list) {
   scan.disabled = true;
   scan.textContent = "Read this disc";
 
+  // An open tray and a closed empty one are the same thing to the person
+  // standing there: nothing to watch. Slot-loading drives have no tray to
+  // close, so the wording never mentions one.
   const states = {
-    open: ["The drive is open", "Put a disc in and close it."],
     loading: ["Reading the disc", "The drive is spinning up. This takes a few seconds."],
-    empty: ["Put a disc in", "ARFABIT is watching the drive and will notice when you do."],
+    empty: ["The drive is empty", "Insert a disc."],
   };
   const [title, detail] = states[drive.State] || states.empty;
 
