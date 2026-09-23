@@ -123,3 +123,30 @@ label.track input { margin: 0; }
 
 .row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.4rem 0; border-bottom: 1px solid var(--line); }
 .row:last-child { border-bottom: 0; }
+
+/* Buttons say what they are doing, so a click never disappears into nothing. */
+button.busy { opacity: 0.7; cursor: progress; }
+button.done { border-color: var(--ok); }
+
+.title-choice { margin: 0.75rem 0 1rem; }
+.title-choice label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.35rem; }
+.title-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.title-row input {
+  font: inherit; padding: 0.45rem 0.6rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+}
+#title-name { flex: 1 1 16rem; }
+#title-year { width: 5.5rem; }
+
+.suggestions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+.suggestions button { font-size: 0.85rem; padding: 0.3rem 0.65rem; }
+
+.lang-group { margin-bottom: 0.75rem; }
+.lang-group h4 {
+  margin: 0 0 0.25rem; font-size: 0.75rem; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted);
+}
+
+.setting { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.setting > div:first-child { font-weight: 500; }
+.setting button { margin-top: 0.5rem; }

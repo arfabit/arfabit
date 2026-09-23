@@ -3,6 +3,8 @@ package store
 import (
 	"fmt"
 	"time"
+
+	"github.com/arfabit/arfabit/internal/meta"
 )
 
 // Stage is one step of the pipeline. The names match the UI and the logs
@@ -58,6 +60,10 @@ type Job struct {
 	Title string `json:"title"`
 	Year  int    `json:"year"`
 
+	// Matches are what the offline film list suggested, best first. The Plan
+	// shows them so the user can pick a different one.
+	Matches []meta.Match `json:"matches,omitempty"`
+
 	// Plan records what was decided, in full, so a job can be understood
 	// long after it ran.
 	Plan *Plan `json:"plan,omitempty"`
@@ -110,12 +116,22 @@ type PlannedAudio struct {
 	Copy        bool   `json:"copy"`
 	Codec       string `json:"codec"`
 	Layout      string `json:"layout"`
+	Channels    int    `json:"channels"`
 	Lang        string `json:"lang"`
 	Bitrate     string `json:"bitrate,omitempty"`
 	Label       string `json:"label"`
 	Selected    bool   `json:"selected"`
 
-	// Stereo marks the downmix ARFABIT adds itself rather than a track that
+	// SourceCodec and SourceLabel record what was on the disc, so the Plan can
+	// say what a track was as well as what it becomes.
+	SourceCodec string `json:"source_codec"`
+	SourceLabel string `json:"source_label,omitempty"`
+
+	// Downmixed marks surround that had to lose channels on the way, because
+	// the encoder writes at most 5.1.
+	Downmixed bool `json:"downmixed,omitempty"`
+
+	// Stereo marks a downmix ARFABIT adds itself rather than a track that
 	// exists on the disc.
 	Stereo bool `json:"stereo,omitempty"`
 }

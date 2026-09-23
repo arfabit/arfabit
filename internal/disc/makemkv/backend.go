@@ -49,11 +49,17 @@ func (b *Backend) Name() string { return "MakeMKV" }
 // Drives lists the optical drives MakeMKV can see.
 func (b *Backend) Drives() ([]disc.Drive, error) {
 	res, err := b.run(context.Background(), "info", fmt.Sprintf("disc:%d", listDrivesIndex))
+
+	// The pseudo-index lists the drives and then tries to open disc 9999,
+	// which does not exist, so makemkvcon always exits non-zero here — 255 in
+	// practice. The drives it printed first are still good, and treating that
+	// exit as a failure reports "no drive" on a machine that has one.
+	if res != nil && len(res.Drives) > 0 {
+		return res.Drives, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	// The trailing 5010 belongs to the pseudo-index, not to any real drive, so
-	// it is deliberately not treated as a failure here.
 	return res.Drives, nil
 }
 
@@ -66,7 +72,7 @@ func (b *Backend) Scan(driveIndex int) (*disc.Disc, error) {
 // taking too long on a damaged disc.
 func (b *Backend) ScanContext(ctx context.Context, driveIndex int) (*disc.Disc, error) {
 	res, err := b.run(ctx, "info", fmt.Sprintf("disc:%d", driveIndex))
-	if err != nil {
+	if err != nil && (res == nil || len(res.Disc.Titles) == 0) {
 		return nil, err
 	}
 
@@ -159,7 +165,10 @@ func (b *Backend) run(ctx context.Context, extra ...string) (*ScanResult, error)
 		if s := stderr.String(); s != "" {
 			msgs = append(msgs, Message{Text: s})
 		}
-		return nil, &Error{Op: "run", Err: waitErr, Messages: msgs}
+		// The parsed result is returned alongside the error: makemkvcon exits
+		// non-zero in situations where what it already printed is perfectly
+		// good, and the caller is better placed to judge than this is.
+		return res, &Error{Op: "run", Err: waitErr, Messages: msgs}
 	}
 
 	return res, nil

@@ -21,6 +21,7 @@ import (
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/doctor"
+	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
 	"github.com/arfabit/arfabit/internal/web"
@@ -66,11 +67,19 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	backend := &makemkv.Backend{MinLength: cfg.Profile.MinTitleLength}
 
+	// A missing film list is not a problem: without it a disc's own name is
+	// used, which on many discs is already right.
+	index, err := meta.LoadIndex(cfg.Paths.Data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "The film list could not be read, so disc names will be used: %v\n", err)
+	}
+
 	runner := &pipeline.Runner{
 		Config:      cfg,
 		Store:       st,
 		Backend:     backend,
 		Calibration: calibration,
+		Index:       index,
 	}
 
 	server, err := web.New(cfg, st, runner, backend)

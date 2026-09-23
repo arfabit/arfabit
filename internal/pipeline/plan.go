@@ -8,7 +8,6 @@ import (
 
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
-	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -61,81 +60,6 @@ func planVideo(plan *store.Plan, kind disc.Kind, video *disc.Stream, profile con
 func isHEVC(codecID string) bool {
 	id := strings.ToUpper(codecID)
 	return strings.Contains(id, "HEVC") || strings.Contains(id, "H265") || strings.Contains(id, "MPEGH")
-}
-
-// planAudio applies the copy-when-native rule and always adds a stereo
-// fallback (§9).
-//
-// The primary track is the one with the most channels that can be copied,
-// because a copy is bit-perfect and free. Only when nothing is copyable does
-// the widest track get encoded instead, so there is always audio.
-func planAudio(title disc.Title, profile config.Profile) []store.PlannedAudio {
-	var planned []store.PlannedAudio
-
-	bestCopyable, bestAny := -1, -1
-	for i, s := range title.Streams {
-		if s.Kind != disc.StreamAudio || !wantLanguage(s.Lang, profile.SubLanguages) {
-			continue
-		}
-		if bestAny < 0 || s.Channels > title.Streams[bestAny].Channels {
-			bestAny = i
-		}
-		if profile.CopyNativeAudio && ffmpeg.CanCopyAudio(shortCodec(s.CodecID)) {
-			if bestCopyable < 0 || s.Channels > title.Streams[bestCopyable].Channels {
-				bestCopyable = i
-			}
-		}
-	}
-
-	primary := bestCopyable
-	if primary < 0 {
-		primary = bestAny
-	}
-
-	for i, s := range title.Streams {
-		if s.Kind != disc.StreamAudio {
-			continue
-		}
-
-		codec := shortCodec(s.CodecID)
-		canCopy := profile.CopyNativeAudio && ffmpeg.CanCopyAudio(codec)
-
-		track := store.PlannedAudio{
-			SourceIndex: s.Index,
-			Copy:        canCopy,
-			Codec:       codec,
-			Layout:      s.Layout,
-			Lang:        s.Lang,
-			Label:       strings.TrimSpace(s.Summary),
-			Selected:    i == primary,
-		}
-		if !canCopy {
-			track.Codec = "aac"
-			track.Bitrate = profile.AudioBitrate
-		}
-		planned = append(planned, track)
-	}
-
-	// A stereo track is always added, whether or not a copy was available, so
-	// every player has something it can handle. It is listed after the
-	// multichannel track because Apple TV picks the first one it understands.
-	if primary >= 0 {
-		src := title.Streams[primary]
-		if src.Channels > 2 {
-			planned = append(planned, store.PlannedAudio{
-				SourceIndex: src.Index,
-				Codec:       "aac",
-				Layout:      "stereo",
-				Lang:        src.Lang,
-				Bitrate:     profile.AudioBitrate,
-				Label:       "Stereo (added by ARFABIT)",
-				Selected:    true,
-				Stereo:      true,
-			})
-		}
-	}
-
-	return planned
 }
 
 // planSubtitles selects subtitle tracks in the wanted languages.

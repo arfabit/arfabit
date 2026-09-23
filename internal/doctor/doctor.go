@@ -201,11 +201,14 @@ func checkDrives(ctx context.Context) Check {
 	backend := &makemkv.Backend{Timeout: 60 * time.Second}
 	drives, err := backend.Drives()
 	if err != nil {
+		// No guessed cause: this is one message for several unrelated
+		// situations, and naming the wrong one sends people looking in the
+		// wrong place (§15).
 		return Check{
 			Name:    "Disc drive",
 			Status:  StatusWarn,
-			Message: "ARFABIT could not ask about your drive.",
-			Fix:     "If MakeMKV is open, close it: only one program can use the drive at a time.",
+			Message: "ARFABIT could not ask about your drive. Here is exactly what MakeMKV reported.",
+			Fix:     "Things worth checking: the drive is plugged in and powered, and MakeMKV is not open in another window.",
 			Detail:  err.Error(),
 		}
 	}

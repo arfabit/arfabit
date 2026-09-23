@@ -43,17 +43,19 @@ function renderPlan(job) {
     ? `Kept exactly as it is on the disc — ${plan.resolution}.`
     : `${plan.source_codec} · ${plan.resolution} · converted to HEVC, quality ${plan.crf}, ${plan.preset}.`;
 
-  $("plan-audio").replaceChildren(...(plan.audio || []).map((track, i) =>
-    trackRow(`audio-${i}`, track.source_index, track.selected,
-      track.label || track.codec, track.copy ? "kept as-is" : `converted to ${track.codec}`)));
+  $("plan-audio").replaceChildren(...groupByLanguage(plan.audio || [], "audio"));
 
   const subs = plan.subtitles || [];
   if (subs.length === 0) {
     $("plan-subs").textContent = "This disc has no subtitles.";
   } else {
-    $("plan-subs").replaceChildren(...subs.map((track, i) =>
-      trackRow(`sub-${i}`, track.source_index, track.selected, track.label, track.forced ? "forced" : "")));
+    $("plan-subs").replaceChildren(...groupByLanguage(subs.map((t) => ({
+      ...t,
+      label: `${t.forced ? "Only for foreign speech" : "Full subtitles"}${t.label ? ` · ${t.label}` : ""}`,
+    })), "sub"));
   }
+
+  renderTitleChoice(job);
 
   const est = plan.estimated_time ? Math.round(plan.estimated_time / 60000000000) : 0;
   $("plan-estimate").textContent = est
@@ -65,6 +67,48 @@ function renderPlan(job) {
   $("plan-blocked").textContent = fits ? "" : "Free up some room and look for the disc again.";
 }
 
+// groupByLanguage lays the tracks out the way a disc's own menu reads: one
+// heading per language, widest first inside each.
+function groupByLanguage(tracks, kind) {
+  const groups = [];
+  const byLang = new Map();
+
+  tracks.forEach((track, i) => {
+    const lang = languageName(track.lang);
+    if (!byLang.has(lang)) {
+      const group = { lang, rows: [] };
+      byLang.set(lang, group);
+      groups.push(group);
+    }
+    byLang.get(lang).rows.push({ track, i });
+  });
+
+  return groups.map((group) => {
+    const box = document.createElement("div");
+    box.className = "lang-group";
+
+    const heading = document.createElement("h4");
+    heading.textContent = group.lang;
+    box.append(heading);
+
+    for (const { track, i } of group.rows) {
+      box.append(trackRow(`${kind}-${i}`, track.source_index, track.selected,
+        track.label || track.codec, ""));
+    }
+    return box;
+  });
+}
+
+const LANGUAGES = {
+  eng: "English", fra: "French", fre: "French", spa: "Spanish", deu: "German",
+  ger: "German", ita: "Italian", jpn: "Japanese", nld: "Dutch", dut: "Dutch",
+  por: "Portuguese", rus: "Russian", kor: "Korean", zho: "Chinese", chi: "Chinese",
+};
+
+function languageName(code) {
+  return LANGUAGES[(code || "").toLowerCase()] || (code ? code.toUpperCase() : "Unknown");
+}
+
 function spaceMessage(space) {
   const lead = space.Fits
     ? "There is just enough room, and the estimate could be low."
@@ -73,6 +117,36 @@ function spaceMessage(space) {
     `The drive has ${bytes(space.Free)} free.\n` +
     `Your masters folder holds ${bytes(space.Masters)}.\n` +
     `Your library folder holds ${bytes(space.Library)}.`;
+}
+
+// renderTitleChoice offers the name and year, with whatever the film list
+// suggested. Nothing is applied without a click.
+function renderTitleChoice(job) {
+  $("title-choice").hidden = false;
+  $("title-name").value = job.title || job.disc_name || "";
+  $("title-year").value = job.year ? String(job.year) : "";
+
+  const matches = job.matches || [];
+  $("title-suggestions").replaceChildren(...matches.map((match) => {
+    const button = document.createElement("button");
+    button.textContent = `${match.title.Name}${match.title.Year ? ` (${match.title.Year})` : ""}`;
+    button.title = match.Why || "";
+    button.addEventListener("click", () => {
+      $("title-name").value = match.title.Name;
+      $("title-year").value = match.title.Year || "";
+      saveTitle();
+    });
+    return button;
+  }));
+}
+
+async function saveTitle() {
+  await busy($("title-save"), "Saving", "Saved", () =>
+    post("/api/title", {
+      title: $("title-name").value,
+      year: Number($("title-year").value) || 0,
+    }));
+  refresh();
 }
 
 function trackRow(id, sourceIndex, selected, label, note) {
@@ -201,6 +275,38 @@ function applyFilter() {
 
 // --- talking to the server ------------------------------------------------
 
+// busy marks a button while its request is in flight, so a click is never
+// swallowed silently. The label is restored afterwards either way.
+async function busy(button, working, done, action) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.classList.add("busy");
+  button.textContent = working;
+
+  try {
+    const result = await action();
+    button.classList.remove("busy");
+    if (result !== null && done) {
+      button.classList.add("done");
+      button.textContent = done;
+      setTimeout(() => {
+        button.classList.remove("done");
+        button.textContent = original;
+        button.disabled = false;
+      }, 1600);
+      return result;
+    }
+    button.textContent = original;
+    button.disabled = false;
+    return result;
+  } catch (err) {
+    button.classList.remove("busy");
+    button.textContent = original;
+    button.disabled = false;
+    throw err;
+  }
+}
+
 async function post(path, body) {
   const res = await fetch(path, {
     method: "POST",
@@ -298,9 +404,32 @@ async function runDoctor() {
 
 // --- wiring ---------------------------------------------------------------
 
-$("scan").addEventListener("click", () => post("/api/scan"));
-$("start").addEventListener("click", () => post("/api/start"));
-$("stop").addEventListener("click", () => post("/api/stop"));
+$("scan").addEventListener("click", (e) =>
+  busy(e.target, "Looking\u2026", null, () => post("/api/scan")));
+
+$("start").addEventListener("click", (e) =>
+  busy(e.target, "Starting\u2026", null, () => post("/api/start")));
+
+$("stop").addEventListener("click", (e) =>
+  busy(e.target, "Stopping\u2026", null, () => post("/api/stop")));
+
+$("title-save").addEventListener("click", saveTitle);
+
+$("index-build").addEventListener("click", (e) =>
+  busy(e.target, "Downloading\u2026", null, () => post("/api/index")));
+
+events.addEventListener("index", (e) => {
+  const status = JSON.parse(e.data);
+  const detail = $("index-detail");
+  if (status.state === "downloading") {
+    detail.textContent = "Downloading the film list. This happens once and takes a few minutes.";
+  } else if (status.state === "ready") {
+    detail.textContent = `Ready — ${status.count.toLocaleString()} films.`;
+    $("index-build").textContent = "Download it again";
+  } else {
+    detail.textContent = `The film list did not download. ${status.detail || ""}`;
+  }
+});
 $("log-filter").addEventListener("input", applyFilter);
 
 $("log-follow").addEventListener("change", (e) => {
@@ -326,6 +455,8 @@ $("log-jump").addEventListener("click", () => {
   $("log").scrollTop = $("log").scrollHeight;
 });
 
+const events = new EventSource("/events");
+
 async function loadAutostart() {
   const status = await fetch("/api/autostart").then((r) => r.json());
   $("autostart").checked = !!status.enabled;
@@ -344,7 +475,6 @@ $("autostart").addEventListener("change", async (e) => {
   }
 });
 
-const events = new EventSource("/events");
 events.addEventListener("job", (e) => {
   const job = JSON.parse(e.data);
   renderJob(job);

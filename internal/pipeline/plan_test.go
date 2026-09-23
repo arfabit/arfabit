@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -112,8 +113,16 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 		t.Errorf("stereo fallback = %+v, want a selected AAC downmix", *stereo)
 	}
 
+	// TrueHD cannot be copied, so it is converted to Dolby Digital Plus
+	// rather than flattened to stereo.
 	if byIndex[1].Copy {
 		t.Error("TrueHD marked as copyable; Apple TV cannot decode it")
+	}
+	if byIndex[1].Codec != surroundCodec {
+		t.Errorf("TrueHD converted to %q, want %q", byIndex[1].Codec, surroundCodec)
+	}
+	if !byIndex[1].Downmixed {
+		t.Error("a 7.1 source should be marked as losing channels; the encoder writes at most 5.1")
 	}
 	if !byIndex[2].Copy {
 		t.Error("AC-3 not marked as copyable; Apple TV decodes it natively")
@@ -122,13 +131,10 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 		t.Error("DTS marked as copyable")
 	}
 
-	// The copyable English track is the one selected: surround for free,
-	// even though the TrueHD track has more channels.
-	if !byIndex[2].Selected {
-		t.Error("the copyable Dolby 5.1 track was not selected")
-	}
-	if byIndex[1].Selected {
-		t.Error("the TrueHD track was selected; it would have to be re-encoded")
+	// The widest English track wins, because surround is now preserved by
+	// converting rather than being thrown away.
+	if !byIndex[1].Selected {
+		t.Error("the widest English track was not selected")
 	}
 
 	// Multichannel first: Apple TV picks the first track it understands.
@@ -320,5 +326,111 @@ func TestSurroundNoteSilentWhenSurroundKept(t *testing.T) {
 	}}
 	if note := surroundNote(plan); note != "" {
 		t.Errorf("a note was produced despite surround being kept: %q", note)
+	}
+}
+
+// Tracks are grouped the way a disc's own menu reads: wanted languages first,
+// widest first inside each language.
+func TestAudioOrdering(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "spa"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
+		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 8, Lang: "eng"},
+		{Index: 4, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
+		{Index: 5, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 6, Lang: "eng"},
+	}}
+
+	tracks := planAudio(title, config.Defaults().Profile)
+
+	var order []string
+	for _, tr := range tracks {
+		if tr.Stereo {
+			continue
+		}
+		order = append(order, fmt.Sprintf("%s/%d", tr.Lang, tr.Channels))
+	}
+
+	want := []string{"eng/8", "eng/6", "eng/2", "fra/6", "spa/2"}
+	if len(order) != len(want) {
+		t.Fatalf("got %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Errorf("position %d = %s, want %s (full order %v)", i, order[i], want[i], order)
+		}
+	}
+}
+
+// Discs often carry two stereo tracks with nothing to tell them apart — one is
+// frequently a commentary. ARFABIT cannot know which, so it keeps both rather
+// than picking wrongly.
+func TestAmbiguousStereoTracksAreBothKept(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 8, Lang: "eng"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
+		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
+	}}
+
+	var stereoSelected int
+	for _, tr := range planAudio(title, config.Defaults().Profile) {
+		if tr.Channels <= 2 && tr.Selected && !tr.Stereo {
+			stereoSelected++
+		}
+	}
+	if stereoSelected != 2 {
+		t.Errorf("%d of the two stereo tracks were kept, want both", stereoSelected)
+	}
+}
+
+// Labels say what a track is and what becomes of it, in words rather than
+// codec identifiers.
+func TestTrackLabelsAreReadable(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_TRUEHD", Channels: 8, Lang: "eng"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
+	}}
+
+	tracks := planAudio(title, config.Defaults().Profile)
+
+	if got := tracks[0].Label; !strings.Contains(got, "English") ||
+		!strings.Contains(got, "7.1") ||
+		!strings.Contains(got, "Dolby TrueHD") ||
+		!strings.Contains(got, "Dolby Digital Plus") {
+		t.Errorf("label does not explain the conversion: %q", got)
+	}
+	if got := tracks[0].Label; strings.Contains(got, "truehd") || strings.Contains(got, "eac3") {
+		t.Errorf("label leaks codec identifiers: %q", got)
+	}
+
+	var french string
+	for _, tr := range tracks {
+		if tr.Lang == "fra" {
+			french = tr.Label
+		}
+	}
+	if !strings.Contains(french, "French") || !strings.Contains(french, "kept exactly as it is") {
+		t.Errorf("a copied track is not described as kept: %q", french)
+	}
+}
+
+// MakeMKV reports layouts like "5.1(side)", which is accurate and unhelpful.
+func TestLayoutNames(t *testing.T) {
+	tests := []struct {
+		channels int
+		raw      string
+		want     string
+	}{
+		{8, "7.1", "7.1"},
+		{6, "5.1(side)", "5.1"},
+		{2, "stereo", "Stereo"},
+		{1, "mono", "Mono"},
+	}
+	for _, tc := range tests {
+		if got := layoutName(tc.channels, tc.raw); got != tc.want {
+			t.Errorf("layoutName(%d, %q) = %q, want %q", tc.channels, tc.raw, got, tc.want)
+		}
 	}
 }

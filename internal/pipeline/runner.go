@@ -25,6 +25,11 @@ type Runner struct {
 	Backend     *makemkv.Backend
 	Calibration *Calibration
 
+	// Index is the offline film list, used to confirm a title and find its
+	// year. Nil when it has not been downloaded, in which case the disc's own
+	// name is used.
+	Index *meta.Index
+
 	// OnUpdate is called whenever the job changes, so the web view can
 	// refresh without polling.
 	OnUpdate func(*Job)
@@ -105,6 +110,19 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	rec.Stage = store.StagePlan
 	rec.State = store.StateWaiting
 	rec.Title = titleFrom(d)
+
+	// The offline list confirms the name and supplies the year, which no disc
+	// label carries. The best match is offered, never applied silently: the
+	// Plan shows the candidates and the user decides (§11).
+	if matches := r.Index.Lookup(bestLabel(d), int(title.Duration.Minutes()), 3); len(matches) > 0 {
+		rec.Matches = matches
+		best := matches[0]
+		rec.Title = best.Title.Name
+		rec.Year = best.Title.Year
+		log.Printf(store.StagePlan, "This looks like %s — %s.", best.Title, best.Why)
+	} else if r.Index != nil {
+		log.Printf(store.StagePlan, "This disc is not in the film list, so its own name is used.")
+	}
 
 	// Estimates are shown before anything starts, so the user knows what they
 	// are agreeing to.
@@ -319,16 +337,20 @@ func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTra
 
 		track := ffmpeg.AudioTrack{
 			SourceIndex: idx,
-			Copy:        planned.Copy && !planned.Stereo,
+			Copy:        planned.Copy,
 			Codec:       planned.Codec,
 			Bitrate:     planned.Bitrate,
 			Lang:        planned.Lang,
-			Title:       planned.Label,
+			Title:       shortTrackName(planned),
 			Default:     len(tracks) == 0,
 		}
-		if planned.Stereo {
+		switch {
+		case planned.Stereo, planned.Channels <= 2 && !planned.Copy:
 			track.Channels = 2
-			track.Title = "Stereo"
+		case planned.Downmixed:
+			// The encoder writes at most 5.1, so a 7.1 source is asked for
+			// explicitly rather than left to ffmpeg to decide.
+			track.Channels = maxEncodedChannels
 		}
 		tracks = append(tracks, track)
 	}
@@ -402,6 +424,16 @@ func surroundNote(plan *store.Plan) string {
 	return "This disc's surround sound is in a format an Apple TV cannot play, and its Dolby track is stereo only, so the movie will be in stereo."
 }
 
+// shortTrackName is what the track is called in the player's own menu, where
+// there is no room for the Plan's full explanation.
+func shortTrackName(planned store.PlannedAudio) string {
+	layout := planned.Layout
+	if planned.Downmixed {
+		layout = "5.1"
+	}
+	return fmt.Sprintf("%s %s", languageName(planned.Lang), layout)
+}
+
 func (r *Runner) hasSelectedSubtitles(job *Job) bool {
 	for _, s := range job.Plan.Subtitles {
 		if s.Selected {
@@ -468,6 +500,14 @@ func detailOf(err error) string {
 // disc author wrote it: shouted, and sometimes with the format tacked on, as in
 // "THE MANDALORIAN AND GROGU - BLU-RAY". Either way it is tidied before it
 // becomes a folder name.
+// bestLabel is whichever of the disc's names is more likely to be searchable.
+func bestLabel(d *disc.Disc) string {
+	if d.Name != "" {
+		return d.Name
+	}
+	return d.Label
+}
+
 func titleFrom(d *disc.Disc) string {
 	if name := meta.CleanDiscLabel(d.Name); name != "" {
 		return name

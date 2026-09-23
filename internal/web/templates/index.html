@@ -30,6 +30,16 @@
     <h2 id="plan-title">Found a movie</h2>
     <p id="plan-summary" class="muted"></p>
 
+    <div id="title-choice" class="title-choice" hidden>
+      <label for="title-name">Is this right?</label>
+      <div class="title-row">
+        <input id="title-name" type="text" autocomplete="off">
+        <input id="title-year" type="text" inputmode="numeric" placeholder="Year" maxlength="4">
+        <button id="title-save">Use this name</button>
+      </div>
+      <div id="title-suggestions" class="suggestions"></div>
+    </div>
+
     <div id="plan-notice" class="notice" hidden></div>
 
     <div class="grid">
@@ -88,6 +98,12 @@
       <span>Start ARFABIT when this computer starts</span>
     </label>
     <p id="autostart-detail" class="muted small"></p>
+
+    <div class="setting">
+      <div>Film list</div>
+      <p id="index-detail" class="muted small">Used to confirm a movie's name and find its year.</p>
+      <button id="index-build">Download the film list</button>
+    </div>
   </section>
 
   <section class="card">

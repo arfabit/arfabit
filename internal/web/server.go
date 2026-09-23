@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/arfabit/arfabit/internal/autostart"
@@ -19,6 +20,7 @@ import (
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/doctor"
+	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -81,6 +83,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/start", s.handleStart)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("POST /api/plan", s.handleUpdatePlan)
+
+	mux.HandleFunc("POST /api/title", s.handleChooseTitle)
+	mux.HandleFunc("POST /api/index", s.handleBuildIndex)
 
 	mux.HandleFunc("GET /api/autostart", s.handleAutostart)
 	mux.HandleFunc("POST /api/autostart", s.handleSetAutostart)
@@ -215,6 +220,61 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 
 	_ = s.Store.SaveJob(job.Job)
 	writeJSON(w, job.Plan)
+}
+
+// handleChooseTitle applies the name and year the user picked.
+func (s *Server) handleChooseTitle(w http.ResponseWriter, r *http.Request) {
+	job := s.Runner.Current()
+	if job == nil {
+		writeError(w, "There is no disc waiting.", nil)
+		return
+	}
+
+	var choice struct {
+		Title string `json:"title"`
+		Year  int    `json:"year"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&choice); err != nil {
+		writeError(w, "ARFABIT could not read that change.", err)
+		return
+	}
+	if strings.TrimSpace(choice.Title) == "" {
+		writeError(w, "A movie needs a name.", nil)
+		return
+	}
+
+	job.Title = strings.TrimSpace(choice.Title)
+	job.Year = choice.Year
+	_ = s.Store.SaveJob(job.Job)
+
+	writeJSON(w, job.Job)
+}
+
+// handleBuildIndex downloads the film list.
+//
+// It runs in the background and reports over the event stream, because it is a
+// 200 MB download and the page must stay usable throughout.
+func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
+	go func() {
+		s.events.send("index", map[string]any{"state": "downloading"})
+
+		ix, err := meta.BuildIndex(s.Config.Paths.Data, false, nil)
+		if err != nil {
+			s.events.send("index", map[string]any{
+				"state":  "stopped",
+				"detail": err.Error(),
+			})
+			return
+		}
+
+		s.Runner.Index = ix
+		s.events.send("index", map[string]any{
+			"state": "ready",
+			"count": len(ix.Entries),
+		})
+	}()
+
+	writeJSON(w, map[string]string{"state": "downloading"})
 }
 
 // handleAutostart reports whether ARFABIT starts with the computer.
