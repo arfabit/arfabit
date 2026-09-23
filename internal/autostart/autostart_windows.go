@@ -37,3 +37,7 @@ func current() Status {
 	err := exec.Command("schtasks", "/Query", "/TN", taskName).Run()
 	return Status{Enabled: err == nil, Path: taskName, Mechanism: "Task Scheduler at logon"}
 }
+
+// startupTemplate exposes the entry for testing. Windows builds its command
+// line directly rather than from a template.
+func startupTemplate() string { return "" }

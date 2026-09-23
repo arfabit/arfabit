@@ -131,7 +131,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 			if err := askToQuit(url, "a newer copy of ARFABIT was started"); err != nil {
 				return fmt.Errorf(
 					"ARFABIT is already running at %s and would not stand down.\n"+
-						"Stop it from that page, or run:\n\n  lsof -ti :%s | xargs kill\n\n"+
+						"Stop it from that page, or run:\n\n  lsof -ti :%s -sTCP:LISTEN | xargs kill\n\n"+
 						"The underlying message was: %v",
 					url, portOf(cfg.Server.Addr), err)
 			}

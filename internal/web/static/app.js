@@ -739,8 +739,9 @@ function wireButtons() {
   $("quit").addEventListener("click", async (e) => {
     const result = await busy(e.target, "Stopping…", null, () => post("/api/quit"));
     if (result) {
-      $("restart-detail").textContent =
-        "ARFABIT has stopped. Start it again from where you launched it.";
+      $("restart-detail").textContent = $("autostart").checked
+        ? "ARFABIT has stopped. It will start again the next time you log in, or you can start it yourself."
+        : "ARFABIT has stopped. Start it again from where you launched it.";
       $("restart").disabled = true;
       $("quit").disabled = true;
     }

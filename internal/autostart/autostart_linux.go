@@ -14,12 +14,14 @@ const unitName = "arfabit.service"
 // A user unit rather than a system one, for the same reason as on macOS: the
 // drive and the user's folders belong to the session. Lingering is what keeps
 // it running after logout.
+//
+// No Restart= line, deliberately. Restarting on exit means Stop appears not to
+// work: the program comes straight back and the person cannot tell why.
 const unitTemplate = `[Unit]
 Description=ARFABIT
 
 [Service]
 ExecStart=%s -no-open
-Restart=on-failure
 
 [Install]
 WantedBy=default.target
@@ -66,3 +68,6 @@ func current() Status {
 	_, err := os.Stat(path)
 	return Status{Enabled: err == nil, Path: path, Mechanism: "systemd user service"}
 }
+
+// startupTemplate exposes the entry for testing.
+func startupTemplate() string { return unitTemplate }

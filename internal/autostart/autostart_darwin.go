@@ -15,6 +15,11 @@ const label = "com.arfabit.arfabit"
 // A LaunchAgent, not a LaunchDaemon. ARFABIT needs the user's session: the
 // optical drive and the user's own folders are not reachable from a system
 // daemon.
+//
+// RunAtLoad without KeepAlive, deliberately. KeepAlive relaunches the program
+// the moment it exits, which means Stop appears not to work and neither does
+// kill: the thing comes straight back and the person cannot tell why. Starting
+// at login is what was asked for; refusing to stay stopped is not.
 const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -27,8 +32,6 @@ const plistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <string>-no-open</string>
   </array>
   <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
   <string>%s</string>
@@ -89,3 +92,6 @@ func current() Status {
 	_, err := os.Stat(path)
 	return Status{Enabled: err == nil, Path: path, Mechanism: "launchd user agent"}
 }
+
+// startupTemplate exposes the entry for testing.
+func startupTemplate() string { return plistTemplate }
