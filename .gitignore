@@ -1,0 +1,36 @@
+# Local refs for study. Never committed.
+temp/
+
+# Built binaries
+/arfabit
+/arfabit.exe
+/dist/
+/build/
+
+# Local state and configuration
+config.toml
+/data/
+*.log
+
+# Media and working files, in case anything lands here by mistake
+*.mkv
+*.mp4
+*.m4v
+*.srt
+*.sup
+
+# Bundled models and data, fetched at runtime rather than committed
+/internal/subs/models/
+/internal/meta/index/
+
+# Go
+*.test
+*.out
+vendor/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
