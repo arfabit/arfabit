@@ -244,3 +244,41 @@ func TestParseScanIgnoresUnknownRecords(t *testing.T) {
 		t.Errorf("Duration = %v, want %v", got, want)
 	}
 }
+
+// A second real disc, with three English subtitle sets and five French ones —
+// the duplicate-track case Appendix A describes. It guards against a parser
+// that collapses same-language streams or miscounts them.
+func TestParseScanSecondDisc(t *testing.T) {
+	res := loadFixture(t, "scan-bd-2.txt")
+
+	if got, want := res.Disc.Name, "Crime 101"; got != want {
+		t.Errorf("Name = %q, want %q", got, want)
+	}
+
+	title := res.Disc.Titles[0]
+	if got, want := len(title.Streams), 49; got != want {
+		t.Fatalf("got %d streams, want %d", got, want)
+	}
+
+	langs := map[string]int{}
+	var audio, subs int
+	for _, s := range title.Streams {
+		switch s.Kind {
+		case disc.StreamAudio:
+			audio++
+		case disc.StreamSubtitle:
+			subs++
+			langs[s.Lang]++
+		}
+	}
+	if audio != 12 || subs != 36 {
+		t.Errorf("audio = %d subs = %d, want 12 / 36", audio, subs)
+	}
+	// Seven subtitle languages, none of which should be mislabelled English.
+	if got, want := len(langs), 7; got != want {
+		t.Errorf("got %d subtitle languages %v, want %d", got, langs, want)
+	}
+	if got, want := langs["jpn"], 4; got != want {
+		t.Errorf("Japanese subtitle streams = %d, want %d", got, want)
+	}
+}

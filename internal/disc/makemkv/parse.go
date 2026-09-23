@@ -30,6 +30,15 @@ type Message struct {
 // attributes between versions, and a scan that found titles is useful even if
 // part of the output was not understood.
 func ParseScan(r io.Reader) (*ScanResult, error) {
+	return ParseScanFunc(r, nil)
+}
+
+// ParseScanFunc is ParseScan with a callback invoked for each message as it is
+// read, so the UI can show progress during a scan that takes minutes.
+//
+// onMessage may be nil. It is called from the parsing goroutine and should not
+// block.
+func ParseScanFunc(r io.Reader, onMessage func(Message)) (*ScanResult, error) {
 	res := &ScanResult{Disc: &disc.Disc{}}
 
 	// Titles and streams arrive interleaved and out of order, keyed by index,
@@ -48,8 +57,14 @@ func ParseScan(r io.Reader) (*ScanResult, error) {
 
 		switch rec.Type {
 		case recMSG:
-			if code, err := rec.intField(0); err == nil && !noisyMessages[code] {
-				res.Messages = append(res.Messages, Message{Code: code, Text: rec.field(3)})
+			code, err := rec.intField(0)
+			if err != nil || noisyMessages[code] {
+				continue
+			}
+			m := Message{Code: code, Text: rec.field(3)}
+			res.Messages = append(res.Messages, m)
+			if onMessage != nil {
+				onMessage(m)
 			}
 
 		case recDRV:
