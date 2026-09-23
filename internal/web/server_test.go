@@ -415,3 +415,15 @@ func TestEjectRefusedWhileWorking(t *testing.T) {
 		t.Error("the disc was ejected while it was being read")
 	}
 }
+
+// The page's files are built into the program, so a new copy means new files.
+// A browser serving yesterday's script against today's server produces
+// failures that make no sense to anybody.
+func TestStaticFilesAreNotCached(t *testing.T) {
+	for _, path := range []string{"/static/app.js", "/static/app.css"} {
+		rec := get(t, newTestServer(t), path)
+		if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-cache") {
+			t.Errorf("%s may be cached: Cache-Control = %q", path, got)
+		}
+	}
+}

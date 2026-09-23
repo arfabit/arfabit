@@ -47,9 +47,10 @@ type Server struct {
 	// standing aside for a newer one does not read as a mystery shutdown.
 	Quit func(reason string)
 
-	tmpl   *template.Template
-	events *eventStream
-	drives driveWatcher
+	tmpl    *template.Template
+	events  *eventStream
+	drives  driveWatcher
+	started time.Time
 
 	// building guards the film list download. A button can be clicked twice;
 	// the server is where "once" has to be true.
@@ -70,6 +71,7 @@ func New(cfg config.Config, st *store.Store, runner *pipeline.Runner, backend *m
 		Backend: backend,
 		tmpl:    tmpl,
 		events:  newEventStream(),
+		started: time.Now(),
 	}
 
 	// Every job change is pushed to open pages, so nothing polls and nothing
@@ -101,7 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /{$}", s.handleHome)
-	mux.Handle("GET /static/", http.FileServer(http.FS(assets)))
+	mux.Handle("GET /static/", noCache(http.FileServer(http.FS(assets))))
 
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /api/state", s.handleState)
@@ -131,6 +133,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
 		"NodeName": s.Config.Node.Name,
+		"Started":  s.started.Format("3:04 PM"),
 		"Library":  s.Config.Paths.Library,
 		"Masters":  s.Config.Paths.Masters,
 		"Profile":  s.Config.Profile,
@@ -448,6 +451,18 @@ func (s *Server) handleSetAutostart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, status)
+}
+
+// noCache stops the browser holding on to the page's own files.
+//
+// They are built into the program, so a new copy of ARFABIT means new files —
+// and a browser serving yesterday's script against today's server produces
+// failures that make no sense to anybody.
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		h.ServeHTTP(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
