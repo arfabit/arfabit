@@ -25,9 +25,23 @@ func TestCommandIsDefined(t *testing.T) {
 	}
 }
 
+// Ejecting an empty drive is reasonable when something seems stuck, but
+// saying a disc came out when none did is a small lie.
+func TestDescribeKnowsWhetherThereWasADisc(t *testing.T) {
+	if got := (Result{OK: true}).Describe(true); !contains(got, "disc has been ejected") {
+		t.Errorf("with a disc: %q", got)
+	}
+	if got := (Result{OK: true}).Describe(false); contains(got, "disc has been ejected") {
+		t.Errorf("an empty drive reported a disc coming out: %q", got)
+	}
+	if got := (Result{OK: true}).Describe(false); !contains(got, "empty") {
+		t.Errorf("an empty drive does not say so: %q", got)
+	}
+}
+
 // A failed eject must read as a small inconvenience, not an error.
 func TestDescribeFailureIsGentle(t *testing.T) {
-	got := Result{Output: "device busy"}.Describe()
+	got := Result{Output: "device busy"}.Describe(true)
 	for _, unwanted := range []string{"failed", "error", "Error"} {
 		if contains(got, unwanted) {
 			t.Errorf("Describe() says %q: %s", unwanted, got)

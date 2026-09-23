@@ -89,9 +89,9 @@ func (s *Server) handleEject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	device := ""
+	device, hadDisc := "", false
 	for _, d := range s.Drives() {
-		device = d.Device
+		device, hadDisc = d.Device, d.Loaded
 		break
 	}
 
@@ -101,6 +101,6 @@ func (s *Server) handleEject(w http.ResponseWriter, r *http.Request) {
 	result := eject.Eject(ctx, device)
 	writeJSON(w, map[string]any{
 		"ok":      result.OK,
-		"message": result.Describe(),
+		"message": result.Describe(hadDisc),
 	})
 }

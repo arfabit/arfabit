@@ -306,7 +306,7 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 
 	job.Stage = store.StageEject
 	result := eject.Eject(ctx, job.Drive)
-	job.Log.Printf(store.StageEject, "%s", result.Describe())
+	job.Log.Printf(store.StageEject, "%s", result.Describe(true))
 
 	job.State = store.StateDone
 	job.Note = fmt.Sprintf("%s is ready.", job.Title)

@@ -51,10 +51,20 @@ func blockDevice(device string) string {
 	return strings.Replace(device, "/dev/rdisk", "/dev/disk", 1)
 }
 
-// describe renders a short explanation of a failed eject for the UI.
-func (r Result) Describe() string {
-	if r.OK {
+// Describe says what happened, in terms of what was actually in the drive.
+//
+// hadDisc matters: ejecting an empty drive is a perfectly reasonable thing to
+// do when something seems stuck, and reporting that a disc came out when none
+// did would be a small lie that makes the program harder to trust.
+func (r Result) Describe(hadDisc bool) string {
+	switch {
+	case r.OK && hadDisc:
 		return "The disc has been ejected."
+	case r.OK:
+		return "The drive was empty. It has been opened."
+	case hadDisc:
+		return fmt.Sprintf("The disc did not come out. You can press the button on the drive. (%s)", r.Output)
+	default:
+		return fmt.Sprintf("The drive did not open. (%s)", r.Output)
 	}
-	return fmt.Sprintf("The disc did not come out. You can press the button on the drive. (%s)", r.Output)
 }
