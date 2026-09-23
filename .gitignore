@@ -42,3 +42,6 @@ desktop.ini
 !.claude/commands/
 !.claude/agents/
 .claude/settings.local.json
+
+# Disc scan fixtures: kept locally for development, not committed.
+internal/disc/makemkv/testdata/

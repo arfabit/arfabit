@@ -1,6 +1,7 @@
 package makemkv
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -55,9 +56,17 @@ func TestParseLineRejectsNonRecords(t *testing.T) {
 	}
 }
 
+// loadFixture reads a real disc scan from testdata.
+//
+// The fixtures are real scans kept locally and not committed, so a fresh clone
+// skips these tests rather than failing. Everything they cover is behaviour
+// observed on actual discs; the format tests above run everywhere.
 func loadFixture(t *testing.T, name string) *ScanResult {
 	t.Helper()
 	f, err := os.Open("testdata/" + name)
+	if errors.Is(err, os.ErrNotExist) {
+		t.Skipf("fixture %s not present; see docs/ARCHITECTURE.md Appendix A", name)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
