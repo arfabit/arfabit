@@ -325,6 +325,7 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 			"state": "ready",
 			"count": len(ix.Entries),
 			"path":  path,
+			"built": ix.Built,
 		})
 	}()
 
@@ -412,6 +413,7 @@ func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request) {
 	if ix := s.Runner.Index; ix != nil {
 		status["state"] = "ready"
 		status["count"] = len(ix.Entries)
+		status["built"] = ix.Built
 	}
 	writeJSON(w, status)
 }

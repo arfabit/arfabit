@@ -534,6 +534,36 @@ async function loadIndexStatus() {
   renderIndexStatus(status);
 }
 
+// describeAge says how long ago something happened, in the words a person
+// would use.
+function describeAge(when) {
+  if (!when) return "at some point";
+
+  const then = new Date(when);
+  if (Number.isNaN(then.getTime())) return "at some point";
+
+  const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  if (days < 365) return `on ${then.toLocaleDateString()}`;
+  return `on ${then.toLocaleDateString()}, over a year ago`;
+}
+
+// ageAdvice says whether downloading again is worth the trouble.
+//
+// A film's name and year do not change, so an old list is only a problem for
+// films released since it was made.
+function ageAdvice(when) {
+  if (!when) return "";
+
+  const days = Math.floor((Date.now() - new Date(when).getTime()) / 86400000);
+  if (days < 180) {
+    return "No need to download it again unless a very new film is not recognised.";
+  }
+  return "Worth downloading again if a recent film is not recognised.";
+}
+
 function renderIndexStatus(status) {
   const detail = $("index-detail");
   const button = $("index-build");
@@ -552,8 +582,8 @@ function renderIndexStatus(status) {
   if (status.state === "ready") {
     button.textContent = "Download it again";
     detail.textContent =
-      `Ready — ${(status.count || 0).toLocaleString()} films, saved in ${status.path}. ` +
-      "Used to confirm a movie's name and find its year.";
+      `${(status.count || 0).toLocaleString()} films, downloaded ${describeAge(status.built)}. ` +
+      `${ageAdvice(status.built)} Saved in ${status.path}.`;
     return;
   }
 
