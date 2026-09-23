@@ -13,6 +13,7 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/arfabit/arfabit/internal/autostart"
@@ -42,11 +43,17 @@ type Server struct {
 	// because only it knows how to shut down tidily first.
 	Restart func() error
 
-	// Quit stops ARFABIT.
-	Quit func()
+	// Quit stops ARFABIT. The reason is shown in the terminal, so a copy
+	// standing aside for a newer one does not read as a mystery shutdown.
+	Quit func(reason string)
 
 	tmpl   *template.Template
 	events *eventStream
+	drives driveWatcher
+
+	// building guards the film list download. A button can be clicked twice;
+	// the server is where "once" has to be true.
+	building atomic.Bool
 }
 
 // New prepares the server.
@@ -71,6 +78,12 @@ func New(cfg config.Config, st *store.Store, runner *pipeline.Runner, backend *m
 		s.events.send("job", job)
 	}
 
+	// Log lines go out as they are written, so a stage that takes minutes
+	// shows its working instead of sitting silent.
+	runner.OnLog = func(e pipeline.Entry) {
+		s.events.send("log", e)
+	}
+
 	return s, nil
 }
 
@@ -92,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /api/state", s.handleState)
+	mux.HandleFunc("GET /api/drives", s.handleDrives)
+	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
 	mux.HandleFunc("GET /api/log", s.handleLog)
 
@@ -101,6 +116,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/plan", s.handleUpdatePlan)
 
 	mux.HandleFunc("POST /api/title", s.handleChooseTitle)
+	mux.HandleFunc("GET /api/index", s.handleIndexStatus)
 	mux.HandleFunc("POST /api/index", s.handleBuildIndex)
 
 	mux.HandleFunc("POST /api/restart", s.handleRestart)
@@ -142,6 +158,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, state{
 		Job:      s.Runner.Current(),
 		Recent:   recent,
+		Drives:   s.Drives(),
 		NodeName: s.Config.Node.Name,
 		Paths:    s.Config.Paths,
 	})
@@ -169,16 +186,11 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {
-	drives, err := s.Backend.Drives()
-	if err != nil {
-		writeError(w, "ARFABIT could not ask about your disc drive.", err)
-		return
-	}
-
 	var loaded *disc.Drive
-	for i := range drives {
-		if drives[i].Loaded {
-			loaded = &drives[i]
+	for _, d := range s.Drives() {
+		if d.Loaded {
+			found := d
+			loaded = &found
 			break
 		}
 	}
@@ -274,8 +286,16 @@ func (s *Server) handleChooseTitle(w http.ResponseWriter, r *http.Request) {
 // It runs in the background and reports over the event stream, because it is a
 // 200 MB download and the page must stay usable throughout.
 func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
+	if !s.building.CompareAndSwap(false, true) {
+		writeError(w, "The film list is already downloading.", nil)
+		return
+	}
+
 	go func() {
-		s.events.send("index", map[string]any{"state": "downloading", "read": 0})
+		defer s.building.Store(false)
+
+		path := meta.IndexPath(s.Config.Paths.Data)
+		s.events.send("index", map[string]any{"state": "downloading", "read": 0, "path": path})
 
 		// Progress is reported as it arrives, but not on every read: the
 		// callback fires thousands of times a second and the page only needs
@@ -287,7 +307,7 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			lastSent = read
-			s.events.send("index", map[string]any{"state": "downloading", "read": read})
+			s.events.send("index", map[string]any{"state": "downloading", "read": read, "path": path})
 		}
 
 		ix, err := meta.BuildIndex(s.Config.Paths.Data, false, onProgress)
@@ -295,6 +315,7 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 			s.events.send("index", map[string]any{
 				"state":  "stopped",
 				"detail": err.Error(),
+				"path":   path,
 			})
 			return
 		}
@@ -303,6 +324,7 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 		s.events.send("index", map[string]any{
 			"state": "ready",
 			"count": len(ix.Entries),
+			"path":  path,
 		})
 	}()
 
@@ -356,6 +378,16 @@ func (s *Server) handleQuit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	reason := "asked from the page"
+	if req.Reason != "" {
+		reason = req.Reason
+	}
+
 	writeJSON(w, map[string]bool{"stopping": true})
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -363,8 +395,25 @@ func (s *Server) handleQuit(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		time.Sleep(250 * time.Millisecond)
-		s.Quit()
+		s.Quit(reason)
 	}()
+}
+
+// handleIndexStatus says whether the film list is present and where it lives.
+//
+// "Where" matters: a download that names no destination is indistinguishable
+// from one that is not happening.
+func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request) {
+	status := map[string]any{
+		"state": "missing",
+		"path":  meta.IndexPath(s.Config.Paths.Data),
+	}
+
+	if ix := s.Runner.Index; ix != nil {
+		status["state"] = "ready"
+		status["count"] = len(ix.Entries)
+	}
+	writeJSON(w, status)
 }
 
 // handleAutostart reports whether ARFABIT starts with the computer.

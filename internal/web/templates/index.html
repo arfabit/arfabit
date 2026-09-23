@@ -8,6 +8,10 @@
 </head>
 <body>
 
+<div id="connection" class="connection" hidden>
+  Not connected to ARFABIT. It may have stopped.
+</div>
+
 <header>
   <h1>ARFABIT</h1>
   <p class="sub">{{.NodeName}}</p>
@@ -22,9 +26,13 @@
   </section>
 
   <section id="idle" class="card">
-    <h2>Put a disc in</h2>
-    <p class="muted">ARFABIT will read it and show you what it found.</p>
-    <button id="scan" class="primary">Look for a disc</button>
+    <h2 id="idle-title">Put a disc in</h2>
+    <p id="idle-detail" class="muted">ARFABIT is watching the drive and will notice when you do.</p>
+    <div class="button-row">
+      <button id="scan" class="primary" disabled>Read this disc</button>
+      <button id="eject">Eject</button>
+    </div>
+    <p id="eject-detail" class="muted small"></p>
   </section>
 
   <section id="plan" class="card" hidden>

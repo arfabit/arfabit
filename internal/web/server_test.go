@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/arfabit/arfabit/internal/config"
+	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
@@ -262,7 +264,7 @@ func TestQuitStopsArfabit(t *testing.T) {
 	s := newTestServer(t)
 
 	stopped := make(chan struct{})
-	s.Quit = func() { close(stopped) }
+	s.Quit = func(string) { close(stopped) }
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/quit", nil))
@@ -283,7 +285,7 @@ func TestQuitRefusedWhileWorking(t *testing.T) {
 	s := newTestServer(t)
 
 	var called bool
-	s.Quit = func() { called = true }
+	s.Quit = func(string) { called = true }
 	s.Runner.SetCurrentForTest(&pipeline.Job{
 		Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StageRip},
 	})
@@ -293,5 +295,123 @@ func TestQuitRefusedWhileWorking(t *testing.T) {
 
 	if called {
 		t.Error("ARFABIT stopped while a disc was being worked on")
+	}
+}
+
+// The event stream is how the page learns anything at all, so it is worth
+// proving end to end rather than only through the watcher list.
+func TestEventStreamDeliversOverHTTP(t *testing.T) {
+	s := newTestServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	finished := make(chan struct{})
+	go func() {
+		s.Handler().ServeHTTP(rec, req)
+		close(finished)
+	}()
+
+	// Wait for the handler to register before sending anything.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.events.mu.Lock()
+		watching := len(s.events.watchers)
+		s.events.mu.Unlock()
+		if watching > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the stream never opened")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	s.events.send("log", pipeline.Entry{ID: 1, Stage: store.StageScan, Text: "Reading the disc."})
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-finished
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "event: log") {
+		t.Errorf("no log event reached the page:\n%s", body)
+	}
+	if !strings.Contains(body, "Reading the disc.") {
+		t.Errorf("the message did not arrive:\n%s", body)
+	}
+}
+
+// A log line written during a job must reach the page as it happens, not when
+// the stage ends: a Blu-ray scan takes minutes and silence looks like failure.
+func TestLogLinesReachTheStreamImmediately(t *testing.T) {
+	s := newTestServer(t)
+
+	_, ch := s.events.add()
+
+	s.Runner.OnLog(pipeline.Entry{ID: 7, Stage: store.StageScan, Text: "Waking the drive."})
+
+	select {
+	case msg := <-ch:
+		if !strings.Contains(msg, "event: log") || !strings.Contains(msg, "Waking the drive.") {
+			t.Errorf("unexpected message: %q", msg)
+		}
+	default:
+		t.Fatal("the log line never reached the stream")
+	}
+}
+
+// A button can be clicked twice, so "once" has to be true on the server.
+func TestIndexDownloadsOnceAtATime(t *testing.T) {
+	s := newTestServer(t)
+	s.building.Store(true)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/index", nil))
+
+	var problem map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(problem["message"], "already downloading") {
+		t.Errorf("a second download was accepted: %q", problem["message"])
+	}
+}
+
+// The page should know what is in the drive without being asked to look.
+func TestDrivesAreReportedInState(t *testing.T) {
+	s := newTestServer(t)
+	s.drives.drives = []disc.Drive{
+		{Index: 0, Name: "BD-RE", Device: "/dev/rdisk8", Label: "CRIME_101", Loaded: true},
+	}
+
+	rec := get(t, s, "/api/state")
+
+	var got state
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Drives) != 1 || !got.Drives[0].Loaded {
+		t.Fatalf("drives = %+v", got.Drives)
+	}
+	if got.Drives[0].Label != "CRIME_101" {
+		t.Errorf("label = %q", got.Drives[0].Label)
+	}
+}
+
+// Ejecting mid-rip would pull a disc out from under the reader.
+func TestEjectRefusedWhileWorking(t *testing.T) {
+	s := newTestServer(t)
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StageRip},
+	})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/eject", nil))
+
+	if rec.Code == http.StatusOK {
+		t.Error("the disc was ejected while it was being read")
 	}
 }

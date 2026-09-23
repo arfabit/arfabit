@@ -101,8 +101,8 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	// Stopping from the page matters for anyone whose computer starts ARFABIT
 	// on its own: they have no terminal to press Ctrl+C in.
 	quit := make(chan struct{})
-	server.Quit = func() {
-		fmt.Println("\nStopping, asked from the page.")
+	server.Quit = func(reason string) {
+		fmt.Printf("\nStopping: %s.\n", reason)
 		close(quit)
 	}
 
@@ -123,7 +123,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		if url, ok := alreadyRunning(cfg.Server.Addr); ok {
 			fmt.Printf("\nARFABIT was already running at %s. Taking over.\n", url)
 
-			if err := askToQuit(url); err != nil {
+			if err := askToQuit(url, "a newer copy of ARFABIT was started"); err != nil {
 				return fmt.Errorf(
 					"ARFABIT is already running at %s and would not stand down.\n"+
 						"Stop it from that page, or run:\n\n  lsof -ti :%s | xargs kill\n\n"+
@@ -160,6 +160,12 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	// always complete because every write is atomic.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Watching the drive is how the page knows a disc has been put in without
+	// anyone having to ask it to look.
+	watchCtx, stopWatching := context.WithCancel(context.Background())
+	defer stopWatching()
+	go server.WatchDrives(watchCtx)
 
 	errs := make(chan error, 1)
 	go func() {
@@ -226,10 +232,11 @@ func alreadyRunning(addr string) (string, bool) {
 }
 
 // askToQuit asks a running copy to stand down.
-func askToQuit(url string) error {
+func askToQuit(url, reason string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 
-	resp, err := client.Post(url+"/api/quit", "application/json", nil)
+	body := strings.NewReader(fmt.Sprintf(`{"reason":%q}`, reason))
+	resp, err := client.Post(url+"/api/quit", "application/json", body)
 	if err != nil {
 		return err
 	}

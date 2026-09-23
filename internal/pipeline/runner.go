@@ -34,6 +34,11 @@ type Runner struct {
 	// refresh without polling.
 	OnUpdate func(*Job)
 
+	// OnLog is called for every line written to a job's log, as it is
+	// written. The page shows progress from these, so a stage that takes
+	// minutes is never silent.
+	OnLog func(Entry)
+
 	mu      sync.Mutex
 	current *Job
 }
@@ -71,7 +76,14 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	rec.Stage = store.StageScan
 
 	logPath := r.Store.LogPath(rec.ID)
-	log, err := NewLog(logPath, nil)
+
+	// Every line goes out as it is written. Without this the page shows
+	// nothing at all until the stage ends, and a Blu-ray scan takes minutes.
+	log, err := NewLog(logPath, func(e Entry) {
+		if r.OnLog != nil {
+			r.OnLog(e)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +91,17 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	job := &Job{Job: rec, Log: log}
 	r.setCurrent(job)
 
-	log.Printf(store.StageScan, "Reading the disc in %s.", drive.Name)
+	// Tell the page a disc is being read before doing it, not after.
+	r.notify(job)
+
+	log.Printf(store.StageScan, "Reading the disc in %s. This takes a minute or two.", drive.Name)
+
+	// MakeMKV talks while it works; passing that through is the difference
+	// between a page that looks busy and one that looks broken.
+	r.Backend.OnMessage = func(m makemkv.Message) {
+		log.Printf(store.StageScan, "%s", m.Text)
+	}
+	defer func() { r.Backend.OnMessage = nil }()
 
 	d, err := r.Backend.ScanContext(ctx, drive.Index)
 	if err != nil {
@@ -202,6 +224,9 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 		OnProgress: func(p makemkv.Progress) {
 			job.Progress = Progress{Percent: p.TotalPercent(), Operation: p.Operation}
 			r.notify(job)
+		},
+		OnMessage: func(m makemkv.Message) {
+			job.Log.Printf(store.StageRip, "%s", m.Text)
 		},
 	})
 	if err != nil {
