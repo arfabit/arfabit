@@ -114,6 +114,10 @@ type PlannedAudio struct {
 	Bitrate     string `json:"bitrate,omitempty"`
 	Label       string `json:"label"`
 	Selected    bool   `json:"selected"`
+
+	// Stereo marks the downmix ARFABIT adds itself rather than a track that
+	// exists on the disc.
+	Stereo bool `json:"stereo,omitempty"`
 }
 
 // PlannedSubtitle is one subtitle track the Plan will produce.
