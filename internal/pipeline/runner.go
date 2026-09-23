@@ -59,6 +59,15 @@ type Progress struct {
 	Percent   float64 `json:"percent"`
 	Operation string  `json:"operation"`
 	Remaining string  `json:"remaining"`
+
+	// Since is when this stage began, so the page can show a clock that
+	// ticks. A moving number is the difference between a program that is
+	// working and one that appears to have died.
+	Since time.Time `json:"since"`
+
+	// Expected is how long the stage was estimated to take, for context
+	// beside the clock.
+	Expected string `json:"expected,omitempty"`
 }
 
 // Current returns the job in flight, or nil.
@@ -99,6 +108,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	// Tell the page a disc is being read before doing it, not after.
 	r.notify(job)
 
+	job.Progress = Progress{Since: time.Now(), Operation: "Reading the disc"}
 	log.Printf(store.StageScan, "Reading the disc in %s. This takes a minute or two.", drive.Name)
 
 	// MakeMKV talks while it works; passing that through is the difference
@@ -245,7 +255,14 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	ripStart := time.Now()
 
 	job.Stage = store.StageRip
-	job.Log.Printf(store.StageRip, "Copying the disc. This is the slow part.")
+	job.Progress = Progress{
+		Since:     ripStart,
+		Operation: "Copying the disc",
+		Expected:  humanDuration(r.ripEstimate(job).Round(time.Minute)),
+	}
+	job.Log.Printf(store.StageRip,
+		"Copying the disc. This is the slow part and usually takes %s.",
+		job.Progress.Expected)
 	r.save(job)
 
 	res, err := r.Backend.Rip(ctx, makemkv.RipRequest{
@@ -253,7 +270,20 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 		Titles:     []int{job.Plan.TitleIndex},
 		OutputDir:  masterDir,
 		OnProgress: func(p makemkv.Progress) {
-			job.Progress = Progress{Percent: p.TotalPercent(), Operation: p.Operation}
+			// Overall progress starts at zero and stays there while MakeMKV
+			// works out what it is doing, so the current step stands in until
+			// the total means something.
+			percent := p.TotalPercent()
+			if percent == 0 {
+				percent = p.CurrentPercent()
+			}
+
+			job.Progress = Progress{
+				Percent:   percent,
+				Operation: p.Operation,
+				Since:     ripStart,
+				Expected:  job.Progress.Expected,
+			}
 			r.notify(job)
 		},
 		OnMessage: func(m makemkv.Message) {
@@ -277,7 +307,10 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	}
 
 	job.Stage = store.StagePackage
-	job.Log.Printf(store.StagePackage, "Making the movie file for your Apple TV.")
+	packageStart := time.Now()
+	job.Progress = Progress{Since: packageStart, Operation: "Making the movie file"}
+	job.Log.Printf(store.StagePackage,
+		"Making the movie file for your Apple TV. Converting the picture is slow; there is nothing to do but wait.")
 	r.save(job)
 
 	delivery, err := r.packageMaster(ctx, job, title)
@@ -359,6 +392,7 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 				Percent:   p.Percent(),
 				Operation: "Making the movie file",
 				Remaining: humanDuration(p.Remaining().Round(time.Minute)),
+				Since:     start,
 			}
 			r.notify(job)
 		},
@@ -491,6 +525,14 @@ func (r *Runner) hasSelectedSubtitles(job *Job) bool {
 		}
 	}
 	return false
+}
+
+// ripEstimate is how long copying this disc is expected to take.
+func (r *Runner) ripEstimate(job *Job) time.Duration {
+	if job.Plan == nil {
+		return 0
+	}
+	return r.Calibration.EstimateRip(job.Drive, disc.Kind(job.DiscKind), job.Plan.SourceSize).Time
 }
 
 // readFailureNote explains a disc that could not be read.

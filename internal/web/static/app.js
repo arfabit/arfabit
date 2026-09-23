@@ -17,6 +17,8 @@ const seenLogIds = new Set();
 let followLog = true;
 let events = null;
 let drives = [];
+let currentJob = null;
+let clockTimer = null;
 
 // --- problems the page cannot hide --------------------------------------
 
@@ -384,7 +386,97 @@ function renderPlan(job) {
   $("plan-blocked").textContent = fits ? "" : "Free up some room and look for the disc again.";
 }
 
+// The clock ticks once a second whether or not anything else changes.
+//
+// Copying a disc reports its first percentage a couple of minutes in, and the
+// log goes quiet while it works. A number that moves is the only thing that
+// distinguishes working from hung, so the page keeps its own time rather than
+// waiting to be told.
+function startClock() {
+  if (clockTimer) return;
+  clockTimer = setInterval(tickClock, 1000);
+  tickClock();
+}
+
+function stopClock() {
+  if (!clockTimer) return;
+  clearInterval(clockTimer);
+  clockTimer = null;
+}
+
+function tickClock() {
+  const job = currentJob;
+  if (!job || job.state !== "running") {
+    stopClock();
+    return;
+  }
+
+  const progress = job.progress || {};
+  const pct = Math.round(progress.percent || 0);
+
+  // Left: where it is now.
+  const now = [];
+  const elapsed = elapsedSince(progress.since);
+  if (elapsed) now.push(elapsed);
+  if (pct > 0) now.push(`${pct}%`);
+  if (progress.operation) now.push(progress.operation);
+  $("working-detail").textContent = now.join(" · ");
+
+  // Right: where it is going.
+  $("working-estimate").textContent = estimateText(progress, pct);
+}
+
+// estimateText says how much longer, as honestly as it can.
+//
+// ffmpeg reports its own remaining time and that is trusted. MakeMKV does not,
+// so until there is a percentage to work from the answer is what this machine
+// has learned discs usually take — and it says which it is.
+function estimateText(progress, pct) {
+  if (progress.remaining && progress.remaining !== "unknown") {
+    return `about ${progress.remaining} left`;
+  }
+
+  if (pct > 0 && pct < 100 && progress.since) {
+    const elapsedMs = Date.now() - new Date(progress.since).getTime();
+    const totalMs = (elapsedMs / pct) * 100;
+    const leftMs = Math.max(0, totalMs - elapsedMs);
+    if (elapsedMs > 20000) return `about ${humanMs(leftMs)} left`;
+  }
+
+  if (progress.expected) return `usually takes ${progress.expected}`;
+  return "working out how long this will take";
+}
+
+function humanMs(ms) {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 1) return "under a minute";
+  if (minutes < 60) return `${minutes} minutes`;
+
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} hours` : `${hours}h ${rest}m`;
+}
+
+// elapsedSince renders how long ago something started, counting in seconds
+// early on so the number visibly moves.
+function elapsedSince(when) {
+  if (!when) return "";
+
+  const started = new Date(when);
+  if (Number.isNaN(started.getTime()) || started.getTime() === 0) return "";
+
+  const seconds = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
 function renderJob(job) {
+  currentJob = job;
+
   if (!job) {
     renderDrives(drives);
     show("idle", true);
@@ -409,19 +501,11 @@ function renderJob(job) {
   if (waiting) renderPlan(job);
 
   if (running) {
-    const pct = Math.round((job.progress && job.progress.percent) || 0);
     $("working-title").textContent = stageWords(job.stage);
-    $("bar-fill").style.width = `${pct}%`;
-
-    const remaining = job.progress && job.progress.remaining;
-    const parts = [];
-    if (pct > 0) parts.push(`${pct}%`);
-    if (remaining && remaining !== "unknown") parts.push(`about ${remaining} left`);
-    if (job.progress && job.progress.operation) parts.push(job.progress.operation);
-
-    $("working-detail").textContent = parts.length
-      ? parts.join(" · ")
-      : "Working. The log below shows what is happening.";
+    $("bar-fill").style.width = `${Math.round((job.progress && job.progress.percent) || 0)}%`;
+    startClock();
+  } else {
+    stopClock();
   }
 
   if (done || stopped) {

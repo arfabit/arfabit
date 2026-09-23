@@ -163,3 +163,13 @@ button.done { border-color: var(--ok); }
   font-size: 0.9rem;
   text-align: center;
 }
+
+/* Where it is now on the left, where it is going on the right. */
+.progress-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.estimate-right { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
