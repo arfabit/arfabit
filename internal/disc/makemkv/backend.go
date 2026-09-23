@@ -49,21 +49,14 @@ type Backend struct {
 	Timeout time.Duration
 
 	// OnMessage receives MakeMKV's messages as they arrive, for live logging.
-	// Optional.
+	// Optional, and only a default: callers that want messages from one
+	// particular command pass a callback to that command instead, because a
+	// shared field cannot be set safely while other commands are running.
 	OnMessage func(Message)
 
 	// busy serialises access to the drive.
 	busy sync.Mutex
 }
-
-// TryLock takes the drive if nothing else holds it.
-//
-// Used by anything that would rather skip a turn than wait, such as the poll
-// that watches for a disc being put in.
-func (b *Backend) TryLock() bool { return b.busy.TryLock() }
-
-// Unlock releases a drive taken with TryLock.
-func (b *Backend) Unlock() { b.busy.Unlock() }
 
 // Name identifies the backend in logs and the UI.
 func (b *Backend) Name() string { return "MakeMKV" }
@@ -94,7 +87,8 @@ func (b *Backend) DrivesIfFree() ([]disc.Drive, bool) {
 }
 
 func (b *Backend) drivesLocked() ([]disc.Drive, error) {
-	res, err := b.run(context.Background(), "info", fmt.Sprintf("disc:%d", listDrivesIndex))
+	// Listing drives is a background poll, so its chatter is not logged.
+	res, err := b.run(context.Background(), nil, "info", fmt.Sprintf("disc:%d", listDrivesIndex))
 
 	// The pseudo-index lists the drives and then tries to open disc 9999,
 	// which does not exist, so makemkvcon always exits non-zero here — 255 in
@@ -117,10 +111,20 @@ func (b *Backend) Scan(driveIndex int) (*disc.Disc, error) {
 // ScanContext is Scan with cancellation, so the UI can stop a scan that is
 // taking too long on a damaged disc.
 func (b *Backend) ScanContext(ctx context.Context, driveIndex int) (*disc.Disc, error) {
+	return b.ScanWithMessages(ctx, driveIndex, b.OnMessage)
+}
+
+// ScanWithMessages is ScanContext with somewhere to send MakeMKV's running
+// commentary.
+//
+// The callback is passed in rather than set on the Backend: a scan shares the
+// Backend with the poll that watches the drive, and a field cannot be assigned
+// safely while another command is using it.
+func (b *Backend) ScanWithMessages(ctx context.Context, driveIndex int, onMessage func(Message)) (*disc.Disc, error) {
 	b.busy.Lock()
 	defer b.busy.Unlock()
 
-	res, err := b.run(ctx, "info", fmt.Sprintf("disc:%d", driveIndex))
+	res, err := b.run(ctx, onMessage, "info", fmt.Sprintf("disc:%d", driveIndex))
 	if err != nil && (res == nil || len(res.Disc.Titles) == 0) {
 		return nil, err
 	}
@@ -135,10 +139,10 @@ func (b *Backend) ScanContext(ctx context.Context, driveIndex int) (*disc.Disc, 
 		}
 	}
 
-	if hasCode(res.Messages, msgOSAccessMode) && b.OnMessage != nil {
+	if hasCode(res.Messages, msgOSAccessMode) && onMessage != nil {
 		// Not fatal — the scan worked — but it means raw access was
 		// unavailable, which usually degrades what MakeMKV can read.
-		b.OnMessage(Message{
+		onMessage(Message{
 			Code: msgOSAccessMode,
 			Text: "Opened in OS access mode; another program may be using the drive.",
 		})
@@ -168,7 +172,10 @@ func (b *Backend) args(extra ...string) []string {
 }
 
 // run executes makemkvcon and parses its output.
-func (b *Backend) run(ctx context.Context, extra ...string) (*ScanResult, error) {
+//
+// onMessage may be nil, and is per-call rather than taken from the Backend so
+// that concurrent commands cannot tread on each other.
+func (b *Backend) run(ctx context.Context, onMessage func(Message), extra ...string) (*ScanResult, error) {
 	path := b.Path
 	if path == "" {
 		p, err := Locate()
@@ -199,7 +206,7 @@ func (b *Backend) run(ctx context.Context, extra ...string) (*ScanResult, error)
 		return nil, &Error{Op: "start", Err: err}
 	}
 
-	res, parseErr := ParseScanFunc(stdout, b.OnMessage)
+	res, parseErr := ParseScanFunc(stdout, onMessage)
 
 	// Drain anything left so the child never blocks on a full pipe.
 	_, _ = io.Copy(io.Discard, stdout)

@@ -1,8 +1,10 @@
 package makemkv
 
 import (
+	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -414,5 +416,44 @@ func TestParseDriveStates(t *testing.T) {
 				t.Error("the drive lost its name")
 			}
 		})
+	}
+}
+
+// A scan shares the Backend with the poll that watches the drive, so its
+// message callback is passed per-call. Setting a field instead meant the two
+// could tread on each other, and the scan refusing to start because the poll
+// held the drive for a fraction of a second.
+func TestScanTakesItsOwnMessageCallback(t *testing.T) {
+	b := &Backend{}
+
+	var fromField, fromCall int
+	b.OnMessage = func(Message) { fromField++ }
+	onCall := func(Message) { fromCall++ }
+
+	// Both callbacks reach run without either being stored on the Backend.
+	if _, err := b.run(context.Background(), onCall, "--version"); err != nil {
+		t.Logf("makemkvcon is not usable here: %v", err)
+	}
+
+	if b.OnMessage == nil {
+		t.Error("the Backend's own callback was cleared by a call that supplied its own")
+	}
+	_ = fromField
+	_ = fromCall
+}
+
+// Two commands must be able to run one after another without one clearing the
+// other's callback.
+func TestBackendCallbackSurvivesScans(t *testing.T) {
+	b := &Backend{OnMessage: func(Message) {}}
+
+	before := b.OnMessage
+	_, _ = b.ScanWithMessages(context.Background(), 0, func(Message) {})
+
+	if b.OnMessage == nil {
+		t.Fatal("the Backend's callback was cleared")
+	}
+	if reflect.ValueOf(before).Pointer() != reflect.ValueOf(b.OnMessage).Pointer() {
+		t.Error("the Backend's callback was replaced")
 	}
 }

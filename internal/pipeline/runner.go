@@ -104,25 +104,12 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	// MakeMKV talks while it works; passing that through is the difference
 	// between a page that looks busy and one that looks broken.
 	//
-	// OnMessage is shared state, so it is set while holding the drive, which
-	// is the same lock every command takes.
-	if !r.Backend.TryLock() {
-		r.stop(job, "The disc drive is busy. Wait a moment and try again.", "")
-		return job, fmt.Errorf("drive busy")
-	}
-	r.Backend.OnMessage = func(m makemkv.Message) {
+	// The scan waits its turn if the drive is momentarily busy rather than
+	// giving up: the poll that watches for a disc holds it for a fraction of
+	// a second, and refusing over that would be maddening.
+	d, err := r.Backend.ScanWithMessages(ctx, drive.Index, func(m makemkv.Message) {
 		log.Printf(store.StageScan, "%s", m.Text)
-	}
-	r.Backend.Unlock()
-
-	defer func() {
-		if r.Backend.TryLock() {
-			r.Backend.OnMessage = nil
-			r.Backend.Unlock()
-		}
-	}()
-
-	d, err := r.Backend.ScanContext(ctx, drive.Index)
+	})
 	if err != nil {
 		if ctx.Err() != nil {
 			r.stop(job, "Stopped at your request.", "")
