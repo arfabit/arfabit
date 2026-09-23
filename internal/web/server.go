@@ -38,6 +38,10 @@ type Server struct {
 	Runner  *pipeline.Runner
 	Backend *makemkv.Backend
 
+	// Restart starts ARFABIT again. Set by the program that owns the process,
+	// because only it knows how to shut down tidily first.
+	Restart func() error
+
 	tmpl   *template.Template
 	events *eventStream
 }
@@ -95,6 +99,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/title", s.handleChooseTitle)
 	mux.HandleFunc("POST /api/index", s.handleBuildIndex)
+
+	mux.HandleFunc("POST /api/restart", s.handleRestart)
 
 	mux.HandleFunc("GET /api/autostart", s.handleAutostart)
 	mux.HandleFunc("POST /api/autostart", s.handleSetAutostart)
@@ -284,6 +290,37 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, map[string]string{"state": "downloading"})
+}
+
+// handleRestart starts ARFABIT again.
+//
+// A disc being worked on stops this: a restart mid-rip would leave the job
+// unfinished, and the person clicking is unlikely to mean that.
+func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if s.Restart == nil {
+		writeError(w, "This copy of ARFABIT cannot restart itself.", nil)
+		return
+	}
+
+	if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
+		writeError(w, "A disc is being worked on. Stop it first, or wait for it to finish.", nil)
+		return
+	}
+
+	// The reply goes out before the restart, so the page knows to start
+	// waiting rather than watching the connection die.
+	writeJSON(w, map[string]bool{"restarting": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	go func() {
+		// A moment for the reply to reach the browser.
+		time.Sleep(250 * time.Millisecond)
+		if err := s.Restart(); err != nil {
+			s.events.send("restart", map[string]string{"detail": err.Error()})
+		}
+	}()
 }
 
 // handleAutostart reports whether ARFABIT starts with the computer.

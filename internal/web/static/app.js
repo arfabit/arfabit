@@ -415,6 +415,36 @@ $("stop").addEventListener("click", (e) =>
 
 $("title-save").addEventListener("click", saveTitle);
 
+$("restart").addEventListener("click", async (e) => {
+  const result = await busy(e.target, "Restarting\u2026", null, () => post("/api/restart"));
+  if (result) waitForRestart();
+});
+
+// waitForRestart holds the page until ARFABIT answers again, then reloads.
+//
+// The connection drops while the program is replaced, so the page polls rather
+// than waiting on an event that cannot arrive.
+async function waitForRestart() {
+  $("restart-detail").textContent = "Restarting. This page will come back on its own.";
+
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const res = await fetch("/api/state", { cache: "no-store" });
+      if (res.ok) {
+        location.reload();
+        return;
+      }
+    } catch {
+      // Expected while the program is coming back up.
+    }
+  }
+
+  $("restart-detail").textContent =
+    "ARFABIT has not come back yet. Reload this page, or start it again from where you launched it.";
+}
+
 $("index-build").addEventListener("click", (e) =>
   busy(e.target, "Downloading\u2026", null, () => post("/api/index")));
 

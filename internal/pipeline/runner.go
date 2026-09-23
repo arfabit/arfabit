@@ -448,6 +448,9 @@ func (r *Runner) stop(job *Job, note, detail string) error {
 	return errors.New(note)
 }
 
+// SetCurrentForTest installs a job without running a scan.
+func (r *Runner) SetCurrentForTest(job *Job) { r.setCurrent(job) }
+
 func (r *Runner) setCurrent(job *Job) {
 	r.mu.Lock()
 	r.current = job

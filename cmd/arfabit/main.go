@@ -23,6 +23,7 @@ import (
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
+	"github.com/arfabit/arfabit/internal/restart"
 	"github.com/arfabit/arfabit/internal/store"
 	"github.com/arfabit/arfabit/internal/web"
 )
@@ -85,6 +86,15 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	server, err := web.New(cfg, st, runner, backend)
 	if err != nil {
 		return err
+	}
+
+	// Restarting is how most small problems get cleared, so the page offers
+	// it. Everything is put away first, exactly as Ctrl+C would.
+	server.Restart = func() error {
+		fmt.Println("\nRestarting.")
+		saveCalibration(st, cfg.Node.ID, calibration)
+		server.Close()
+		return restart.Exec()
 	}
 
 	listener, err := net.Listen("tcp", cfg.Server.Addr)

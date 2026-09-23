@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
@@ -201,4 +202,56 @@ func TestCloseIsSafeTwice(t *testing.T) {
 
 	s.Close()
 	s.Close()
+}
+
+// A restart part-way through a rip would leave the job unfinished, which is
+// unlikely to be what the person clicking meant.
+func TestRestartRefusedWhileWorking(t *testing.T) {
+	s := newTestServer(t)
+
+	var called bool
+	s.Restart = func() error { called = true; return nil }
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StageRip},
+	})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/restart", nil))
+
+	if called {
+		t.Error("ARFABIT restarted while a disc was being worked on")
+	}
+
+	var problem map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(problem["message"], "Stop it first") {
+		t.Errorf("the message does not say what to do: %q", problem["message"])
+	}
+}
+
+// With nothing running, the reply goes out before the restart happens, so the
+// page knows to start waiting rather than watching the connection die.
+func TestRestartRepliesBeforeRestarting(t *testing.T) {
+	s := newTestServer(t)
+
+	done := make(chan struct{})
+	s.Restart = func() error { close(done); return nil }
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/restart", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "restarting") {
+		t.Errorf("body = %q", rec.Body.String())
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Error("the restart never ran")
+	}
 }
