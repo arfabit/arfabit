@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARFABIT</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<header>
+  <h1>ARFABIT</h1>
+  <p class="sub">{{.NodeName}}</p>
+</header>
+
+<main>
+
+  <section id="doctor" class="card" hidden>
+    <h2>Before you start</h2>
+    <div id="doctor-list"></div>
+  </section>
+
+  <section id="idle" class="card">
+    <h2>Put a disc in</h2>
+    <p class="muted">ARFABIT will read it and show you what it found.</p>
+    <button id="scan" class="primary">Look for a disc</button>
+  </section>
+
+  <section id="plan" class="card" hidden>
+    <h2 id="plan-title">Found a movie</h2>
+    <p id="plan-summary" class="muted"></p>
+
+    <div id="plan-notice" class="notice" hidden></div>
+
+    <div class="grid">
+      <div>
+        <h3>Picture</h3>
+        <p id="plan-video" class="muted"></p>
+      </div>
+      <div>
+        <h3>Sound</h3>
+        <div id="plan-audio"></div>
+      </div>
+      <div>
+        <h3>Subtitles</h3>
+        <div id="plan-subs"></div>
+      </div>
+    </div>
+
+    <p id="plan-estimate" class="estimate"></p>
+
+    <div class="actions">
+      <button id="start" class="primary">Start</button>
+      <span id="plan-blocked" class="muted"></span>
+    </div>
+  </section>
+
+  <section id="working" class="card" hidden>
+    <h2 id="working-title">Working</h2>
+    <div class="bar"><div id="bar-fill"></div></div>
+    <p id="working-detail" class="muted"></p>
+    <div class="actions">
+      <button id="stop">Stop</button>
+    </div>
+  </section>
+
+  <section id="done" class="card" hidden>
+    <h2 id="done-title">Ready</h2>
+    <p id="done-detail" class="muted"></p>
+  </section>
+
+  <section class="card">
+    <div class="log-head">
+      <h2>What's happening</h2>
+      <div class="log-controls">
+        <input id="log-filter" type="search" placeholder="Filter" autocomplete="off">
+        <label class="follow"><input id="log-follow" type="checkbox" checked> Follow</label>
+      </div>
+    </div>
+    <div id="log" class="log"></div>
+    <button id="log-jump" class="jump" hidden>Jump to live</button>
+  </section>
+
+  <section class="card">
+    <h2>Recent discs</h2>
+    <div id="recent"></div>
+    <p class="muted small">Movies go in {{.Library}}</p>
+  </section>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
