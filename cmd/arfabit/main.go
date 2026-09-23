@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -99,6 +100,15 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
+		// Already running is not a problem to report, it is the thing the
+		// person wanted. Open the page and stand down quietly.
+		if url, ok := alreadyRunning(cfg.Server.Addr); ok {
+			fmt.Printf("\nARFABIT is already running.\n\n  Open %s\n\n", url)
+			if !noOpen {
+				openBrowser(url)
+			}
+			return nil
+		}
 		return explainListenFailure(cfg.Server.Addr, err)
 	}
 
@@ -154,6 +164,38 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	return nil
 }
 
+// alreadyRunning reports whether the occupied port is ARFABIT itself.
+//
+// Asking is better than assuming: something else may have the port, and saying
+// "already running" about another program would be a guess (§15).
+func alreadyRunning(addr string) (string, bool) {
+	url := friendlyURLFor(addr)
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url + "/api/state")
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+
+	// The reply must look like ARFABIT's own, not merely be a web server.
+	var state struct {
+		NodeName string `json:"node_name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&state); err != nil {
+		return "", false
+	}
+	if state.NodeName == "" {
+		return "", false
+	}
+
+	return url, true
+}
+
 // explainListenFailure says what an occupied port actually means.
 //
 // "bind: address already in use" almost always means ARFABIT is already
@@ -161,8 +203,8 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 func explainListenFailure(addr string, err error) error {
 	if errors.Is(err, syscall.EADDRINUSE) {
 		return fmt.Errorf(
-			"Something is already using %s, most likely ARFABIT itself in another window.\n"+
-				"Close it, or start this one on a different address with:\n\n"+
+			"Something is already using %s, but it does not answer like ARFABIT.\n"+
+				"Close whatever it is, or start ARFABIT on a different address with:\n\n"+
 				"  arfabit -addr :7848\n\n"+
 				"The underlying message was: %v", addr, err)
 	}
@@ -236,6 +278,18 @@ func saveCalibration(st *store.Store, nodeID string, c *pipeline.Calibration) {
 		return
 	}
 	_ = os.WriteFile(calibrationPath(st, nodeID), append(data, '\n'), 0o644)
+}
+
+// friendlyURLFor turns a configured address into one a person can type.
+func friendlyURLFor(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "http://localhost:7847"
+	}
+	if host == "" || host == "::" || host == "0.0.0.0" {
+		host = "localhost"
+	}
+	return fmt.Sprintf("http://%s:%s", host, port)
 }
 
 // friendlyURL turns a listen address into one a person can type.
