@@ -369,10 +369,32 @@ function renderRecent(jobs) {
 }
 
 async function runDoctor() {
-  const report = await fetch("/api/doctor").then((r) => r.json());
+  show("doctor", true);
+  $("doctor-heading").textContent = "Checking your computer";
+  $("doctor-status").textContent =
+    "Looking for MakeMKV, FFmpeg and your disc drive. Waking the drive can take a few seconds.";
+  $("doctor-list").replaceChildren();
+
+  let report;
+  try {
+    report = await fetch("/api/doctor").then((r) => r.json());
+  } catch (err) {
+    $("doctor-heading").textContent = "Could not finish checking";
+    $("doctor-status").textContent = String(err);
+    return;
+  }
+
   const problems = (report.checks || []).filter((c) => c.status !== "ok");
 
-  show("doctor", problems.length > 0);
+  if (problems.length === 0) {
+    $("doctor-heading").textContent = "Everything is ready";
+    $("doctor-status").textContent = "MakeMKV, FFmpeg and your disc drive are all set up.";
+    setTimeout(() => show("doctor", false), 2500);
+    return;
+  }
+
+  $("doctor-heading").textContent = "Before you start";
+  $("doctor-status").textContent = "";
   $("doctor-list").replaceChildren(...problems.map((check) => {
     const row = document.createElement("div");
     row.className = "check";
@@ -445,19 +467,47 @@ async function waitForRestart() {
     "ARFABIT has not come back yet. Reload this page, or start it again from where you launched it.";
 }
 
-$("index-build").addEventListener("click", (e) =>
-  busy(e.target, "Downloading\u2026", null, () => post("/api/index")));
+$("index-build").addEventListener("click", (e) => {
+  // No busy() wrapper here: the download outlives the request, so the event
+  // stream owns this button until it finishes.
+  e.target.disabled = true;
+  e.target.textContent = "Starting\u2026";
+  $("index-detail").textContent = "Asking for the film list\u2026";
+  post("/api/index");
+});
 
 events.addEventListener("index", (e) => {
   const status = JSON.parse(e.data);
   const detail = $("index-detail");
+  const button = $("index-build");
+
   if (status.state === "downloading") {
-    detail.textContent = "Downloading the film list. This happens once and takes a few minutes.";
-  } else if (status.state === "ready") {
-    detail.textContent = `Ready — ${status.count.toLocaleString()} films.`;
-    $("index-build").textContent = "Download it again";
-  } else {
-    detail.textContent = `The film list did not download. ${status.detail || ""}`;
+    button.disabled = true;
+    button.textContent = "Downloading\u2026";
+    detail.textContent = status.read
+      ? `Downloaded ${bytes(status.read)} of about 200 MB. This happens once.`
+      : "Starting the download. This happens once and takes a few minutes.";
+    return;
+  }
+
+  button.disabled = false;
+
+  if (status.state === "ready") {
+    button.textContent = "Download it again";
+    detail.textContent = `Ready — ${status.count.toLocaleString()} films. Used to confirm a movie's name and find its year.`;
+    return;
+  }
+
+  button.textContent = "Try again";
+  detail.textContent = "The film list did not download.";
+  if (status.detail) {
+    const pre = document.createElement("pre");
+    pre.textContent = status.detail;
+    const wrap = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Technical details";
+    wrap.append(summary, pre);
+    detail.append(document.createElement("br"), wrap);
   }
 });
 $("log-filter").addEventListener("input", applyFilter);

@@ -271,9 +271,22 @@ func (s *Server) handleChooseTitle(w http.ResponseWriter, r *http.Request) {
 // 200 MB download and the page must stay usable throughout.
 func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 	go func() {
-		s.events.send("index", map[string]any{"state": "downloading"})
+		s.events.send("index", map[string]any{"state": "downloading", "read": 0})
 
-		ix, err := meta.BuildIndex(s.Config.Paths.Data, false, nil)
+		// Progress is reported as it arrives, but not on every read: the
+		// callback fires thousands of times a second and the page only needs
+		// to see movement.
+		var lastSent int64
+		onProgress := func(read int64) {
+			const step = 2 << 20
+			if read-lastSent < step {
+				return
+			}
+			lastSent = read
+			s.events.send("index", map[string]any{"state": "downloading", "read": read})
+		}
+
+		ix, err := meta.BuildIndex(s.Config.Paths.Data, false, onProgress)
 		if err != nil {
 			s.events.send("index", map[string]any{
 				"state":  "stopped",

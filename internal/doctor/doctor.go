@@ -67,12 +67,19 @@ func (r Report) Ready() bool {
 func Run(ctx context.Context, cfg config.Config) Report {
 	var r Report
 
+	// Folders first, and deliberately.
+	//
+	// Creating them is what makes macOS ask permission for the Downloads
+	// folder, and that question should arrive while ARFABIT is plainly
+	// starting up rather than minutes later, next to whatever the person
+	// happened to click. Everything after it is quick by comparison, except
+	// the drive, which is last because spinning up a disc takes seconds.
+	r.Checks = append(r.Checks, checkFolders(cfg))
 	r.Checks = append(r.Checks, checkMakeMKV())
 	r.Checks = append(r.Checks, checkTool("FFmpeg", ffmpeg.Locate, installFFmpeg()))
 	r.Checks = append(r.Checks, checkTool("FFprobe", ffmpeg.LocateProbe, installFFmpeg()))
 	r.Checks = append(r.Checks, checkLicense())
 	r.Checks = append(r.Checks, checkDrives(ctx))
-	r.Checks = append(r.Checks, checkFolders(cfg))
 
 	return r
 }

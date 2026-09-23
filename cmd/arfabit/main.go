@@ -57,6 +57,14 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		return printChecks(cfg)
 	}
 
+	// Create the folders now, while ARFABIT is visibly starting.
+	//
+	// On macOS this is what prompts for access to the Downloads folder, and
+	// that question makes sense here. Left until later it arrives minutes
+	// afterwards, next to whatever the person happened to be doing, looking
+	// like a consequence of it.
+	prepareFolders(cfg)
+
 	st, err := store.New(cfg.Paths.Data, cfg.Node.ID)
 	if err != nil {
 		return err
@@ -209,6 +217,18 @@ func explainListenFailure(addr string, err error) error {
 				"The underlying message was: %v", addr, err)
 	}
 	return fmt.Errorf("ARFABIT could not listen on %s: %w", addr, err)
+}
+
+// prepareFolders makes the folders ARFABIT writes to.
+//
+// Problems are not fatal: Doctor reports them properly a moment later, and
+// stopping here would mean the page never opens to explain why.
+func prepareFolders(cfg config.Config) {
+	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Masters, cfg.Paths.Library} {
+		if dir != "" {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+	}
 }
 
 // printChecks runs Doctor on the command line, for anyone who would rather not
