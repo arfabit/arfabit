@@ -170,3 +170,35 @@ func TestEventStreamSkipsFullWatchers(t *testing.T) {
 		t.Fatal("send blocked on a watcher that was not reading")
 	}
 }
+
+// Pages hold their update connection open for as long as they are on screen,
+// so shutdown has to close them. Waiting for them to end on their own waits
+// forever, which is what made Ctrl+C hang.
+func TestCloseEndsOpenStreams(t *testing.T) {
+	s := newTestServer(t)
+
+	_, first := s.events.add()
+	_, second := s.events.add()
+
+	s.Close()
+
+	for i, ch := range []chan string{first, second} {
+		select {
+		case _, open := <-ch:
+			if open {
+				t.Errorf("watcher %d received a message instead of being closed", i)
+			}
+		default:
+			t.Errorf("watcher %d is still open after Close", i)
+		}
+	}
+}
+
+// Closing twice must not panic: shutdown may race with a page disconnecting.
+func TestCloseIsSafeTwice(t *testing.T) {
+	s := newTestServer(t)
+	s.events.add()
+
+	s.Close()
+	s.Close()
+}

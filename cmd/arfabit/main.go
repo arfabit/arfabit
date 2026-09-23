@@ -37,7 +37,7 @@ func main() {
 	flag.Parse()
 
 	if err := run(*configPath, *addr, *noOpen, *checkOnly); err != nil {
-		fmt.Fprintf(os.Stderr, "\nARFABIT could not start.\n%v\n\n", err)
+		fmt.Fprintf(os.Stderr, "\n%v\n\n", err)
 		os.Exit(1)
 	}
 }
@@ -89,7 +89,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
-		return fmt.Errorf("ARFABIT could not listen on %s: %w", cfg.Server.Addr, err)
+		return explainListenFailure(cfg.Server.Addr, err)
 	}
 
 	url := friendlyURL(listener.Addr())
@@ -129,9 +129,34 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	fmt.Println("\nStopping.")
 	saveCalibration(st, cfg.Node.ID, calibration)
 
+	// Pages hold their update connection open for as long as they are on
+	// screen, so those are closed first: waiting for them would wait forever.
+	server.Close()
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return httpServer.Shutdown(shutdownCtx)
+
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		// Something is still holding on. Close it outright rather than leave
+		// the port occupied, which would stop ARFABIT starting again.
+		_ = httpServer.Close()
+	}
+	return nil
+}
+
+// explainListenFailure says what an occupied port actually means.
+//
+// "bind: address already in use" almost always means ARFABIT is already
+// running, often in another window, and saying so saves a hunt.
+func explainListenFailure(addr string, err error) error {
+	if errors.Is(err, syscall.EADDRINUSE) {
+		return fmt.Errorf(
+			"Something is already using %s, most likely ARFABIT itself in another window.\n"+
+				"Close it, or start this one on a different address with:\n\n"+
+				"  arfabit -addr :7848\n\n"+
+				"The underlying message was: %v", addr, err)
+	}
+	return fmt.Errorf("ARFABIT could not listen on %s: %w", addr, err)
 }
 
 // printChecks runs Doctor on the command line, for anyone who would rather not

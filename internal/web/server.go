@@ -67,6 +67,15 @@ func New(cfg config.Config, st *store.Store, runner *pipeline.Runner, backend *m
 	return s, nil
 }
 
+// Close ends every open page connection.
+//
+// Called before the HTTP server is shut down, because those connections stay
+// open for as long as a page is on screen and would otherwise hold shutdown up
+// indefinitely.
+func (s *Server) Close() {
+	s.events.closeAll()
+}
+
 // Handler builds the routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()

@@ -53,6 +53,21 @@ func (e *eventStream) add() (int, chan string) {
 	return e.next, ch
 }
 
+// closeAll ends every open stream.
+//
+// Server-sent event connections are held open for as long as a page is on
+// screen, so an orderly shutdown has to close them: waiting for them to finish
+// on their own would wait forever.
+func (e *eventStream) closeAll() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for id, ch := range e.watchers {
+		close(ch)
+		delete(e.watchers, id)
+	}
+}
+
 func (e *eventStream) remove(id int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -75,7 +90,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	id, ch := s.events.add()
-	defer s.events.remove(id)
+	defer func() {
+		// closeAll may have removed and closed this already.
+		defer func() { _ = recover() }()
+		s.events.remove(id)
+	}()
 
 	// An immediate comment opens the stream so the browser stops waiting.
 	fmt.Fprint(w, ": connected\n\n")
