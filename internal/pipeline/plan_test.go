@@ -522,3 +522,77 @@ func TestStereoIsMadeWhenTheDiscHasNone(t *testing.T) {
 		t.Errorf("stereo was made from the %q track, want eng", made.Lang)
 	}
 }
+
+// A disc's own stereo track is a purpose-made mix, but it is usually Dolby at
+// a few hundred kilobits while the surround track beside it is lossless. Both
+// routes to stereo are offered, and the disc's own is the one ticked.
+func TestLosslessStereoOptionIsOffered(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_TRUEHD", CodecLong: "TrueHD Atmos", Channels: 8, Lang: "eng"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
+	}}
+
+	tracks := planAudio(title, config.Defaults().Profile)
+
+	var discStereo, madeStereo *store.PlannedAudio
+	for i := range tracks {
+		switch {
+		case tracks[i].Stereo:
+			madeStereo = &tracks[i]
+		case tracks[i].Channels <= 2:
+			discStereo = &tracks[i]
+		}
+	}
+
+	if discStereo == nil || madeStereo == nil {
+		t.Fatal("both stereo routes should be offered")
+	}
+	if !discStereo.Selected {
+		t.Error("the disc's own stereo mix is not the one ticked")
+	}
+	if madeStereo.Selected {
+		t.Error("the made stereo track is ticked; it is an alternative, not the default")
+	}
+	if !madeStereo.Lossless {
+		t.Error("the made stereo track does not record that its source was lossless")
+	}
+	if !strings.Contains(madeStereo.Label, "lossless") {
+		t.Errorf("the label does not say where it came from: %q", madeStereo.Label)
+	}
+}
+
+// With no lossless track there is nothing better to offer, so nothing is.
+func TestNoExtraStereoWhenNothingIsLossless(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "eng"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
+	}}
+
+	for _, tr := range planAudio(title, config.Defaults().Profile) {
+		if tr.Stereo {
+			t.Errorf("a made stereo track was offered with no lossless source: %q", tr.Label)
+		}
+	}
+}
+
+// DTS-HD Master Audio shares its codec id with ordinary DTS and is told apart
+// only by the long name.
+func TestLosslessDetection(t *testing.T) {
+	tests := []struct {
+		codecID, codecLong string
+		want               bool
+	}{
+		{"A_TRUEHD", "TrueHD Atmos", true},
+		{"A_DTS", "DTS-HD Master Audio", true},
+		{"A_DTS", "DTS", false},
+		{"A_AC3", "Dolby Digital", false},
+		{"A_FLAC", "FLAC", true},
+	}
+	for _, tc := range tests {
+		if got := isLossless(tc.codecID, tc.codecLong); got != tc.want {
+			t.Errorf("isLossless(%q, %q) = %v, want %v", tc.codecID, tc.codecLong, got, tc.want)
+		}
+	}
+}

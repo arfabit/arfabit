@@ -47,6 +47,25 @@ var friendlyCodec = map[string]string{
 	"pcm":    "Uncompressed",
 }
 
+// losslessCodecs are the formats that carry the studio's audio bit for bit.
+//
+// DTS-HD Master Audio is the awkward one: MakeMKV reports it with the same
+// codec id as ordinary DTS and distinguishes it only in the long name.
+var losslessCodecs = map[string]bool{
+	"truehd": true,
+	"flac":   true,
+	"pcm":    true,
+}
+
+// isLossless reports whether a track carries the audio without loss.
+func isLossless(codecID, codecLong string) bool {
+	if losslessCodecs[strings.ToLower(shortCodec(codecID))] {
+		return true
+	}
+	long := strings.ToLower(codecLong)
+	return strings.Contains(long, "master audio") || strings.Contains(long, "lossless")
+}
+
 // friendlyLanguage names the common languages. Anything else keeps its code,
 // which is better than guessing.
 var friendlyLanguage = map[string]string{
@@ -56,7 +75,7 @@ var friendlyLanguage = map[string]string{
 	"kor": "Korean", "zho": "Chinese", "chi": "Chinese", "und": "Unknown",
 }
 
-// planAudio decides which sound tracks to keep and what to do with each.
+// planAudio decides which sound tracks to offer and what each would become.
 //
 // Tracks are grouped by language, the wanted languages first, and ordered
 // widest first inside each group, so the list reads the way the disc's own
@@ -74,52 +93,7 @@ func planAudio(title disc.Title, profile config.Profile) []store.PlannedAudio {
 	sortByLanguageThenWidth(tracks, profile.SubLanguages)
 	selectDefaults(tracks, profile)
 
-	return addStereoFallback(tracks, profile)
-}
-
-// addStereoFallback makes sure something stereo is always delivered.
-//
-// Many discs carry a stereo track already, and those are kept as they are. A
-// disc that offers surround only gets a downmix made from its primary track,
-// so any player and any pair of speakers has something straightforward to use.
-// It goes last, because Apple TV takes the first track it understands.
-func addStereoFallback(tracks []store.PlannedAudio, profile config.Profile) []store.PlannedAudio {
-	primaryLang := ""
-	if len(profile.SubLanguages) > 0 {
-		primaryLang = strings.ToLower(profile.SubLanguages[0])
-	}
-
-	var primary *store.PlannedAudio
-	for i := range tracks {
-		if tracks[i].Channels <= 2 {
-			// A real stereo track exists, so nothing needs making.
-			return tracks
-		}
-		inLanguage := primaryLang == "" || strings.EqualFold(tracks[i].Lang, primaryLang)
-		if inLanguage && (primary == nil || tracks[i].Channels > primary.Channels) {
-			primary = &tracks[i]
-		}
-	}
-	if primary == nil && len(tracks) > 0 {
-		primary = &tracks[0]
-	}
-	if primary == nil {
-		return tracks
-	}
-
-	return append(tracks, store.PlannedAudio{
-		SourceIndex: primary.SourceIndex,
-		Codec:       "aac",
-		Bitrate:     profile.AudioBitrate,
-		Layout:      "Stereo",
-		Channels:    2,
-		Lang:        primary.Lang,
-		SourceCodec: primary.SourceCodec,
-		Label: fmt.Sprintf("%s · Stereo · made by ARFABIT from the %s track",
-			languageName(primary.Lang), primary.Layout),
-		Selected: true,
-		Stereo:   true,
-	})
+	return addStereoOptions(tracks, profile)
 }
 
 // describeTrack works out what one source track becomes.
@@ -132,6 +106,7 @@ func describeTrack(s disc.Stream, profile config.Profile) store.PlannedAudio {
 		Channels:    s.Channels,
 		SourceCodec: source,
 		SourceLabel: strings.TrimSpace(s.Summary),
+		Lossless:    isLossless(s.CodecID, s.CodecLong),
 	}
 
 	switch {
@@ -164,6 +139,9 @@ func trackLabel(t store.PlannedAudio) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "%s · %s · %s", languageName(t.Lang), t.Layout, codecName(t.SourceCodec))
+	if t.Lossless {
+		b.WriteString(" (lossless)")
+	}
 
 	switch {
 	case t.Copy:
@@ -210,21 +188,14 @@ func sortByLanguageThenWidth(tracks []store.PlannedAudio, wanted []string) {
 // listed alongside with what it would become, so turning one on is one click —
 // the Plan shows the choice rather than making it.
 func selectDefaults(tracks []store.PlannedAudio, profile config.Profile) {
-	primaryLang := ""
-	if len(profile.SubLanguages) > 0 {
-		primaryLang = strings.ToLower(profile.SubLanguages[0])
-	}
-
-	inLanguage := func(t store.PlannedAudio) bool {
-		return primaryLang == "" || strings.EqualFold(t.Lang, primaryLang)
-	}
+	inLanguage := languageFilter(profile)
 
 	// Discs often carry two stereo tracks with nothing to tell them apart —
 	// one is frequently a commentary. ARFABIT cannot know which, so it keeps
 	// both rather than choosing wrongly.
 	var found bool
 	for i := range tracks {
-		if inLanguage(tracks[i]) && tracks[i].Channels <= 2 {
+		if inLanguage(tracks[i].Lang) && tracks[i].Channels <= 2 {
 			tracks[i].Selected = true
 			found = true
 		}
@@ -241,6 +212,98 @@ func selectDefaults(tracks []store.PlannedAudio, profile config.Profile) {
 			return
 		}
 	}
+}
+
+// addStereoOptions makes sure stereo is always available, and offers a second
+// way of getting it when the disc has a lossless track.
+//
+// A disc's own stereo track is usually a purpose-made mix, and that is what
+// gets ticked. But it is also typically Dolby at a few hundred kilobits, while
+// the surround track beside it may be lossless — so a downmix from that is
+// offered as well, unticked, for anyone who would rather have the better source
+// than the studio's fold-down. Neither is obviously right, which is why both
+// are on the list.
+func addStereoOptions(tracks []store.PlannedAudio, profile config.Profile) []store.PlannedAudio {
+	inLanguage := languageFilter(profile)
+
+	var (
+		haveStereo   bool
+		widest       *store.PlannedAudio
+		bestLossless *store.PlannedAudio
+	)
+	for i := range tracks {
+		t := &tracks[i]
+		if t.Channels <= 2 {
+			haveStereo = true
+			continue
+		}
+		if !inLanguage(t.Lang) {
+			continue
+		}
+		if widest == nil || t.Channels > widest.Channels {
+			widest = t
+		}
+		if t.Lossless && (bestLossless == nil || t.Channels > bestLossless.Channels) {
+			bestLossless = t
+		}
+	}
+
+	// Nothing stereo on the disc at all, so one is made from the best source
+	// available: lossless where the disc has it.
+	if !haveStereo {
+		source := bestLossless
+		if source == nil {
+			source = widest
+		}
+		if source == nil && len(tracks) > 0 {
+			source = &tracks[0]
+		}
+		if source == nil {
+			return tracks
+		}
+		return append(tracks, derivedStereo(*source, profile, true))
+	}
+
+	// A stereo track exists, but a lossless surround track is a better source
+	// for anyone who prefers it to the disc's own mix.
+	if bestLossless != nil {
+		return append(tracks, derivedStereo(*bestLossless, profile, false))
+	}
+
+	return tracks
+}
+
+// derivedStereo describes a stereo track made from a wider one.
+func derivedStereo(source store.PlannedAudio, profile config.Profile, selected bool) store.PlannedAudio {
+	quality := "the"
+	if source.Lossless {
+		quality = "the lossless"
+	}
+
+	return store.PlannedAudio{
+		SourceIndex: source.SourceIndex,
+		Codec:       "aac",
+		Bitrate:     profile.AudioBitrate,
+		Layout:      "Stereo",
+		Channels:    2,
+		Lang:        source.Lang,
+		SourceCodec: source.SourceCodec,
+		Lossless:    source.Lossless,
+		Label: fmt.Sprintf("%s · Stereo · made by ARFABIT from %s %s %s track",
+			languageName(source.Lang), quality, source.Layout, codecName(source.SourceCodec)),
+		Selected: selected,
+		Stereo:   true,
+	}
+}
+
+// languageFilter reports whether a track is in the language the user wants.
+// With no languages configured, every track counts.
+func languageFilter(profile config.Profile) func(string) bool {
+	if len(profile.SubLanguages) == 0 {
+		return func(string) bool { return true }
+	}
+	primary := strings.ToLower(profile.SubLanguages[0])
+	return func(lang string) bool { return strings.EqualFold(lang, primary) }
 }
 
 // layoutName describes a channel layout plainly.

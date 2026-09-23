@@ -127,6 +127,10 @@ type PlannedAudio struct {
 	SourceCodec string `json:"source_codec"`
 	SourceLabel string `json:"source_label,omitempty"`
 
+	// Lossless marks audio carried bit for bit from the studio, which makes it
+	// the better source for a downmix even though it cannot be played as-is.
+	Lossless bool `json:"lossless,omitempty"`
+
 	// Stereo marks a downmix ARFABIT adds itself rather than a track that
 	// exists on the disc.
 	Stereo bool `json:"stereo,omitempty"`
