@@ -34,3 +34,11 @@ Thumbs.db
 desktop.ini
 .idea/
 *.swp
+
+# Claude Code: share project config, keep machine-specific bits local
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+!.claude/commands/
+!.claude/agents/
+.claude/settings.local.json

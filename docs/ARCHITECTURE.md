@@ -351,14 +351,26 @@ looks excellent. The Plan says so plainly when it applies.
 
 ### Audio
 
-| Layout                 | Codec  | Bitrate               |
-| ---------------------- | ------ | --------------------- |
-| Stereo (day-1 default) | AAC-LC | 256k VBR              |
-| 5.1 (later)            | E-AC-3 | 768k                  |
-| 5.1 fallback (later)   | AC-3   | 640k (format ceiling) |
+**Copy when the codec is already native, encode when it is not** — the same rule as
+video (§4). Apple TV decodes AC-3, E-AC-3 and AAC, and most Blu-rays carry a DD 5.1
+track alongside the lossless one, so surround usually costs nothing.
+
+| Source track | Action |
+| --- | --- |
+| AC-3 / E-AC-3 / AAC | **copy** (`-c:a copy`) — bit-perfect, no encode time |
+| TrueHD / DTS-HD MA / DTS / PCM | encode |
+
+**An AAC stereo track is always added as a fallback**, whether or not a copy was
+available.
+
+| Target | Codec | Bitrate |
+| --- | --- | --- |
+| Stereo fallback (always present) | AAC-LC | 256k VBR |
+| 5.1 / 7.1 when encoding is required (later) | E-AC-3 | 768k |
+| 5.1 alternate (later) | AC-3 | 640k (format ceiling) |
 
 Track order matters: Apple TV selects the first compatible track, so multichannel
-is listed first when present.
+is listed first when present, with the stereo fallback after it.
 
 ---
 
@@ -570,3 +582,119 @@ auto-sample Transcode Lab · "fix my subtitle file" standalone tool · TV series
 Music CDs (separate backend — MakeMKV cannot read CDDA; needs libcdio + MusicBrainz) ·
 Dolby Vision (P7 → P8.1 via `dovi_tool`) · HDR10+ · `arfabit-control` light web
 controller for NAS targets · local text LLM for the OCR context pass.
+
+---
+
+## Appendix A. makemkvcon robot mode
+
+Observed from `makemkvcon -r --cache=1 info disc:N` (v1.18.4). This is a field guide,
+not a spec — MakeMKV publishes no formal one. Extend it as new discs reveal attributes.
+
+### Line grammar
+
+```
+TYPE:field,field,...        fields are CSV; strings are quoted; quotes escaped as \"
+```
+
+| Line | Shape |
+|---|---|
+| `MSG` | `code,flags,argcount,"rendered","format",args...` |
+| `DRV` | `index,visible,?,flags,"drive name","disc label","device"` |
+| `TCOUNT` | `count` — titles **above `--minlength`**, default 120s |
+| `CINFO` | `attr,code,"value"` — disc level |
+| `TINFO` | `title,attr,code,"value"` |
+| `SINFO` | `title,stream,attr,code,"value"` |
+
+`MSG` carries a **stable numeric code plus a format string with arguments broken out
+separately**. Error handling keys on the code, never on the rendered English (§15) —
+that survives wording changes and localization.
+
+### Message codes seen
+
+| Code | Meaning | Handling |
+|---|---|---|
+| 1005 | version banner | informational |
+| 1009 | "default profile missing" | **suppress** — appears every run, harmless |
+| 1011 | "Using LibreDrive mode" | good: raw access engaged |
+| 2010 | "opened in OS access mode" | degraded access; usually another process holds the drive |
+| 5010 | "Failed to open disc" | **expected and ignorable after a `disc:9999` probe**; a real error otherwise |
+
+`disc:9999` is a pseudo-index that enumerates drives, then fails to open disc 9999.
+Treating its trailing 5010 as an error is a bug.
+
+### DRV
+
+Sixteen slots always print. **`visible == 256` means an empty slot, not a drive.**
+Filter on it or the UI shows sixteen phantom drives.
+
+### CINFO (disc)
+
+| Attr | Meaning | Example |
+|---|---|---|
+| 1 | disc type | `Blu-ray disc` |
+| 2 | **disc name** | `The Sheep Detectives` |
+| 28 / 29 | language code / name | `eng` / `English` |
+| 30 | display name | |
+| 32 | **volume label** | `THE_SHEEP_DETECTIVES` |
+
+Attr 2 is already a human-readable title, cleaner than the volume label. §11 should try
+attr 2 first and fall back to attr 32.
+
+### TINFO (title)
+
+| Attr | Meaning | Example |
+|---|---|---|
+| 2 | name | `The Sheep Detectives` |
+| 8 | chapter count | `16` |
+| 9 | duration | `1:49:04` |
+| 10 | size, human | `31.1 GB` |
+| 11 | **size, bytes** | `33457569792` |
+| 16 | source playlist | `00001.mpls` |
+| 27 | suggested output filename | `..._t00.mkv` |
+| 30 | summary | `... - 16 chapter(s) , 31.1 GB` |
+
+Attr 11 and 9 drive main-feature selection and the space check (§8).
+Attr 16 is how playlist obfuscation is spotted: many titles sharing or cycling `.mpls`
+names with near-identical durations.
+
+### SINFO (stream)
+
+| Attr | Meaning | Example |
+|---|---|---|
+| 1 | stream type | `Video` / `Audio` / `Subtitles` |
+| 2 | layout | `Surround 7.1` |
+| 3 / 4 | language code / name | `eng` / `English` |
+| 5 | **codec id** | `V_MPEG4/ISO/AVC`, `A_TRUEHD` |
+| 6 / 7 | codec short / long | `TrueHD` / `TrueHD Atmos` |
+| 13 | bitrate | `128 Kb/s` |
+| 14 | channel count | `8` |
+| 17 / 18 | sample rate / bit depth | `48000` / `24` |
+| 19 | **resolution** | `1920x1080` |
+| 20 | aspect | `16:9` |
+| 21 | frame rate | `23.976 (120000/5005)` |
+| 30 | summary | `TrueHD Surround 7.1 English` |
+| 38 / 39 | flag chars / names | `d` / `Default` |
+| 40 | channel layout | `7.1` |
+| 42 | conversion note | `( Lossless conversion )` |
+
+**Trap: attr 28/29 are not the stream's language.** On a French subtitle stream, attr 3/4
+correctly read `fra`/`French` while attr 28/29 read `eng`/`English` — the *title's*
+language leaking into the stream record. **Always use attr 3/4 for stream language.**
+Using 28/29 silently tags every track as English.
+
+**Duplicate tracks are normal and indistinguishable at scan time.** A disc may list two
+identical-looking `PGS English` streams and four `PGS French`. Every exposed attribute
+matches; the real difference is standard vs SDH, or France vs Canadian French. Resolve
+it by content, not metadata:
+
+1. Before OCR, compare bitmap count, byte size, and first/last timestamps. Exact
+   duplicates are dropped without OCR cost.
+2. After OCR, detect SDH by `[SOUND EFFECT]` markers, musical notes, and `SPEAKER:`
+   prefixes, and label the track accordingly — which is what the Plex sidecar name
+   needs anyway.
+
+**Open problem: forced-subtitle detection.** MakeMKV marks forced tracks only inside the
+attr 30 summary string — `PGS English  (forced only)`, with two spaces. There is no
+dedicated attribute. Parsing English prose is exactly what §15 warns against, so treat a
+match as a *hint*, corroborate with attr 38/39 flags and track size, and let the Plan
+show what was inferred rather than asserting it.
