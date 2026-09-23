@@ -12,12 +12,21 @@ import (
 	"github.com/arfabit/arfabit/internal/store"
 )
 
-// driveWatchInterval is how often the drive is asked what it holds.
+// How often the drive is asked what it holds.
 //
-// Listing drives does not open the disc, so it is cheap. Five seconds is
-// quick enough that putting a disc in feels noticed, without keeping the
-// drive busy.
-const driveWatchInterval = 5 * time.Second
+// Asking wakes the drive, so it is asked as seldom as the situation allows:
+//
+//   - While a job is running the drive is not asked at all. The disc is known,
+//     nothing can change, and a job takes hours — during which a poll every
+//     five seconds would keep the drive spinning the whole time for nothing.
+//   - An empty drive is asked often, because somebody putting a disc in wants
+//     it noticed.
+//   - A drive with a disc already in it is asked rarely: the only thing left
+//     to notice is the disc being taken out, which nobody is waiting on.
+const (
+	driveWatchEmpty  = 5 * time.Second
+	driveWatchLoaded = 30 * time.Second
+)
 
 // driveWatcher keeps the page told what is in the drive.
 //
@@ -42,6 +51,12 @@ func (s *Server) Drives() []disc.Drive {
 // the drive changes.
 func (s *Server) WatchDrives(ctx context.Context) {
 	check := func() {
+		// A job owns the drive. Asking it anything now would wake it every few
+		// seconds for hours, and could not tell us anything we do not know.
+		if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
+			return
+		}
+
 		// Skip a turn rather than queue behind a scan or a rip. Two
 		// makemkvcon processes on one drive drop it out of LibreDrive and
 		// then time out mid-read, which ruins the job in progress.
@@ -62,17 +77,30 @@ func (s *Server) WatchDrives(ctx context.Context) {
 
 	check()
 
-	ticker := time.NewTicker(driveWatchInterval)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(s.nextWatchDelay()):
 			check()
 		}
 	}
+}
+
+// nextWatchDelay is how long to leave the drive alone before asking again.
+func (s *Server) nextWatchDelay() time.Duration {
+	if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
+		// Come back soon enough to notice the job finishing, without touching
+		// the drive in the meantime.
+		return driveWatchLoaded
+	}
+
+	for _, d := range s.Drives() {
+		if d.Loaded {
+			return driveWatchLoaded
+		}
+	}
+	return driveWatchEmpty
 }
 
 func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {

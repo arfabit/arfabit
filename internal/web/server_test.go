@@ -427,3 +427,34 @@ func TestStaticFilesAreNotCached(t *testing.T) {
 		}
 	}
 }
+
+// Asking the drive anything wakes it. During a job that would keep it
+// spinning for hours to learn nothing: the disc is known and cannot change.
+func TestDriveIsLeftAloneDuringAJob(t *testing.T) {
+	s := newTestServer(t)
+	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: true}}
+
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StagePackage},
+	})
+
+	if got := s.nextWatchDelay(); got < driveWatchLoaded {
+		t.Errorf("delay during a job = %v; the drive should be left alone", got)
+	}
+}
+
+// An empty drive is asked often, because somebody putting a disc in wants it
+// noticed. One with a disc already in it is asked rarely.
+func TestEmptyDriveIsCheckedMoreOften(t *testing.T) {
+	s := newTestServer(t)
+
+	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: false}}
+	empty := s.nextWatchDelay()
+
+	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: true}}
+	loaded := s.nextWatchDelay()
+
+	if !(empty < loaded) {
+		t.Errorf("empty = %v, loaded = %v; an empty drive should be checked more often", empty, loaded)
+	}
+}
