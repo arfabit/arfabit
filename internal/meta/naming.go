@@ -126,13 +126,26 @@ func CleanDiscLabel(label string) string {
 		s = strings.TrimSuffix(strings.ToUpper(s), suffix)
 	}
 
-	return strings.TrimSpace(titleCase(s))
+	// A stripped suffix can leave a dangling dash behind.
+	return strings.Trim(titleCase(s), " -\u2013\u2014")
 }
 
-// titleCase capitalises words, leaving ones that are already mixed case alone.
+// smallWords stay lowercase inside a title, the way titles are normally set.
+var smallWords = map[string]bool{
+	"a": true, "an": true, "and": true, "as": true, "at": true, "but": true,
+	"by": true, "for": true, "in": true, "nor": true, "of": true, "on": true,
+	"or": true, "the": true, "to": true, "vs": true, "with": true,
+}
+
+// titleCase capitalises a shouted disc label into something readable.
+//
+// The first and last words are always capitalised, whatever they are.
 func titleCase(s string) string {
 	words := strings.Fields(strings.ToLower(s))
 	for i, w := range words {
+		if i > 0 && i < len(words)-1 && smallWords[w] {
+			continue
+		}
 		r := []rune(w)
 		r[0] = unicode.ToUpper(r[0])
 		words[i] = string(r)

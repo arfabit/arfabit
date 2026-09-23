@@ -139,7 +139,7 @@ func (r *Runner) Start(parent context.Context) error {
 		return errors.New("this disc is already being worked on")
 	}
 	if !job.Space.Fits {
-		return errors.New("there is not enough room for this disc")
+		return errors.New(job.Space.Describe())
 	}
 
 	ctx, cancel := context.WithCancel(parent)
@@ -377,6 +377,31 @@ func (r *Runner) deliver(job *Job, title meta.Title) error {
 	return nil
 }
 
+// surroundNote explains a disc whose surround sound cannot be carried across.
+//
+// Some discs offer surround only in formats an Apple TV cannot decode, with
+// Dolby available in stereo alone. ARFABIT then keeps the stereo track, which
+// is bit-perfect, rather than converting surround down to it — but the loss is
+// worth saying out loud rather than leaving to be noticed on the sofa.
+func surroundNote(plan *store.Plan) string {
+	var chosen *store.PlannedAudio
+	var surroundAvailable bool
+
+	for i, a := range plan.Audio {
+		if a.Selected && chosen == nil {
+			chosen = &plan.Audio[i]
+		}
+		if a.Layout != "" && a.Layout != "stereo" {
+			surroundAvailable = true
+		}
+	}
+
+	if chosen == nil || !surroundAvailable || chosen.Layout != "stereo" {
+		return ""
+	}
+	return "This disc's surround sound is in a format an Apple TV cannot play, and its Dolby track is stereo only, so the movie will be in stereo."
+}
+
 func (r *Runner) hasSelectedSubtitles(job *Job) bool {
 	for _, s := range job.Plan.Subtitles {
 		if s.Selected {
@@ -437,9 +462,15 @@ func detailOf(err error) string {
 	return err.Error()
 }
 
+// titleFrom works out what to call the movie.
+//
+// MakeMKV's own disc name is usually the best source, but it arrives as the
+// disc author wrote it: shouted, and sometimes with the format tacked on, as in
+// "THE MANDALORIAN AND GROGU - BLU-RAY". Either way it is tidied before it
+// becomes a folder name.
 func titleFrom(d *disc.Disc) string {
-	if d.Name != "" {
-		return d.Name
+	if name := meta.CleanDiscLabel(d.Name); name != "" {
+		return name
 	}
 	return meta.CleanDiscLabel(d.Label)
 }

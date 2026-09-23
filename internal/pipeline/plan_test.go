@@ -276,3 +276,49 @@ func TestSpaceDescribe(t *testing.T) {
 		t.Error("a message was produced when there is plenty of room")
 	}
 }
+
+// A check that could not run must not stop a job: that would be ARFABIT
+// getting in the way over its own shortcoming rather than a real shortage.
+func TestSpaceFailsOpen(t *testing.T) {
+	space, err := CheckSpace(1_000_000, "/no/such/volume/that/exists", "/also/not/here")
+	if err == nil {
+		t.Skip("this system reported free space for a path that does not exist")
+	}
+	if !space.Fits {
+		t.Error("a failed check refused the job")
+	}
+	if !space.Unknown {
+		t.Error("Unknown = false after a failed check")
+	}
+	if !strings.Contains(space.Describe(), "could not check") {
+		t.Errorf("the message does not admit the check failed: %q", space.Describe())
+	}
+}
+
+// Some discs carry surround only in formats an Apple TV cannot decode. Keeping
+// the bit-perfect stereo track is right, but the loss must be said out loud.
+func TestSurroundNoteWhenOnlyStereoSurvives(t *testing.T) {
+	plan := &store.Plan{Audio: []store.PlannedAudio{
+		{Label: "DTS-HD MA Surround 7.1 English", Layout: "7.1"},
+		{Label: "DD Stereo English", Layout: "stereo", Copy: true, Selected: true},
+	}}
+
+	note := surroundNote(plan)
+	if note == "" {
+		t.Fatal("no note was produced")
+	}
+	if !strings.Contains(note, "stereo") {
+		t.Errorf("note does not explain the outcome: %q", note)
+	}
+}
+
+// When surround does survive, there is nothing to say.
+func TestSurroundNoteSilentWhenSurroundKept(t *testing.T) {
+	plan := &store.Plan{Audio: []store.PlannedAudio{
+		{Label: "DD Surround 5.1 English", Layout: "5.1", Copy: true, Selected: true},
+		{Label: "Stereo", Layout: "stereo", Stereo: true, Selected: true},
+	}}
+	if note := surroundNote(plan); note != "" {
+		t.Errorf("a note was produced despite surround being kept: %q", note)
+	}
+}

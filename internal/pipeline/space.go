@@ -19,6 +19,11 @@ type Space struct {
 	Fits      bool
 	Tight     bool
 	MastersAt string
+
+	// Unknown means the check itself did not work. ARFABIT then lets the job
+	// go ahead: refusing to start because a check failed would be ARFABIT
+	// getting in the way over its own shortcoming, not a real shortage.
+	Unknown bool
 }
 
 // tightMargin is how close to the limit counts as worth mentioning, since an
@@ -29,7 +34,9 @@ const tightMargin = 1.10
 func CheckSpace(needed int64, mastersDir, libraryDir string) (Space, error) {
 	free, err := freeBytes(mastersDir)
 	if err != nil {
-		return Space{}, err
+		// Fail open: the job may proceed, and the Plan says the check did not
+		// work rather than pretending there is no room.
+		return Space{Needed: needed, Fits: true, Unknown: true, MastersAt: mastersDir}, err
 	}
 
 	s := Space{
@@ -51,6 +58,9 @@ func CheckSpace(needed int64, mastersDir, libraryDir string) (Space, error) {
 // user has masters they no longer need, and this is the moment they would want
 // to know it. ARFABIT offers to open the folder and never to remove anything.
 func (s Space) Describe() string {
+	if s.Unknown {
+		return "ARFABIT could not check how much room is left, so it will go ahead. Keep an eye on your free space."
+	}
 	if s.Fits && !s.Tight {
 		return ""
 	}

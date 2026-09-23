@@ -78,8 +78,12 @@ func TestCleanDiscLabel(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"THE_SHEEP_DETECTIVES", "The Sheep Detectives"},
 		{"CRIME_101", "Crime 101"},
-		{"IN_THE_GREY_BLU_RAY", "In The Grey"},
+		{"IN_THE_GREY_BLU_RAY", "In the Grey"},
 		{"THE_MATRIX_DISC_1", "The Matrix"},
+		// Shouted, with the format tacked on and an en dash left behind.
+		{"THE MANDALORIAN AND GROGU \u2013 BLU-RAY", "The Mandalorian and Grogu"},
+		// Small words stay lowercase, except first and last.
+		{"KING_OF_THE_HILL", "King of the Hill"},
 	}
 	for _, tc := range tests {
 		if got := CleanDiscLabel(tc.in); got != tc.want {
