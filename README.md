@@ -25,6 +25,8 @@ That's it. ARFABIT finds the movie, shows you what it found, and starts working.
 
 To have ARFABIT start up whenever your computer does, flip the switch in Settings that says "Start ARFABIT when this computer starts."
 
+To stop it, use the **Stop ARFABIT** button in Settings, or press Ctrl+C in the window you started it from. Starting it again while a copy is already running simply takes over from the old one.
+
 ## While it's working
 
 ARFABIT shows you one page with everything on it:

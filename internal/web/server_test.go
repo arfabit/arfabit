@@ -255,3 +255,43 @@ func TestRestartRepliesBeforeRestarting(t *testing.T) {
 		t.Error("the restart never ran")
 	}
 }
+
+// Somebody whose computer starts ARFABIT has no terminal to press Ctrl+C in,
+// so the page has to be able to stop it.
+func TestQuitStopsArfabit(t *testing.T) {
+	s := newTestServer(t)
+
+	stopped := make(chan struct{})
+	s.Quit = func() { close(stopped) }
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/quit", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Error("ARFABIT did not stop")
+	}
+}
+
+// Stopping mid-rip would abandon a job, same as restarting.
+func TestQuitRefusedWhileWorking(t *testing.T) {
+	s := newTestServer(t)
+
+	var called bool
+	s.Quit = func() { called = true }
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StageRip},
+	})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/quit", nil))
+
+	if called {
+		t.Error("ARFABIT stopped while a disc was being worked on")
+	}
+}

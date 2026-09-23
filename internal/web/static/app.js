@@ -467,6 +467,16 @@ async function waitForRestart() {
     "ARFABIT has not come back yet. Reload this page, or start it again from where you launched it.";
 }
 
+$("quit").addEventListener("click", async (e) => {
+  const result = await busy(e.target, "Stopping\u2026", null, () => post("/api/quit"));
+  if (result) {
+    $("restart-detail").textContent =
+      "ARFABIT has stopped. Start it again from where you launched it, or from your computer's startup list if you turned that on.";
+    $("restart").disabled = true;
+    $("quit").disabled = true;
+  }
+});
+
 $("index-build").addEventListener("click", (e) => {
   // No busy() wrapper here: the download outlives the request, so the event
   // stream owns this button until it finishes.

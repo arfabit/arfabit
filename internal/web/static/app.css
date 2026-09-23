@@ -150,3 +150,5 @@ button.done { border-color: var(--ok); }
 .setting { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .setting > div:first-child { font-weight: 500; }
 .setting button { margin-top: 0.5rem; }
+
+.button-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }

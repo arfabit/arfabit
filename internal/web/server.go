@@ -42,6 +42,9 @@ type Server struct {
 	// because only it knows how to shut down tidily first.
 	Restart func() error
 
+	// Quit stops ARFABIT.
+	Quit func()
+
 	tmpl   *template.Template
 	events *eventStream
 }
@@ -101,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/index", s.handleBuildIndex)
 
 	mux.HandleFunc("POST /api/restart", s.handleRestart)
+	mux.HandleFunc("POST /api/quit", s.handleQuit)
 
 	mux.HandleFunc("GET /api/autostart", s.handleAutostart)
 	mux.HandleFunc("POST /api/autostart", s.handleSetAutostart)
@@ -333,6 +337,33 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
 		if err := s.Restart(); err != nil {
 			s.events.send("restart", map[string]string{"detail": err.Error()})
 		}
+	}()
+}
+
+// handleQuit stops ARFABIT.
+//
+// Somebody who started it from a terminal can press Ctrl+C, but somebody whose
+// computer starts it, or who closed that window, has no way to stop it at all.
+// So the page offers one.
+func (s *Server) handleQuit(w http.ResponseWriter, r *http.Request) {
+	if s.Quit == nil {
+		writeError(w, "This copy of ARFABIT cannot stop itself.", nil)
+		return
+	}
+
+	if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
+		writeError(w, "A disc is being worked on. Stop it first, or wait for it to finish.", nil)
+		return
+	}
+
+	writeJSON(w, map[string]bool{"stopping": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		s.Quit()
 	}()
 }
 

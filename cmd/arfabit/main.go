@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -97,6 +98,14 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		return err
 	}
 
+	// Stopping from the page matters for anyone whose computer starts ARFABIT
+	// on its own: they have no terminal to press Ctrl+C in.
+	quit := make(chan struct{})
+	server.Quit = func() {
+		fmt.Println("\nStopping, asked from the page.")
+		close(quit)
+	}
+
 	// Restarting is how most small problems get cleared, so the page offers
 	// it. Everything is put away first, exactly as Ctrl+C would.
 	server.Restart = func() error {
@@ -108,16 +117,27 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
-		// Already running is not a problem to report, it is the thing the
-		// person wanted. Open the page and stand down quietly.
+		// Another copy already has the port. Ask it to stand down and take
+		// over: somebody who has just started ARFABIT wants the copy they
+		// started, which is very often one they have only now rebuilt.
 		if url, ok := alreadyRunning(cfg.Server.Addr); ok {
-			fmt.Printf("\nARFABIT is already running.\n\n  Open %s\n\n", url)
-			if !noOpen {
-				openBrowser(url)
+			fmt.Printf("\nARFABIT was already running at %s. Taking over.\n", url)
+
+			if err := askToQuit(url); err != nil {
+				return fmt.Errorf(
+					"ARFABIT is already running at %s and would not stand down.\n"+
+						"Stop it from that page, or run:\n\n  lsof -ti :%s | xargs kill\n\n"+
+						"The underlying message was: %v",
+					url, portOf(cfg.Server.Addr), err)
 			}
-			return nil
+
+			listener, err = waitForPort(cfg.Server.Addr, 10*time.Second)
+			if err != nil {
+				return explainListenFailure(cfg.Server.Addr, err)
+			}
+		} else {
+			return explainListenFailure(cfg.Server.Addr, err)
 		}
-		return explainListenFailure(cfg.Server.Addr, err)
 	}
 
 	url := friendlyURL(listener.Addr())
@@ -151,6 +171,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	select {
 	case err := <-errs:
 		return err
+	case <-quit:
 	case <-ctx.Done():
 	}
 
@@ -202,6 +223,45 @@ func alreadyRunning(addr string) (string, bool) {
 	}
 
 	return url, true
+}
+
+// askToQuit asks a running copy to stand down.
+func askToQuit(url string) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	resp, err := client.Post(url+"/api/quit", "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		return fmt.Errorf("it declined: %s", strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// waitForPort waits for the address to become free, then claims it.
+func waitForPort(addr string, within time.Duration) (net.Listener, error) {
+	deadline := time.Now().Add(within)
+	for {
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			return listener, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func portOf(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return addr
 }
 
 // explainListenFailure says what an occupied port actually means.
