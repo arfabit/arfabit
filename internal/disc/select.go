@@ -1,6 +1,7 @@
 package disc
 
 import (
+	"fmt"
 	"sort"
 	"time"
 )
@@ -31,15 +32,19 @@ type Selection struct {
 // or a TV episode. Below this a title is a menu, a logo or a stinger.
 const minFeatureDuration = 15 * time.Minute
 
-// decoyTolerance is how close in duration two titles must be to count as
-// near-identical. Playlist obfuscation produces titles within a second or two
-// of each other; genuine alternate cuts differ by minutes.
-const decoyTolerance = 0.02 // 2%
+// decoyTolerance is how close two titles must be to count as the same title.
+//
+// Real playlist decoys are byte-for-byte the same content wrapped in different
+// playlists, so their durations match exactly. An alternate cut differs by
+// minutes. A one-second window separates the two without catching cuts.
+const decoyTolerance = time.Second
 
-// minDecoys is how many near-identical long titles constitute obfuscation.
-// Two similar titles is ordinary (a film and its alternate cut); five is a
-// deliberate attempt to hide the feature.
-const minDecoys = 5
+// minDecoys is how many identical-length long titles constitute obfuscation.
+//
+// Observed on a real disc: three titles at exactly 2h12m05s and 40.7 GB, in
+// playlists 00800, 00802 and 00803. Two identical titles is common enough to be
+// unremarkable; three is deliberate.
+const minDecoys = 3
 
 // SelectTitles suggests which titles to rip.
 //
@@ -82,9 +87,10 @@ func SelectTitles(titles []Title) Selection {
 	switch {
 	case decoys >= minDecoys:
 		sel.Obfuscated = true
-		sel.Reason = "This disc lists several titles of almost the same length, " +
-			"which some discs do to make the movie harder to find. " +
-			"The longest one is selected, but it is worth checking."
+		sel.Reason = fmt.Sprintf("This disc lists %d titles of exactly the same length, "+
+			"which some discs do to make the movie harder to find. "+
+			"They are usually the same film, so any of them works. "+
+			"The first is selected.", decoys)
 	case len(candidates) == 1:
 		sel.Reason = "One title on this disc is long enough to be the movie."
 	default:
@@ -94,8 +100,8 @@ func SelectTitles(titles []Title) Selection {
 	return sel
 }
 
-// countNearIdentical counts candidates whose duration is within decoyTolerance
-// of the longest.
+// countNearIdentical counts candidates whose duration matches the longest
+// within decoyTolerance.
 func countNearIdentical(titles []Title, candidates []int, longest time.Duration) int {
 	if longest <= 0 {
 		return 0
@@ -103,12 +109,11 @@ func countNearIdentical(titles []Title, candidates []int, longest time.Duration)
 
 	n := 0
 	for _, i := range candidates {
-		d := titles[i].Duration
-		diff := longest - d
+		diff := longest - titles[i].Duration
 		if diff < 0 {
 			diff = -diff
 		}
-		if float64(diff)/float64(longest) <= decoyTolerance {
+		if diff <= decoyTolerance {
 			n++
 		}
 	}

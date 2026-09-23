@@ -312,3 +312,34 @@ func TestParseScanThirdDisc(t *testing.T) {
 		}
 	}
 }
+
+// A fourth real disc, and the first obfuscated one: three titles at exactly
+// 2h12m05s and 40.7 GB, in playlists 00800, 00802 and 00803.
+func TestParseScanObfuscatedDisc(t *testing.T) {
+	res := loadFixture(t, "scan-bd-4.txt")
+
+	sel := disc.SelectTitles(res.Disc.Titles)
+	if !sel.Obfuscated {
+		t.Error("Obfuscated = false; this disc has three identical-length titles")
+	}
+	if sel.Feature < 0 {
+		t.Fatal("no feature suggested; obfuscation must still offer a best guess")
+	}
+
+	feature := res.Disc.Titles[sel.Feature]
+	if got, want := feature.Duration, 2*time.Hour+12*time.Minute+5*time.Second; got != want {
+		t.Errorf("feature duration = %v, want %v", got, want)
+	}
+
+	// All three decoys must be the same length, which is what makes them
+	// decoys rather than alternate cuts.
+	var identical int
+	for _, ti := range res.Disc.Titles {
+		if ti.Duration == feature.Duration {
+			identical++
+		}
+	}
+	if got, want := identical, 3; got != want {
+		t.Errorf("got %d titles at the feature's duration, want %d", got, want)
+	}
+}

@@ -49,14 +49,15 @@ func TestSelectTitlesIgnoresShortTitles(t *testing.T) {
 // feature hard to identify. ARFABIT reports it rather than quietly guessing.
 func TestSelectTitlesDetectsObfuscation(t *testing.T) {
 	var titles []Title
-	for i := 0; i < 8; i++ {
-		// Within a second or two of each other, as real decoys are.
-		titles = append(titles, title(i, 100*time.Minute+time.Duration(i)*time.Second, 3000))
+	for i := 0; i < 3; i++ {
+		// Real decoys are the same content in different playlists, so their
+		// durations match exactly.
+		titles = append(titles, title(i, 100*time.Minute, 3000))
 	}
 
 	sel := SelectTitles(titles)
 	if !sel.Obfuscated {
-		t.Error("Obfuscated = false on a disc with eight near-identical titles")
+		t.Error("Obfuscated = false on a disc with three identical titles")
 	}
 	if sel.Feature < 0 {
 		t.Error("no feature suggested; obfuscation should still offer a best guess")
@@ -66,13 +67,16 @@ func TestSelectTitlesDetectsObfuscation(t *testing.T) {
 // Two similar titles is ordinary — a film and its alternate cut — and must not
 // be reported as obfuscation.
 func TestSelectTitlesAllowsAlternateCuts(t *testing.T) {
+	// Three cuts of the same film, differing by minutes. Durations that differ
+	// at all are cuts, not decoys, however many there are.
 	titles := []Title{
 		title(0, 100*time.Minute, 3000),
 		title(1, 101*time.Minute, 3100),
+		title(2, 104*time.Minute, 3200),
 	}
 
 	if sel := SelectTitles(titles); sel.Obfuscated {
-		t.Error("Obfuscated = true for two similar titles; that is an ordinary alternate cut")
+		t.Error("Obfuscated = true for three alternate cuts of differing length")
 	}
 }
 
