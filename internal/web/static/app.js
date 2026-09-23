@@ -468,8 +468,7 @@ async function refresh() {
 async function runDoctor() {
   show("doctor", true);
   $("doctor-heading").textContent = "Checking your computer";
-  $("doctor-status").textContent =
-    "Looking for MakeMKV, FFmpeg and your disc drive. Waking the drive can take a few seconds.";
+  $("doctor-status").textContent = "Looking for MakeMKV and FFmpeg.";
   $("doctor-list").replaceChildren();
 
   let report;
@@ -484,8 +483,10 @@ async function runDoctor() {
   const problems = (report.checks || []).filter((c) => c.status !== "ok");
 
   if (problems.length === 0) {
-    $("doctor-heading").textContent = "Everything is ready";
-    $("doctor-status").textContent = "MakeMKV, FFmpeg and your disc drive are all set up.";
+    // Deliberately says nothing about the drive: that is live state, shown
+    // on its own card, and a claim made here would go stale immediately.
+    $("doctor-heading").textContent = "Everything is installed";
+    $("doctor-status").textContent = "MakeMKV and FFmpeg are both set up.";
     setTimeout(() => show("doctor", false), 2500);
     return;
   }
