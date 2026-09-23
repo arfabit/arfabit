@@ -80,6 +80,20 @@ func (r *Runner) Current() *Job {
 // Scan reads the disc and builds a Plan, stopping short of doing anything to
 // it. Nothing starts until the user says so (§8).
 func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
+	// One job at a time, for now.
+	//
+	// Replacing a running job would leave it running with its progress
+	// invisible and Stop pointing at the wrong thing — an encode quietly
+	// orphaned mid-film. Refusing is not the eventual answer, since the drive
+	// is free once the disc is out and a second disc could perfectly well be
+	// read while the first is still encoding, but losing track of a job is
+	// worse than waiting.
+	if busy := r.Current(); busy != nil && busy.State == store.StateRunning {
+		return nil, fmt.Errorf(
+			"%s is still being worked on (%s). ARFABIT can only manage one disc at a time for now",
+			busy.Title, strings.ToLower(stageWords(busy.Stage)))
+	}
+
 	// A scan that was never started is finished with rather than left hanging
 	// as though it were still expecting an answer. Reading a disc again is
 	// how somebody says they have changed their mind.
@@ -303,6 +317,16 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	r.Calibration.ObserveRip(job.Drive, disc.Kind(job.DiscKind), job.Plan.SourceSize, time.Since(ripStart))
 	job.Log.Printf(store.StageRip, "Copied to %s.", filepath.Base(job.Master))
 
+	// The disc has nothing left to give: everything from here happens on the
+	// copy. Ejecting now rather than at the end frees the drive for hours,
+	// and the alternative is a disc sitting in a machine that has finished
+	// with it.
+	job.Stage = store.StageEject
+	r.save(job)
+
+	ejected := eject.Eject(ctx, job.Drive)
+	job.Log.Printf(store.StageEject, "%s The rest happens on the copy.", ejected.Describe(true))
+
 	// OCR belongs here. Until it exists, the delivery carries no subtitles and
 	// says so plainly rather than quietly omitting them.
 	job.Stage = store.StageOCR
@@ -328,10 +352,6 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	if err := r.deliver(job, title); err != nil {
 		return r.stop(job, "ARFABIT made the movie but could not put it in your library.", err.Error())
 	}
-
-	job.Stage = store.StageEject
-	result := eject.Eject(ctx, job.Drive)
-	job.Log.Printf(store.StageEject, "%s", result.Describe(true))
 
 	job.State = store.StateDone
 	job.Note = fmt.Sprintf("%s is ready.", job.Title)
@@ -538,6 +558,27 @@ func (r *Runner) ripEstimate(job *Job) time.Duration {
 		return 0
 	}
 	return r.Calibration.EstimateRip(job.Drive, disc.Kind(job.DiscKind), job.Plan.SourceSize).Time
+}
+
+// stageWords names a stage the way the page does, for messages that mention
+// what something is busy with.
+func stageWords(stage store.Stage) string {
+	switch stage {
+	case store.StageScan:
+		return "Reading the disc"
+	case store.StageRip:
+		return "Copying the disc"
+	case store.StageOCR:
+		return "Reading the subtitles"
+	case store.StagePackage:
+		return "Making the movie file"
+	case store.StageDeliver:
+		return "Putting it in your library"
+	case store.StageEject:
+		return "Ejecting the disc"
+	default:
+		return "Working"
+	}
 }
 
 // readFailureNote explains a disc that could not be read.

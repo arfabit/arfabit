@@ -80,10 +80,15 @@ These words are used consistently in code, UI, and logs. No synonyms.
 ### Pipeline stages
 
 ```
-SCAN  →  PLAN  →  RIP  →  OCR  →  PACKAGE  →  DELIVER  →  EJECT
+SCAN  →  PLAN  →  RIP  →  EJECT  →  OCR  →  PACKAGE  →  DELIVER
 ```
 
 Stage names appear verbatim in logs and as filter chips in the UI.
+
+**EJECT comes straight after RIP**, not at the end. Once the Master exists the
+disc has nothing left to give, and everything after it happens on the copy.
+Packaging takes hours; holding the disc through that keeps it for no reason and
+keeps the drive spinning.
 
 ---
 

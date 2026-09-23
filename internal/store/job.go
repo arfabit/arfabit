@@ -22,7 +22,12 @@ const (
 )
 
 // Stages in pipeline order.
-var Stages = []Stage{StageScan, StagePlan, StageRip, StageOCR, StagePackage, StageDeliver, StageEject}
+//
+// Ejecting comes straight after the rip rather than at the end: once the copy
+// exists the disc has nothing left to give, and everything after it happens on
+// the copy. Holding the disc through a two-hour encode would be keeping it for
+// no reason.
+var Stages = []Stage{StageScan, StagePlan, StageRip, StageEject, StageOCR, StagePackage, StageDeliver}
 
 // State is where a job has got to.
 type State string

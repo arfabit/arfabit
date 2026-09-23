@@ -1,10 +1,12 @@
 package pipeline
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -130,5 +132,33 @@ func TestScanLeavesRunningJobsAlone(t *testing.T) {
 
 	if running.State != store.StateRunning {
 		t.Errorf("State = %q; a running job was retired", running.State)
+	}
+}
+
+// Replacing a running job would leave it running with its progress invisible
+// and Stop pointing at the wrong thing.
+func TestScanRefusesWhileAJobIsRunning(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
+	r.SetCurrentForTest(&Job{Job: &store.Job{
+		ID:    "encoding",
+		Title: "Crime 101",
+		State: store.StateRunning,
+		Stage: store.StagePackage,
+	}})
+
+	_, err := r.Scan(context.Background(), disc.Drive{Index: 0})
+	if err == nil {
+		t.Fatal("a second disc was accepted while one was still being worked on")
+	}
+	if !strings.Contains(err.Error(), "Crime 101") {
+		t.Errorf("the message does not say what is busy: %q", err)
+	}
+	if !strings.Contains(err.Error(), "making the movie file") {
+		t.Errorf("the message does not say what it is busy with: %q", err)
+	}
+
+	// The running job is still the current one.
+	if r.Current().ID != "encoding" {
+		t.Error("the running job was replaced")
 	}
 }
