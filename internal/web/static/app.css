@@ -63,7 +63,8 @@ button {
 }
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.primary:disabled { opacity: 0.5; cursor: default; }
+button:disabled { opacity: 0.45; cursor: default; }
+button:disabled:hover { border-color: var(--line); }
 
 .actions { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; }
 

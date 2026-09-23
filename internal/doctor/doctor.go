@@ -64,7 +64,7 @@ func (r Report) Ready() bool {
 }
 
 // Run performs every check.
-func Run(ctx context.Context, cfg config.Config) Report {
+func Run(_ context.Context, cfg config.Config) Report {
 	var r Report
 
 	// Folders first, and deliberately.
@@ -79,8 +79,13 @@ func Run(ctx context.Context, cfg config.Config) Report {
 	r.Checks = append(r.Checks, checkTool("FFmpeg", ffmpeg.Locate, installFFmpeg()))
 	r.Checks = append(r.Checks, checkTool("FFprobe", ffmpeg.LocateProbe, installFFmpeg()))
 	r.Checks = append(r.Checks, checkLicense())
-	r.Checks = append(r.Checks, checkDrives(ctx))
 
+	// The drive is deliberately not checked here.
+	//
+	// ARFABIT watches it continuously and says what it holds on the main
+	// card, which is both live and more useful. Checking it again would
+	// report the same thing twice, once of them out of date, and asking
+	// makemkvcon was also the slowest thing Doctor did.
 	return r
 }
 
@@ -196,46 +201,6 @@ func settingsPath() (string, error) {
 		return filepath.Join(os.Getenv("APPDATA"), "MakeMKV", "settings.conf"), nil
 	default:
 		return filepath.Join(home, ".MakeMKV", "settings.conf"), nil
-	}
-}
-
-// checkDrives looks for an optical drive.
-func checkDrives(ctx context.Context) Check {
-	if _, err := makemkv.Locate(); err != nil {
-		return Check{Name: "Disc drive", Status: StatusWarn, Message: "ARFABIT will look for your drive once MakeMKV is installed."}
-	}
-
-	backend := &makemkv.Backend{Timeout: 60 * time.Second}
-	drives, err := backend.Drives()
-	if err != nil {
-		// No guessed cause: this is one message for several unrelated
-		// situations, and naming the wrong one sends people looking in the
-		// wrong place (§15).
-		return Check{
-			Name:    "Disc drive",
-			Status:  StatusWarn,
-			Message: "ARFABIT could not ask about your drive. Here is exactly what MakeMKV reported.",
-			Fix:     "Things worth checking: the drive is plugged in and powered, and MakeMKV is not open in another window.",
-			Detail:  err.Error(),
-		}
-	}
-	if len(drives) == 0 {
-		return Check{
-			Name:    "Disc drive",
-			Status:  StatusWarn,
-			Message: "No disc drive found.",
-			Fix:     "Plug in a DVD or Blu-ray drive. Some need their own power supply.",
-		}
-	}
-
-	var names []string
-	for _, d := range drives {
-		names = append(names, d.Name)
-	}
-	return Check{
-		Name:    "Disc drive",
-		Status:  StatusOK,
-		Message: fmt.Sprintf("Found %s.", strings.Join(names, ", ")),
 	}
 }
 
