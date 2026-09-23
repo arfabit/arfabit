@@ -131,10 +131,10 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 		t.Error("DTS marked as copyable")
 	}
 
-	// The widest English track wins, because surround is now preserved by
-	// converting rather than being thrown away.
-	if !byIndex[1].Selected {
-		t.Error("the widest English track was not selected")
+	// Nothing surround is ticked by default: stereo is what arrives without
+	// choosing anything. The surround tracks are listed and one click away.
+	if byIndex[1].Selected || byIndex[2].Selected {
+		t.Error("a surround track was selected by default; the default is stereo")
 	}
 
 	// Multichannel first: Apple TV picks the first track it understands.
@@ -459,5 +459,66 @@ func TestSurroundCodecMatchesSourceWidth(t *testing.T) {
 		if tracks[0].Codec != tc.wantCodec {
 			t.Errorf("%d channels converted to %q, want %q", tc.channels, tracks[0].Codec, tc.wantCodec)
 		}
+	}
+}
+
+// Stereo is what arrives without choosing anything, and every surround track
+// is listed beside it so turning one on is a single click.
+func TestDefaultIsStereoWithSurroundOffered(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_TRUEHD", Channels: 8, Lang: "eng"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "eng"},
+		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
+	}}
+
+	tracks := planAudio(title, config.Defaults().Profile)
+
+	var selected, surroundOffered int
+	for _, tr := range tracks {
+		if tr.Selected {
+			selected++
+			if tr.Channels > 2 {
+				t.Errorf("surround track %q is on by default", tr.Label)
+			}
+		}
+		if tr.Channels > 2 {
+			surroundOffered++
+		}
+	}
+
+	if selected != 1 {
+		t.Errorf("%d tracks on by default, want just the stereo one", selected)
+	}
+	if surroundOffered != 2 {
+		t.Errorf("%d surround tracks offered, want both listed", surroundOffered)
+	}
+}
+
+// A disc with no stereo track still delivers one, made from its widest.
+func TestStereoIsMadeWhenTheDiscHasNone(t *testing.T) {
+	title := disc.Title{Streams: []disc.Stream{
+		{Index: 0, Kind: disc.StreamVideo},
+		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 8, Lang: "eng"},
+		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
+	}}
+
+	tracks := planAudio(title, config.Defaults().Profile)
+
+	var made *store.PlannedAudio
+	for i := range tracks {
+		if tracks[i].Stereo {
+			made = &tracks[i]
+		}
+	}
+	if made == nil {
+		t.Fatal("no stereo track was made for a disc that has none")
+	}
+	if !made.Selected {
+		t.Error("the made stereo track is not on by default")
+	}
+	// Made from the English track, not the French one.
+	if made.Lang != "eng" {
+		t.Errorf("stereo was made from the %q track, want eng", made.Lang)
 	}
 }

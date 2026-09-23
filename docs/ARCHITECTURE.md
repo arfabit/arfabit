@@ -380,9 +380,21 @@ without a word — the format allows 7.1, the encoder does not. Verified:
 7.1 source → -c:a aac  → aac,  8 channels, 7.1
 ```
 
-A stereo track is always delivered alongside: a real one from the disc where
-there is one, otherwise a downmix. It is listed last, since Apple TV takes the
-first track it understands.
+**Stereo is the default selection.** It plays on everything, needs no receiver,
+and is the least surprising thing to find on the television. Every surround
+track is listed beside it with what it would become, so turning one on is a
+single click — the Plan shows the choice rather than making it. Where a disc
+carries two stereo tracks with nothing to tell them apart, and one is often a
+commentary, both are kept rather than one chosen wrongly.
+
+A stereo track is always delivered: a real one from the disc where there is one,
+otherwise a downmix made from the widest track in the wanted language.
+
+**On Atmos.** Apple TV+ ships Dolby Atmos as E-AC-3 with Joint Object Coding — a
+5.1 core plus an object substream the receiver renders to whatever speakers are
+present. Discrete 7.1 is effectively a Blu-ray-only format; streaming went 5.1
+then Atmos, which is why ffmpeg's E-AC-3 encoder never implemented 7.1. ARFABIT
+cannot produce Atmos: JOC encoding needs Dolby's licensed tools.
 
 Track order matters: Apple TV selects the first compatible track, so multichannel
 is listed first when present, with the stereo fallback after it.

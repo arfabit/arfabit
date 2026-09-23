@@ -84,18 +84,24 @@ func planAudio(title disc.Title, profile config.Profile) []store.PlannedAudio {
 // so any player and any pair of speakers has something straightforward to use.
 // It goes last, because Apple TV takes the first track it understands.
 func addStereoFallback(tracks []store.PlannedAudio, profile config.Profile) []store.PlannedAudio {
+	primaryLang := ""
+	if len(profile.SubLanguages) > 0 {
+		primaryLang = strings.ToLower(profile.SubLanguages[0])
+	}
+
 	var primary *store.PlannedAudio
 	for i := range tracks {
-		if !tracks[i].Selected {
-			continue
-		}
 		if tracks[i].Channels <= 2 {
-			// A real stereo track is already being kept.
+			// A real stereo track exists, so nothing needs making.
 			return tracks
 		}
-		if primary == nil {
+		inLanguage := primaryLang == "" || strings.EqualFold(tracks[i].Lang, primaryLang)
+		if inLanguage && (primary == nil || tracks[i].Channels > primary.Channels) {
 			primary = &tracks[i]
 		}
+	}
+	if primary == nil && len(tracks) > 0 {
+		primary = &tracks[0]
 	}
 	if primary == nil {
 		return tracks
@@ -197,12 +203,12 @@ func sortByLanguageThenWidth(tracks []store.PlannedAudio, wanted []string) {
 	})
 }
 
-// selectDefaults ticks the tracks a person would most likely want.
+// selectDefaults ticks the tracks a person gets without choosing anything.
 //
-// The widest track in the first wanted language, plus every stereo track in
-// that language. Discs often carry two stereo tracks with nothing to tell them
-// apart — one is frequently a commentary — and since ARFABIT cannot know
-// which is which, it keeps both rather than choosing wrongly.
+// Stereo only, for now. It plays on everything, needs no receiver, and is the
+// least surprising thing to find on the television. Every surround track is
+// listed alongside with what it would become, so turning one on is one click —
+// the Plan shows the choice rather than making it.
 func selectDefaults(tracks []store.PlannedAudio, profile config.Profile) {
 	primaryLang := ""
 	if len(profile.SubLanguages) > 0 {
@@ -213,33 +219,26 @@ func selectDefaults(tracks []store.PlannedAudio, profile config.Profile) {
 		return primaryLang == "" || strings.EqualFold(t.Lang, primaryLang)
 	}
 
-	widest := -1
-	for i, t := range tracks {
-		if !inLanguage(t) {
-			continue
-		}
-		if widest < 0 || t.Channels > tracks[widest].Channels {
-			widest = i
-		}
-	}
-	if widest < 0 {
-		// Nothing in the wanted language, so keep the widest of whatever
-		// there is rather than delivering a silent film.
-		for i, t := range tracks {
-			if widest < 0 || t.Channels > tracks[widest].Channels {
-				widest = i
-			}
-		}
-	}
-	if widest < 0 {
-		return
-	}
-
-	tracks[widest].Selected = true
-
+	// Discs often carry two stereo tracks with nothing to tell them apart —
+	// one is frequently a commentary. ARFABIT cannot know which, so it keeps
+	// both rather than choosing wrongly.
+	var found bool
 	for i := range tracks {
 		if inLanguage(tracks[i]) && tracks[i].Channels <= 2 {
 			tracks[i].Selected = true
+			found = true
+		}
+	}
+	if found {
+		return
+	}
+
+	// Nothing stereo in the wanted language, so fall back to any stereo track
+	// at all before resorting to a downmix.
+	for i := range tracks {
+		if tracks[i].Channels <= 2 {
+			tracks[i].Selected = true
+			return
 		}
 	}
 }
