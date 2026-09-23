@@ -1,0 +1,73 @@
+# ARFABIT settings.
+#
+# Copy this to your settings file and change what you like. Everything here is
+# optional: leaving a line out keeps ARFABIT's own default.
+#
+# Where this file goes:
+#   macOS    ~/Library/Application Support/arfabit/config.local.toml
+#   Windows  %APPDATA%\arfabit\config.local.toml
+#   Linux    ~/.config/arfabit/config.local.toml
+#
+# Settings are read in three layers, each overriding the one before:
+#   1. ARFABIT's built-in defaults
+#   2. config.toml in the data folder, which can live on a NAS and be shared
+#   3. config.local.toml, this file, for whatever is particular to this machine
+#
+# The web page shows which layer each setting came from, so you never have to
+# guess which file to edit.
+
+[node]
+# What this computer is called in the web page.
+name = "living-room-mac"
+
+[paths]
+# Where ARFABIT keeps its own records. Put this on a NAS to share it between
+# computers; each one writes only in its own folder, so they cannot collide.
+# data = "/Volumes/nas/arfabit"
+
+# The untouched copy of the disc. These are large, and ARFABIT never removes
+# them: when you want the space back, drag the folder to the trash yourself.
+masters = "~/Downloads/arfabit/masters"
+
+# The finished movies, named the way Plex, Infuse and Jellyfin expect.
+library = "~/Downloads/arfabit/library"
+
+[server]
+# Where the web page is served. The default listens on every network, so you
+# can open it from any device in the house.
+addr = ":7847"
+
+[profile]
+name = "Archive"
+
+# Picture quality, per kind of disc. Lower numbers mean better quality and
+# bigger files. 20 is close to indistinguishable from the disc; below about 16
+# you are mostly storing the disc's own compression noise.
+crf_uhd = 20
+crf_bluray = 20
+crf_dvd = 18
+
+# How hard the encoder works. Slower is smaller at the same quality.
+# One of: superfast, medium, slow, slower, veryslow
+preset = "slow"
+
+# 4K discs are already in the format an Apple TV wants, so ARFABIT can copy
+# the picture exactly instead of converting it. Much faster, and nothing is
+# lost, but the file stays as large as the disc.
+allow_uhd_copy = true
+
+# Sound that an Apple TV already understands is copied across untouched, which
+# is instant and loses nothing. Everything else is converted.
+copy_native_audio = true
+audio_bitrate = "256k"
+
+# Subtitles. Forced subtitles are the ones that appear on their own when
+# somebody speaks another language.
+include_forced_subs = true
+include_full_subs = true
+sub_languages = ["eng"]
+
+# Ignore anything shorter than this when looking for the movie. Two minutes
+# hides menus and studio logos. Set it lower only if a disc seems to be hiding
+# something.
+min_title_seconds = 120

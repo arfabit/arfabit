@@ -326,6 +326,24 @@ $("log-jump").addEventListener("click", () => {
   $("log").scrollTop = $("log").scrollHeight;
 });
 
+async function loadAutostart() {
+  const status = await fetch("/api/autostart").then((r) => r.json());
+  $("autostart").checked = !!status.enabled;
+  $("autostart-detail").textContent = status.enabled
+    ? `Set up through your computer's ${status.mechanism}.`
+    : "";
+}
+
+$("autostart").addEventListener("change", async (e) => {
+  const status = await post("/api/autostart", { enabled: e.target.checked });
+  if (status) {
+    $("autostart").checked = !!status.enabled;
+    $("autostart-detail").textContent = status.enabled
+      ? `Set up through your computer's ${status.mechanism}.`
+      : "";
+  }
+});
+
 const events = new EventSource("/events");
 events.addEventListener("job", (e) => {
   const job = JSON.parse(e.data);
@@ -335,3 +353,4 @@ events.addEventListener("job", (e) => {
 
 refresh();
 runDoctor();
+loadAutostart();

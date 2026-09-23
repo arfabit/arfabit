@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/autostart"
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
@@ -80,6 +81,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/start", s.handleStart)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("POST /api/plan", s.handleUpdatePlan)
+
+	mux.HandleFunc("GET /api/autostart", s.handleAutostart)
+	mux.HandleFunc("POST /api/autostart", s.handleSetAutostart)
 
 	return mux
 }
@@ -211,6 +215,38 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 
 	_ = s.Store.SaveJob(job.Job)
 	writeJSON(w, job.Plan)
+}
+
+// handleAutostart reports whether ARFABIT starts with the computer.
+func (s *Server) handleAutostart(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, autostart.Current())
+}
+
+// handleSetAutostart turns the startup entry on or off.
+func (s *Server) handleSetAutostart(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that change.", err)
+		return
+	}
+
+	var (
+		status autostart.Status
+		err    error
+	)
+	if req.Enabled {
+		status, err = autostart.Enable()
+	} else {
+		status, err = autostart.Disable()
+	}
+	if err != nil {
+		writeError(w, "ARFABIT could not change the startup setting.", err)
+		return
+	}
+
+	writeJSON(w, status)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

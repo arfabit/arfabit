@@ -1,0 +1,39 @@
+//go:build windows
+
+package autostart
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+)
+
+const taskName = "ARFABIT"
+
+// A Task Scheduler entry rather than a Run-key value: it survives better, can
+// restart after a failure, and is visible somewhere a person can find it.
+func enable(exe string) (Status, error) {
+	cmd := exec.Command("schtasks", "/Create", "/F",
+		"/TN", taskName,
+		"/TR", fmt.Sprintf(`"%s" -no-open`, exe),
+		"/SC", "ONLOGON",
+		"/RL", "LIMITED",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return Status{}, fmt.Errorf("%s", string(out))
+	}
+	return current(), nil
+}
+
+func disable() (Status, error) {
+	cmd := exec.Command("schtasks", "/Delete", "/F", "/TN", taskName)
+	if out, err := cmd.CombinedOutput(); err != nil && !os.IsNotExist(err) {
+		return Status{}, fmt.Errorf("%s", string(out))
+	}
+	return current(), nil
+}
+
+func current() Status {
+	err := exec.Command("schtasks", "/Query", "/TN", taskName).Run()
+	return Status{Enabled: err == nil, Path: taskName, Mechanism: "Task Scheduler at logon"}
+}
