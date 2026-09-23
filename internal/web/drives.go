@@ -42,12 +42,12 @@ func (s *Server) Drives() []disc.Drive {
 // the drive changes.
 func (s *Server) WatchDrives(ctx context.Context) {
 	check := func() {
-		found, err := s.Backend.Drives()
-		if err != nil {
-			// A drive that cannot be asked is reported as no drive rather
-			// than as an error: the page says "no disc drive found", which is
-			// what the person sees anyway.
-			found = nil
+		// Skip a turn rather than queue behind a scan or a rip. Two
+		// makemkvcon processes on one drive drop it out of LibreDrive and
+		// then time out mid-read, which ruins the job in progress.
+		found, ok := s.Backend.DrivesIfFree()
+		if !ok {
+			return
 		}
 
 		s.drives.mu.Lock()

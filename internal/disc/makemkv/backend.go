@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/arfabit/arfabit/internal/disc"
@@ -23,6 +24,15 @@ const DefaultMinLength = 120 * time.Second
 const listDrivesIndex = 9999
 
 // Backend runs makemkvcon.
+//
+// Only one makemkvcon may touch a drive at a time. Two at once drop the drive
+// out of LibreDrive into degraded OS access, and then time out mid-read:
+//
+//	Optical drive "..." opened in OS access mode.
+//	Error 'Scsi error - HARDWARE ERROR:TIMEOUT ON LOGICAL UNIT' ...
+//
+// So every command is serialised here rather than left to callers to
+// co-ordinate, because a caller that forgets corrupts a rip.
 type Backend struct {
 	// Path to makemkvcon. Empty means locate it on first use.
 	Path string
@@ -41,13 +51,49 @@ type Backend struct {
 	// OnMessage receives MakeMKV's messages as they arrive, for live logging.
 	// Optional.
 	OnMessage func(Message)
+
+	// busy serialises access to the drive.
+	busy sync.Mutex
 }
+
+// TryLock takes the drive if nothing else holds it.
+//
+// Used by anything that would rather skip a turn than wait, such as the poll
+// that watches for a disc being put in.
+func (b *Backend) TryLock() bool { return b.busy.TryLock() }
+
+// Unlock releases a drive taken with TryLock.
+func (b *Backend) Unlock() { b.busy.Unlock() }
 
 // Name identifies the backend in logs and the UI.
 func (b *Backend) Name() string { return "MakeMKV" }
 
 // Drives lists the optical drives MakeMKV can see.
 func (b *Backend) Drives() ([]disc.Drive, error) {
+	b.busy.Lock()
+	defer b.busy.Unlock()
+
+	return b.drivesLocked()
+}
+
+// DrivesIfFree lists the drives only when nothing else is using them.
+//
+// Reports ok=false rather than waiting: a poll that queues behind a rip would
+// pile up, and the answer would be stale by the time it arrived.
+func (b *Backend) DrivesIfFree() ([]disc.Drive, bool) {
+	if !b.busy.TryLock() {
+		return nil, false
+	}
+	defer b.busy.Unlock()
+
+	drives, err := b.drivesLocked()
+	if err != nil {
+		return nil, true
+	}
+	return drives, true
+}
+
+func (b *Backend) drivesLocked() ([]disc.Drive, error) {
 	res, err := b.run(context.Background(), "info", fmt.Sprintf("disc:%d", listDrivesIndex))
 
 	// The pseudo-index lists the drives and then tries to open disc 9999,
@@ -71,6 +117,9 @@ func (b *Backend) Scan(driveIndex int) (*disc.Disc, error) {
 // ScanContext is Scan with cancellation, so the UI can stop a scan that is
 // taking too long on a damaged disc.
 func (b *Backend) ScanContext(ctx context.Context, driveIndex int) (*disc.Disc, error) {
+	b.busy.Lock()
+	defer b.busy.Unlock()
+
 	res, err := b.run(ctx, "info", fmt.Sprintf("disc:%d", driveIndex))
 	if err != nil && (res == nil || len(res.Disc.Titles) == 0) {
 		return nil, err

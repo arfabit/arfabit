@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -88,7 +89,11 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 		return nil, err
 	}
 
-	job := &Job{Job: rec, Log: log}
+	// The scan is cancellable from the start. Without this, Stop had nothing
+	// to cancel during a scan and said it was stopping while the drive ground
+	// on for minutes.
+	ctx, cancel := context.WithCancel(ctx)
+	job := &Job{Job: rec, Log: log, cancel: cancel}
 	r.setCurrent(job)
 
 	// Tell the page a disc is being read before doing it, not after.
@@ -98,14 +103,32 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 
 	// MakeMKV talks while it works; passing that through is the difference
 	// between a page that looks busy and one that looks broken.
+	//
+	// OnMessage is shared state, so it is set while holding the drive, which
+	// is the same lock every command takes.
+	if !r.Backend.TryLock() {
+		r.stop(job, "The disc drive is busy. Wait a moment and try again.", "")
+		return job, fmt.Errorf("drive busy")
+	}
 	r.Backend.OnMessage = func(m makemkv.Message) {
 		log.Printf(store.StageScan, "%s", m.Text)
 	}
-	defer func() { r.Backend.OnMessage = nil }()
+	r.Backend.Unlock()
+
+	defer func() {
+		if r.Backend.TryLock() {
+			r.Backend.OnMessage = nil
+			r.Backend.Unlock()
+		}
+	}()
 
 	d, err := r.Backend.ScanContext(ctx, drive.Index)
 	if err != nil {
-		r.stop(job, "ARFABIT could not read this disc.", detailOf(err))
+		if ctx.Err() != nil {
+			r.stop(job, "Stopped at your request.", "")
+			return job, ctx.Err()
+		}
+		r.stop(job, readFailureNote(err), detailOf(err))
 		return job, err
 	}
 
@@ -197,13 +220,34 @@ func (r *Runner) Start(parent context.Context) error {
 }
 
 // Stop halts the job in flight. Nothing already written is removed.
+//
+// Stopping a disc that is being read is not instant: MakeMKV finishes whatever
+// the drive is doing first, which on a disc it is struggling with can take a
+// little while. The message says so rather than implying it has already
+// happened.
 func (r *Runner) Stop() {
 	job := r.Current()
-	if job == nil || job.cancel == nil {
+	if job == nil {
 		return
 	}
-	job.Log.Printf(job.Stage, "Stopping at your request. Nothing already saved has been touched.")
+
+	if job.cancel == nil {
+		// Nothing is running, so there is nothing to interrupt.
+		job.State = store.StateStopped
+		job.Note = "Stopped."
+		r.save(job)
+		return
+	}
+
+	job.Log.Printf(job.Stage,
+		"Stopping at your request. The drive may take a moment to finish what it is doing. Nothing already saved has been touched.")
 	job.cancel()
+
+	job.State = store.StateStopped
+	if job.Note == "" {
+		job.Note = "Stopped at your request."
+	}
+	r.save(job)
 }
 
 // run carries the job through the remaining stages.
@@ -460,6 +504,26 @@ func (r *Runner) hasSelectedSubtitles(job *Job) bool {
 		}
 	}
 	return false
+}
+
+// readFailureNote explains a disc that could not be read.
+//
+// Only one thing is said with any confidence, and only on a signature seen in
+// practice: repeated SCSI timeouts mean the drive gave up on the disc, which
+// is a physical problem a person can act on. Everything else gets the plain
+// statement and the raw output (§15).
+func readFailureNote(err error) string {
+	var mkErr *makemkv.Error
+	if errors.As(err, &mkErr) {
+		for _, m := range mkErr.Messages {
+			if strings.Contains(m.Text, "TIMEOUT ON LOGICAL UNIT") {
+				return "The drive could not read part of this disc. " +
+					"Discs that are dirty or scratched often do this, and so do drives that are not getting enough power. " +
+					"Wiping the disc and trying again is usually worth a go."
+			}
+		}
+	}
+	return "ARFABIT did not finish reading this disc."
 }
 
 // stop ends a job without describing it as a failure, and keeps the raw

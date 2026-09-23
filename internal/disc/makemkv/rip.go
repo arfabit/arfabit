@@ -60,6 +60,9 @@ func (b *Backend) Rip(ctx context.Context, req RipRequest) (*RipResult, error) {
 		return nil, &Error{Op: "prepare output directory", Err: err}
 	}
 
+	b.busy.Lock()
+	defer b.busy.Unlock()
+
 	if len(req.Titles) > 1 {
 		combined := &RipResult{}
 		for _, title := range req.Titles {
