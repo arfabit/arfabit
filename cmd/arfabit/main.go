@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -100,9 +101,13 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	// Stopping from the page matters for anyone whose computer starts ARFABIT
 	// on its own: they have no terminal to press Ctrl+C in.
+	// One shutdown, one announcement. The reason is carried to the single
+	// place that prints it, rather than announced here and again below.
 	quit := make(chan struct{})
+	var quitReason atomic.Pointer[string]
+
 	server.Quit = func(reason string) {
-		fmt.Printf("\nStopping: %s.\n", reason)
+		quitReason.CompareAndSwap(nil, &reason)
 		close(quit)
 	}
 
@@ -181,7 +186,11 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	case <-ctx.Done():
 	}
 
-	fmt.Println("\nStopping.")
+	if reason := quitReason.Load(); reason != nil {
+		fmt.Printf("\nStopping: %s.\n", *reason)
+	} else {
+		fmt.Println("\nStopping.")
+	}
 	saveCalibration(st, cfg.Node.ID, calibration)
 
 	// Pages hold their update connection open for as long as they are on
