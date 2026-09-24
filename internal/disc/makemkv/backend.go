@@ -56,6 +56,28 @@ type Backend struct {
 
 	// busy serialises access to the drive.
 	busy sync.Mutex
+
+	// lastAccess is the mode the most recent real scan used, which is the
+	// only place it can be learned.
+	lastAccess        Access
+	lastLibreDriveVer string
+}
+
+// LastAccess reports the mode the most recent scan used, and whether one has
+// happened at all.
+func (b *Backend) LastAccess() (Access, string, bool) {
+	b.busy.Lock()
+	defer b.busy.Unlock()
+
+	return b.lastAccessLocked()
+}
+
+// lastAccessLocked is LastAccess for callers already holding the drive.
+func (b *Backend) lastAccessLocked() (Access, string, bool) {
+	if b.lastAccess == "" {
+		return AccessUnknown, "", false
+	}
+	return b.lastAccess, b.lastLibreDriveVer, true
 }
 
 // Name identifies the backend in logs and the UI.
@@ -137,6 +159,12 @@ func (b *Backend) ScanWithMessages(ctx context.Context, driveIndex int, onMessag
 			Err:      errNoTitles,
 			Messages: res.Messages,
 		}
+	}
+
+	// A real scan is the only thing that reveals how the drive is being
+	// reached, so the answer is kept for the drive report to use later.
+	if access, version := AccessFrom(res.Messages); access != AccessUnknown {
+		b.lastAccess, b.lastLibreDriveVer = access, version
 	}
 
 	if hasCode(res.Messages, msgOSAccessMode) && onMessage != nil {

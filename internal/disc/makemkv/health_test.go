@@ -17,8 +17,8 @@ func TestAccessModeIsExplainedInTermsOfTime(t *testing.T) {
 	if !strings.Contains(explanation, "hours") {
 		t.Errorf("the explanation does not say what it costs: %q", explanation)
 	}
-	if !strings.Contains(explanation, "Closing other programs") {
-		t.Errorf("the explanation suggests nothing to try: %q", explanation)
+	if !strings.Contains(explanation, "holding the disc open") {
+		t.Errorf("the explanation does not name the usual cause: %q", explanation)
 	}
 
 	fast := Health{Access: AccessLibreDrive, LibreDrive: "v06.3"}
@@ -36,7 +36,9 @@ func TestUnknownAccessSaysSo(t *testing.T) {
 	if h.Fast() {
 		t.Error("an unknown access mode was treated as fast")
 	}
-	if !strings.Contains(h.Explain(), "could not tell") {
+	// Not knowing is its own answer, and it says why: the mode is only
+	// reported once a disc has actually been read.
+	if !strings.Contains(h.Explain(), "once a disc has been read") {
 		t.Errorf("an unknown mode was described as something: %q", h.Explain())
 	}
 }
@@ -76,5 +78,32 @@ func TestReadSpeedDescribesTheWait(t *testing.T) {
 func TestReadSpeedWithNoMeasurement(t *testing.T) {
 	if got := (ReadSpeed{}).Describe(1000); !strings.Contains(got, "could not measure") {
 		t.Errorf("an unmeasured speed claimed something: %q", got)
+	}
+}
+
+// Listing drives does not open a disc, and MakeMKV names the mode only when it
+// has. Reading the enumeration's "OS access mode" line as the read mode said
+// "slow" even when reading was fast.
+func TestAccessComesFromARealScan(t *testing.T) {
+	enumeration := []Message{
+		{Code: msgVersion, Text: "MakeMKV started"},
+		{Code: msgOSAccessMode, Text: `Optical drive "BD-RE" opened in OS access mode.`},
+	}
+	realScan := append(append([]Message{}, enumeration...),
+		Message{Code: msgLibreDrive, Text: "Using LibreDrive mode (v06.3 id=866A98CB9C4E)"})
+
+	// Both lines appear in a fast scan; LibreDrive is the one that counts.
+	if access, version := AccessFrom(realScan); access != AccessLibreDrive || version != "v06.3" {
+		t.Errorf("a LibreDrive scan read as %q %q", access, version)
+	}
+
+	// Enumeration alone genuinely says OS mode, which is why it must not be
+	// mistaken for the read mode.
+	if access, _ := AccessFrom(enumeration); access != AccessOS {
+		t.Errorf("enumeration read as %q", access)
+	}
+
+	if access, _ := AccessFrom(nil); access != AccessUnknown {
+		t.Errorf("nothing at all read as %q, want unknown", access)
 	}
 }

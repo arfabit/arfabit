@@ -52,16 +52,35 @@ func (h Health) Explain() string {
 			h.LibreDrive)
 
 	case AccessOS:
-		return "This drive is being reached through macOS rather than directly, which limits an encrypted disc to about the speed it would play at — a film can take hours rather than tens of minutes. " +
-			"Drives vary in whether they support the direct mode, and some need particular firmware. Closing other programs that use the drive is worth trying first."
+		return "The last disc was read through macOS rather than directly, which limits an encrypted disc to about the speed it would play at — a film can take hours rather than tens of minutes. " +
+			"The usual cause is your computer holding the disc open, which the button below releases."
 
 	default:
-		return "ARFABIT could not tell how it is reaching this drive."
+		return "How fast this drive reads is only known once a disc has been read: MakeMKV reports it then and not before."
 	}
 }
 
 // Fast reports whether the drive is in the mode that reads quickly.
 func (h Health) Fast() bool { return h.Access == AccessLibreDrive }
+
+// AccessFrom works out which mode a real scan used.
+//
+// This is the only reliable source: MakeMKV names the mode when it opens a
+// disc, not when it lists drives.
+func AccessFrom(messages []Message) (Access, string) {
+	access, version := AccessUnknown, ""
+
+	for _, m := range messages {
+		switch {
+		case m.Code == msgLibreDrive:
+			access = AccessLibreDrive
+			version = libreDriveVersion(m.Text)
+		case m.Code == msgOSAccessMode && access != AccessLibreDrive:
+			access = AccessOS
+		}
+	}
+	return access, version
+}
 
 // CheckHealth asks the drive how it is being reached.
 //
@@ -76,15 +95,14 @@ func (b *Backend) CheckHealth(ctx context.Context) ([]Health, error) {
 		return nil, err
 	}
 
+	// Listing drives does not open a disc, and MakeMKV only says which mode it
+	// is using once it has. The "opened in OS access mode" line it prints
+	// while enumerating is about the enumeration, not about reading, and
+	// reporting it as the read mode said "slow" even when reading was fast.
 	access, version := AccessUnknown, ""
-	for _, m := range res.Messages {
-		switch {
-		case m.Code == msgLibreDrive:
-			access = AccessLibreDrive
-			version = libreDriveVersion(m.Text)
-		case m.Code == msgOSAccessMode && access != AccessLibreDrive:
-			access = AccessOS
-		}
+
+	if seen, seenVersion, ok := b.lastAccessLocked(); ok {
+		access, version = seen, seenVersion
 	}
 
 	health := make([]Health, 0, len(res.Drives))
