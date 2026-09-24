@@ -20,6 +20,7 @@ let drives = [];
 let driveBusy = "";
 let activeJobs = [];
 let queueFilter = "all";
+let focusedJob = "";
 let clockTimer = null;
 
 // --- problems the page cannot hide --------------------------------------
@@ -73,6 +74,8 @@ function languageName(code) {
 
 function stageWords(stage) {
   return {
+    LAB: "Making test clips",
+    QUEUED: "Waiting its turn",
     SCAN: "Reading the disc",
     PLAN: "Working out what to do",
     RIP: "Copying the disc",
@@ -160,7 +163,8 @@ function showNotice(problem) {
 function logLine(entry) {
   const line = document.createElement("div");
   line.className = "line";
-  line.dataset.text = `${entry.stage} ${entry.text}`.toLowerCase();
+  line.dataset.text = `${entry.disc || ""} ${entry.stage} ${entry.text}`.toLowerCase();
+  line.dataset.job = entry.job || "";
 
   const when = document.createElement("span");
   when.className = "when";
@@ -170,11 +174,16 @@ function logLine(entry) {
   stage.className = "stage";
   stage.textContent = entry.stage;
 
+  // Which disc this line is about, shown only when several are in flight.
+  const disc = document.createElement("span");
+  disc.className = "disc";
+  disc.textContent = entry.disc || "";
+
   const text = document.createElement("span");
   text.className = "text";
   text.textContent = entry.text;
 
-  line.append(when, stage, text);
+  line.append(when, stage, disc, text);
 
   if (!entry.detail) return line;
 
@@ -195,9 +204,35 @@ function logLine(entry) {
 
 function applyFilter() {
   const term = $("log-filter").value.trim().toLowerCase();
+
   for (const line of $("log").querySelectorAll(".line")) {
-    line.style.display = !term || line.dataset.text.includes(term) ? "" : "none";
+    const matchesText = !term || line.dataset.text.includes(term);
+    const matchesJob = !focusedJob || line.dataset.job === focusedJob;
+    line.style.display = matchesText && matchesJob ? "" : "none";
   }
+
+  // The disc column is noise when there is only one disc to speak of.
+  const several = new Set(
+    [...$("log").querySelectorAll(".line")].map((l) => l.dataset.job)
+  ).size > 1;
+  $("log").classList.toggle("several-discs", several && !focusedJob);
+
+  $("log-scope").textContent = focusedJob
+    ? `Showing one disc only. Click it again in the queue to see everything.`
+    : "";
+}
+
+// focusJob narrows the log to one disc, or widens it again.
+//
+// Clicking the disc you are watching is how you say "just this one"; clicking
+// it again is how you take that back.
+function focusJob(id) {
+  focusedJob = focusedJob === id ? "" : id;
+
+  for (const card of $("working-list").children) {
+    card.classList.toggle("focused", card.dataset.job === focusedJob);
+  }
+  applyFilter();
 }
 
 function appendLog(entries) {
@@ -207,8 +242,11 @@ function appendLog(entries) {
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
 
   for (const entry of entries) {
-    if (seenLogIds.has(entry.id)) continue;
-    seenLogIds.add(entry.id);
+    // Line numbers restart with each disc, so the disc is part of the
+    // identity. Without it, three discs at once would hide each other's lines.
+    const key = `${entry.job}:${entry.id}`;
+    if (seenLogIds.has(key)) continue;
+    seenLogIds.add(key);
     box.append(logLine(entry));
   }
 
@@ -472,9 +510,14 @@ function elapsedSince(when) {
 //
 // More than one is ordinary: a film being converted has finished with the
 // drive, so the next disc can be going in while it runs.
-// kindOf groups a job by what it is waiting on, which is what somebody
-// filtering the queue actually cares about.
+// kindOf groups a job for the queue filter.
+//
+// Test clips are their own kind. A disc is reading while it needs the drive
+// and converting once it does not, which is the distinction somebody filtering
+// the queue actually cares about.
 function kindOf(job) {
+  if (job.kind === "lab") return "lab";
+
   switch (job.stage) {
     case "SCAN":
     case "PLAN":
@@ -519,11 +562,13 @@ function renderActive(jobs) {
 function queueSummary(jobs) {
   const reading = jobs.filter((j) => kindOf(j) === "rip").length;
   const converting = jobs.filter((j) => j.stage === "PACKAGE").length;
+  const clips = jobs.filter((j) => j.stage === "LAB").length;
   const waiting = jobs.filter((j) => j.stage === "QUEUED").length;
 
   const parts = [];
   if (reading) parts.push(`${reading} disc${reading === 1 ? "" : "s"} being read`);
   if (converting) parts.push(`${converting} converting`);
+  if (clips) parts.push(`${clips} making test clips`);
   if (waiting) parts.push(`${waiting} waiting their turn`);
 
   return parts.length ? parts.join(" · ") : "";
@@ -537,6 +582,13 @@ function jobCard(job) {
   const title = document.createElement("h2");
   title.className = "job-title";
   card.append(title);
+
+  // Clicking the card narrows the log to this disc, and clicking it again
+  // widens it back out.
+  card.addEventListener("click", (e) => {
+    if (e.target.tagName === "BUTTON") return;
+    focusJob(job.id);
+  });
 
   const stage = document.createElement("div");
   stage.className = "stage";
@@ -573,6 +625,11 @@ function jobCard(job) {
 function updateJobCard(job) {
   const card = $("working-list").querySelector(`[data-job="${CSS.escape(job.id)}"]`);
   if (!card) return;
+
+  // A finished lab run has a comparison worth showing.
+  if (job.comparison && job.comparison.clips) {
+    renderLabResults(job.comparison);
+  }
 
   card.querySelector(".job-title").textContent = job.title || job.disc_name || "A disc";
   card.querySelector(".stage").textContent = stageWords(job.stage);
@@ -1150,33 +1207,6 @@ function connect() {
   events.addEventListener("log", (e) => appendLog([JSON.parse(e.data)]));
   events.addEventListener("index", (e) => renderIndexStatus(JSON.parse(e.data)));
 
-  events.addEventListener("lab", (e) => {
-    const status = JSON.parse(e.data);
-
-    if (status.state === "queued") {
-      $("lab-status").textContent =
-        "Waiting its turn: something else is converting. The clips will start when it finishes.";
-      return;
-    }
-    if (status.state === "working") {
-      $("lab-status").textContent = "Making the clips\u2026";
-      return;
-    }
-    if (status.state === "clip") {
-      $("lab-status").textContent = `Finished ${status.clip.name}\u2026`;
-      return;
-    }
-
-    $("lab-run").disabled = false;
-
-    if (status.state === "done") {
-      $("lab-status").textContent = "Finished.";
-      renderLabResults(status.comparison);
-      loadLabClips();
-      return;
-    }
-    $("lab-status").textContent = `The clips could not be made. ${status.detail || ""}`;
-  });
   events.addEventListener("drives", (e) => {
     const list = JSON.parse(e.data);
     // Only redraw the idle card when nothing is in progress.

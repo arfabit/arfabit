@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -55,8 +56,10 @@ type Server struct {
 	// building guards the film list download, and lab guards the clip
 	// renderer. A button can be clicked twice; the server is where "once" has
 	// to be true.
+	// A button can be clicked twice; the server is where "once" has to be
+	// true. Lab runs need no such guard: they are jobs, and the queue decides
+	// when they run.
 	building atomic.Bool
-	lab      atomic.Bool
 }
 
 // New prepares the server.
@@ -217,12 +220,29 @@ func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
 // ones without redrawing — which is what keeps a search or a text selection
 // from being thrown away (§14).
 func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
-	job := s.Runner.Current()
-	if job == nil || job.Log == nil {
-		writeJSON(w, []pipeline.Entry{})
-		return
+	// Every disc being worked on, merged and in time order. Showing one job's
+	// log while three are running would hide two of them.
+	jobs := s.Runner.Active()
+	if pending := s.Runner.Current(); pending != nil {
+		jobs = append(jobs, pending)
 	}
-	writeJSON(w, job.Log.Entries())
+
+	seen := map[string]bool{}
+	entries := []pipeline.Entry{}
+
+	for _, job := range jobs {
+		if job == nil || job.Log == nil || seen[job.ID] {
+			continue
+		}
+		seen[job.ID] = true
+		entries = append(entries, job.Log.Entries()...)
+	}
+
+	sort.SliceStable(entries, func(a, b int) bool {
+		return entries[a].Time.Before(entries[b].Time)
+	})
+
+	writeJSON(w, entries)
 }
 
 func (s *Server) handleScan(w http.ResponseWriter, r *http.Request) {

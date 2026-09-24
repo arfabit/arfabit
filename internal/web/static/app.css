@@ -196,3 +196,11 @@ table.results tr.best td { font-weight: 600; }
 
 .drive-fast { color: var(--ok); }
 .drive-slow { color: var(--warn); }
+
+/* Which disc a line belongs to, shown only when several are in flight. */
+.log .disc { display: none; flex: none; width: 10rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log.several-discs .disc { display: inline-block; }
+
+/* The disc whose log is being shown on its own. */
+.job-card { cursor: pointer; }
+.job-card.focused { border-color: var(--accent); }

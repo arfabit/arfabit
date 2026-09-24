@@ -21,6 +21,10 @@ const (
 	// person watching deserves to know which.
 	StageQueued Stage = "QUEUED"
 
+	// StageLab is rendering test clips, which is work of the same kind as
+	// packaging and queues alongside it.
+	StageLab Stage = "LAB"
+
 	StagePackage Stage = "PACKAGE"
 	StageDeliver Stage = "DELIVER"
 	StageEject   Stage = "EJECT"
@@ -49,10 +53,24 @@ const (
 	StateStopped State = "stopped"
 )
 
-// Job is one disc's trip through the pipeline.
+// Kind says what a job is. Everything in the queue is one of these, so that
+// one list can show everything the machine is doing.
+type Kind string
+
+const (
+	// KindDisc is a disc on its way to becoming a film.
+	KindDisc Kind = "disc"
+
+	// KindLab is a set of test clips rendered from a copy.
+	KindLab Kind = "lab"
+)
+
+// Job is one piece of work: a disc on its way through the pipeline, or a set
+// of test clips.
 type Job struct {
 	ID   string `json:"id"`
 	Node string `json:"node"`
+	Kind Kind   `json:"kind"`
 
 	Started time.Time `json:"started"`
 	Updated time.Time `json:"updated"`
@@ -159,10 +177,24 @@ type PlannedSubtitle struct {
 func NewJob(id string) *Job {
 	return &Job{
 		ID:      id,
+		Kind:    KindDisc,
 		Started: time.Now(),
 		Updated: time.Now(),
 		State:   StateRunning,
 		Stage:   StageScan,
+	}
+}
+
+// NewLabJob starts a job for a set of test clips.
+func NewLabJob(id, film string) *Job {
+	return &Job{
+		ID:      id,
+		Kind:    KindLab,
+		Title:   film,
+		Started: time.Now(),
+		Updated: time.Now(),
+		State:   StateRunning,
+		Stage:   StageLab,
 	}
 }
 

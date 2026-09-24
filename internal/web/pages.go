@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/arfabit/arfabit/internal/drive"
-	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/lab"
+	"github.com/arfabit/arfabit/internal/pipeline"
 )
 
 // handleDriveHealth reports how the drive is being reached and how fast it has
@@ -231,8 +231,11 @@ func editionOf(name string) string {
 	return tag
 }
 
-// handleLab renders clips under several settings so a quality can be chosen by
-// watching rather than guessing.
+// handleLab puts a set of test clips in the queue.
+//
+// The work itself belongs to the runner, so that a lab run is a job like any
+// other: it waits its turn at the processor, keeps a log, can be stopped, and
+// shows up in the queue beside the discs.
 func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Master   string     `json:"master"`
@@ -245,64 +248,27 @@ func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
-	if req.Master == "" || len(req.Settings) == 0 {
-		writeError(w, "The lab needs a copy to work from and something to try.", nil)
+
+	job, err := s.Runner.StartLab(context.Background(), pipeline.LabRequest{
+		Master:    req.Master,
+		Film:      req.Film,
+		At:        time.Duration(req.At * float64(time.Second)),
+		Length:    time.Duration(req.Length * float64(time.Second)),
+		Settings:  req.Settings,
+		OutputDir: s.Config.Paths.Lab,
+	})
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
 		return
 	}
 
-	if !s.lab.CompareAndSwap(false, true) {
-		writeError(w, "The lab is already making clips.", nil)
-		return
+	writeJSON(w, map[string]string{"job": job.ID})
+}
+
+// capitalise makes a sentence of a message that was written as a fragment.
+func capitalise(s string) string {
+	if s == "" {
+		return s
 	}
-
-	go func() {
-		defer s.lab.Store(false)
-
-		// Lab clips are the same work as packaging a film, so they queue
-		// behind it rather than competing with it for the same cores.
-		if slots := s.Runner.Slots; slots != nil {
-			if running, _ := slots.Busy(); running > 0 {
-				s.events.send("lab", map[string]any{"state": "queued"})
-			}
-			if err := slots.Take(context.Background()); err != nil {
-				s.events.send("lab", map[string]any{"state": "stopped", "detail": err.Error()})
-				return
-			}
-			defer slots.Give()
-		}
-
-		outDir := s.Config.Paths.Lab
-		s.events.send("lab", map[string]any{"state": "working"})
-
-		clips, err := lab.Run(context.Background(), lab.Request{
-			Master:    req.Master,
-			Film:      req.Film,
-			At:        time.Duration(req.At * float64(time.Second)),
-			Length:    time.Duration(req.Length * float64(time.Second)),
-			Settings:  req.Settings,
-			OutputDir: outDir,
-			OnClip: func(clip lab.Clip) {
-				s.events.send("lab", map[string]any{"state": "clip", "clip": clip})
-			},
-		})
-		if err != nil {
-			s.events.send("lab", map[string]any{"state": "stopped", "detail": err.Error()})
-			return
-		}
-
-		// The whole film's length is what makes a clip's numbers mean
-		// something.
-		filmLength := time.Duration(0)
-		if info, err := ffmpeg.Probe(context.Background(), req.Master); err == nil {
-			filmLength = time.Duration(info.Duration * float64(time.Second))
-		}
-
-		s.events.send("lab", map[string]any{
-			"state":      "done",
-			"comparison": lab.Compare(clips, time.Duration(req.Length*float64(time.Second)), filmLength),
-			"folder":     outDir,
-		})
-	}()
-
-	writeJSON(w, map[string]string{"state": "working"})
+	return strings.ToUpper(s[:1]) + s[1:]
 }

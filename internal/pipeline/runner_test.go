@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
+	"github.com/arfabit/arfabit/internal/lab"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -354,5 +356,62 @@ func TestQueuedJobDoesNotHoldTheDrive(t *testing.T) {
 func TestQueuedStageIsNamedPlainly(t *testing.T) {
 	if got := stageWords(store.StageQueued); got != "Waiting its turn" {
 		t.Errorf("stageWords(QUEUED) = %q", got)
+	}
+}
+
+// A lab run is work like any other: it belongs in the queue, waits its turn at
+// the processor, and keeps a log. The alternative is two of everything and a
+// page that tells two stories.
+func TestLabRunIsAJob(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	job, err := r.StartLab(context.Background(), LabRequest{
+		Master:    "/nowhere/master.mkv",
+		Film:      "Crime 101 (2025)",
+		At:        10 * time.Minute,
+		Length:    30 * time.Second,
+		Settings:  []lab.Clip{{Name: "crf20-slow"}},
+		OutputDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if job.Kind != store.KindLab {
+		t.Errorf("Kind = %q, want %q", job.Kind, store.KindLab)
+	}
+	if job.Log == nil {
+		t.Error("a lab run has no log")
+	}
+	if job.Title != "Crime 101 (2025)" {
+		t.Errorf("Title = %q", job.Title)
+	}
+
+	// It is in the queue, not off to one side.
+	var found bool
+	for _, active := range r.Active() {
+		if active.ID == job.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the lab run is not in the queue")
+	}
+
+	// And it does not hold the drive: clips are made from a copy.
+	if busy := r.DriveIsBusy(); busy != nil {
+		t.Errorf("a lab run is holding the drive: %s", busy.Title)
+	}
+}
+
+// Nothing to work from is refused plainly rather than queued to fail later.
+func TestLabRunNeedsSomethingToDo(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	if _, err := r.StartLab(context.Background(), LabRequest{Film: "x"}); err == nil {
+		t.Error("a lab run with no copy was accepted")
+	}
+	if _, err := r.StartLab(context.Background(), LabRequest{Master: "/m.mkv"}); err == nil {
+		t.Error("a lab run with nothing to try was accepted")
 	}
 }

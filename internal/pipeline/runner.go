@@ -16,6 +16,7 @@ import (
 	"github.com/arfabit/arfabit/internal/drive"
 	"github.com/arfabit/arfabit/internal/eject"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
+	"github.com/arfabit/arfabit/internal/lab"
 	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -57,7 +58,11 @@ type Job struct {
 	Log      *Log     `json:"-"`
 	Progress Progress `json:"progress"`
 	Space    Space    `json:"space"`
-	cancel   context.CancelFunc
+
+	// Comparison is what a set of test clips came to, for lab jobs.
+	Comparison lab.Comparison `json:"comparison,omitempty"`
+
+	cancel context.CancelFunc
 }
 
 // Progress is how far the current stage has got.
@@ -187,6 +192,8 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	// to cancel during a scan and said it was stopping while the drive ground
 	// on for minutes.
 	ctx, cancel := context.WithCancel(ctx)
+	log.Describe(rec.ID, rec.DiscLabel)
+
 	job := &Job{Job: rec, Log: log, cancel: cancel}
 	r.setPending(job)
 
@@ -243,6 +250,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	rec.Stage = store.StagePlan
 	rec.State = store.StateWaiting
 	rec.Title = titleFrom(d)
+	log.Describe(rec.ID, rec.Title)
 
 	// The offline list confirms the name and supplies the year, which no disc
 	// label carries. The best match is offered, never applied silently: the

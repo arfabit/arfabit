@@ -20,6 +20,12 @@ type Entry struct {
 	Stage store.Stage `json:"stage"`
 	Text  string      `json:"text"`
 
+	// Job and Disc say which disc a line belongs to. With several discs going
+	// at once a stream of untagged lines is unreadable, which is exactly the
+	// thing this project exists to do better.
+	Job  string `json:"job"`
+	Disc string `json:"disc,omitempty"`
+
 	// Detail is raw output shown only on request, never summarised (§15).
 	Detail string `json:"detail,omitempty"`
 }
@@ -31,6 +37,25 @@ type Log struct {
 	entries []Entry
 	nextID  int64
 	watcher func(Entry)
+
+	job  string
+	disc string
+}
+
+// Describe says which disc this log belongs to, so its lines can be told apart
+// from another disc's.
+func (l *Log) Describe(job, disc string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	l.job, l.disc = job, disc
+
+	// Lines written before the disc had a name are labelled retrospectively,
+	// since they belong to it just as much.
+	for i := range l.entries {
+		l.entries[i].Job = job
+		l.entries[i].Disc = disc
+	}
 }
 
 // maxKeptEntries bounds what is held for the web view. The file on disk keeps
@@ -63,7 +88,15 @@ func (l *Log) add(stage store.Stage, text, detail string) {
 	l.mu.Lock()
 
 	l.nextID++
-	e := Entry{ID: l.nextID, Time: time.Now(), Stage: stage, Text: text, Detail: detail}
+	e := Entry{
+		ID:     l.nextID,
+		Time:   time.Now(),
+		Stage:  stage,
+		Text:   text,
+		Detail: detail,
+		Job:    l.job,
+		Disc:   l.disc,
+	}
 
 	l.entries = append(l.entries, e)
 	if len(l.entries) > maxKeptEntries {
