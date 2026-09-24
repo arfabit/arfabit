@@ -81,8 +81,17 @@ type Request struct {
 	// Settings are what to try.
 	Settings []Clip
 
-	// OutputDir receives the clips.
+	// Film is the movie's name, which becomes both the folder and the stem of
+	// every clip in it, so a media manager recognises them all as the same
+	// film.
+	Film string
+
+	// OutputDir is the lab folder. Clips go into a folder per film inside it.
 	OutputDir string
+
+	// Run numbers this batch. Clips from one run share a number, which is how
+	// a comparison stays recognisable weeks later.
+	Run int
 
 	// OnClip is called as each clip finishes, so the page fills in rather
 	// than waiting for the whole set.
@@ -114,8 +123,19 @@ func Run(ctx context.Context, req Request) ([]Clip, error) {
 	if req.Length <= 0 {
 		req.Length = 30 * time.Second
 	}
-	if err := os.MkdirAll(req.OutputDir, 0o755); err != nil {
+	if req.Film == "" {
+		req.Film = strings.TrimSuffix(filepath.Base(req.Master), filepath.Ext(req.Master))
+	}
+
+	// A folder per film, as elsewhere, so a media manager pointed at the lab
+	// sees films rather than a heap of clips.
+	filmDir := filepath.Join(req.OutputDir, req.Film)
+	if err := os.MkdirAll(filmDir, 0o755); err != nil {
 		return nil, err
+	}
+
+	if req.Run == 0 {
+		req.Run = NextRun(filmDir)
 	}
 
 	info, err := ffmpeg.Probe(ctx, req.Master)
@@ -143,7 +163,7 @@ func Run(ctx context.Context, req Request) ([]Clip, error) {
 
 // render makes one clip.
 func render(ctx context.Context, req Request, setting Clip, video *ffmpeg.Stream) Clip {
-	setting.Path = filepath.Join(req.OutputDir, ClipName(req.Master, setting.Name, req.At))
+	setting.Path = filepath.Join(req.OutputDir, req.Film, ClipName(req.Film, req.Run, setting.Name, req.At))
 
 	args := clipArgs(req, setting, video)
 
@@ -317,22 +337,71 @@ func Compare(clips []Clip, clipLength, filmLength time.Duration) Comparison {
 	return c
 }
 
-// ClipName names a clip so that a folder of them can be read at a glance.
+// ClipName names a clip the way the library names a film, with the setting as
+// the edition.
 //
-// These files are meant to be carried to a television and watched, so the name
-// has to say which film, which setting and which moment without anybody having
-// to remember.
-func ClipName(master, setting string, at time.Duration) string {
-	film := strings.TrimSuffix(filepath.Base(master), filepath.Ext(master))
+// The shape is deliberate: a media manager pointed at the lab folder sees one
+// film with several editions and will play them one after another, which is
+// exactly what comparing them means. The run number keeps one afternoon's
+// comparison together and separate from the next.
+//
+//	Crime 101 (2025) {edition-Lab 001 - crf20-medium - 1h15m20s}.mp4
+func ClipName(film string, run int, setting string, at time.Duration) string {
 	if film == "" {
-		film = "clip"
+		film = "Clip"
 	}
 
-	return fmt.Sprintf("%s - %s - at %s.mp4",
+	return fmt.Sprintf("%s {edition-%s}.mp4",
 		trimName(film, 60),
-		setting,
-		timestamp(at),
+		editionTag(run, setting, at),
 	)
+}
+
+// editionTag is what a media manager shows as the edition name.
+//
+// Braces would close the tag early and are removed; everything else is left
+// readable, because this is the label somebody picks from on a television.
+func editionTag(run int, setting string, at time.Duration) string {
+	tag := fmt.Sprintf("Lab %03d - %s - %s", run, setting, timestamp(at))
+	return strings.NewReplacer("{", "", "}", "").Replace(tag)
+}
+
+// NextRun works out which run this is, by looking at what is already there.
+//
+// The folder is the record, so a run number survives restarts and picks up
+// where it left off rather than starting again at one.
+func NextRun(filmDir string) int {
+	entries, err := os.ReadDir(filmDir)
+	if err != nil {
+		return 1
+	}
+
+	highest := 0
+	for _, e := range entries {
+		var run int
+		if _, err := fmt.Sscanf(runNumberIn(e.Name()), "%d", &run); err != nil {
+			continue
+		}
+		if run > highest {
+			highest = run
+		}
+	}
+	return highest + 1
+}
+
+// runNumberIn pulls "001" out of "... {edition-Lab 001 - ...}.mp4".
+func runNumberIn(name string) string {
+	const marker = "{edition-Lab "
+	start := strings.Index(name, marker)
+	if start < 0 {
+		return ""
+	}
+
+	rest := name[start+len(marker):]
+	if space := strings.IndexAny(rest, " -}"); space >= 0 {
+		rest = rest[:space]
+	}
+	return rest
 }
 
 // timestamp renders a position as something that sorts and reads properly.

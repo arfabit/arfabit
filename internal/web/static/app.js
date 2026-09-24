@@ -758,6 +758,7 @@ async function loadMasters() {
 
   select.replaceChildren(...masters.map((m) => {
     const option = new Option(`${m.title} (${bytes(m.size)})`, m.path);
+    option.dataset.film = m.title;
     return option;
   }));
   $("lab-run").disabled = false;
@@ -803,8 +804,8 @@ async function loadLabClips() {
   const { folder, clips } = await fetch("/api/lab").then((r) => r.json());
 
   $("lab-folder").textContent = clips && clips.length
-    ? `The clips are in ${folder} — copy them to your Apple TV or Plex and watch.`
-    : `Clips will be saved in ${folder}.`;
+    ? `The clips are in ${folder}, a folder per film. Point Plex at it and each setting appears as an edition of the same film, so they play one after another.`
+    : `Clips will be saved in ${folder}, a folder per film.`;
 
   $("lab-clips-heading").hidden = !clips || clips.length === 0;
 
@@ -818,7 +819,7 @@ async function loadLabClips() {
     row.className = "row";
 
     const name = document.createElement("span");
-    name.textContent = clip.name;
+    name.textContent = clip.film ? `${clip.film} — ${clip.name}` : clip.name;
 
     const right = document.createElement("span");
     right.className = "muted small";
@@ -1055,10 +1056,25 @@ function connect() {
   events.addEventListener("open", () => { $("connection").hidden = true; });
 }
 
+// on attaches a handler, and says so rather than throwing when the element is
+// not there.
+//
+// One missing element used to stop every later line from running, so a button
+// removed from the page took the rest of the page with it. A gap in the wiring
+// is now a note in the console and nothing more.
+function on(id, event, handler) {
+  const el = $(id);
+  if (!el) {
+    console.warn(`ARFABIT: no element called ${id} to attach ${event} to`);
+    return;
+  }
+  el.addEventListener(event, handler);
+}
+
 function wireButtons() {
   // The scan outlives the request that starts it, so the button stays put
   // until a job appears and the idle card gives way to the working one.
-  $("scan").addEventListener("click", async (e) => {
+  on("scan", "click", async (e) => {
     e.target.disabled = true;
     e.target.textContent = "Waking the drive…";
 
@@ -1071,28 +1087,26 @@ function wireButtons() {
     }
   });
 
-  $("start").addEventListener("click", (e) =>
+  on("start", "click", (e) =>
     busy(e.target, "Starting…", null, () => post("/api/start")));
 
-  $("stop").addEventListener("click", (e) =>
-    busy(e.target, "Stopping…", null, () => post("/api/stop")));
 
-  $("eject").addEventListener("click", async (e) => {
+  on("eject", "click", async (e) => {
     const result = await busy(e.target, "Ejecting…", null, () => post("/api/eject"));
     if (result) $("eject-detail").textContent = result.message;
   });
 
-  $("title-save").addEventListener("click", saveTitle);
+  on("title-save", "click", saveTitle);
 
-  $("log-filter").addEventListener("input", applyFilter);
+  on("log-filter", "input", applyFilter);
 
-  $("log-follow").addEventListener("change", (e) => {
+  on("log-follow", "change", (e) => {
     followLog = e.target.checked;
     $("log-jump").hidden = followLog;
   });
 
   // Scrolling up steps out of follow mode, because you are reading something.
-  $("log").addEventListener("scroll", () => {
+  on("log", "scroll", () => {
     const box = $("log");
     const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
     if (!atBottom && followLog) {
@@ -1102,14 +1116,14 @@ function wireButtons() {
     }
   });
 
-  $("log-jump").addEventListener("click", () => {
+  on("log-jump", "click", () => {
     followLog = true;
     $("log-follow").checked = true;
     $("log-jump").hidden = true;
     $("log").scrollTop = $("log").scrollHeight;
   });
 
-  $("autostart").addEventListener("change", async (e) => {
+  on("autostart", "change", async (e) => {
     const status = await post("/api/autostart", { enabled: e.target.checked });
     if (status) {
       $("autostart").checked = !!status.enabled;
@@ -1119,12 +1133,12 @@ function wireButtons() {
     }
   });
 
-  $("restart").addEventListener("click", async (e) => {
+  on("restart", "click", async (e) => {
     const result = await busy(e.target, "Restarting…", null, () => post("/api/restart"));
     if (result) waitForRestart();
   });
 
-  $("quit").addEventListener("click", async (e) => {
+  on("quit", "click", async (e) => {
     const result = await busy(e.target, "Stopping…", null, () => post("/api/quit"));
     if (result) {
       $("restart-detail").textContent = $("autostart").checked
@@ -1137,26 +1151,29 @@ function wireButtons() {
 
   // The download outlives the request that starts it, so the event stream
   // owns this button rather than busy().
-  $("drive-check").addEventListener("click", (e) =>
+  on("drive-check", "click", (e) =>
     busy(e.target, "Checking\u2026", null, async () => {
       await loadDriveHealth();
       return true;
     }));
 
-  $("lab-run").addEventListener("click", (e) => {
+  on("lab-run", "click", (e) => {
     e.target.disabled = true;
     $("lab-status").textContent = "Making the clips. Each one takes a few seconds.";
     $("lab-results").replaceChildren();
 
+    const chosen = $("lab-master").selectedOptions[0];
+
     post("/api/lab", {
       master: $("lab-master").value,
+      film: chosen ? chosen.dataset.film : "",
       at: parseTimestamp($("lab-at").value),
       length: Number($("lab-length").value),
       settings: labSettings($("lab-what").value),
     });
   });
 
-  $("index-build").addEventListener("click", (e) => {
+  on("index-build", "click", (e) => {
     e.target.disabled = true;
     e.target.textContent = "Starting…";
     post("/api/index");

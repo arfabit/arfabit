@@ -1,6 +1,8 @@
 package lab
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -173,29 +175,72 @@ func TestSafeName(t *testing.T) {
 	}
 }
 
-// The clips are meant to be carried to a television and watched, so the name
-// has to say which film, which setting and which moment.
-func TestClipNameReadsInAFolderListing(t *testing.T) {
-	got := ClipName(
-		"/masters/Crime 101 (2025)/CRIME_101_t00.mkv",
-		"crf20-medium",
-		75*time.Minute+20*time.Second,
-	)
+// A media manager pointed at the lab folder should see one film with several
+// editions, and play them one after another. That is what comparing means.
+func TestClipNameIsAnEditionOfTheFilm(t *testing.T) {
+	got := ClipName("Crime 101 (2025)", 1, "crf20-medium", 75*time.Minute+20*time.Second)
 
-	for _, want := range []string{"CRIME_101_t00", "crf20-medium", "1h15m20s", ".mp4"} {
+	if !strings.HasPrefix(got, "Crime 101 (2025) {edition-") {
+		t.Errorf("the clip is not named as an edition of the film: %q", got)
+	}
+	for _, want := range []string{"Lab 001", "crf20-medium", "1h15m20s", ".mp4"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("name %q is missing %q", got, want)
 		}
 	}
 }
 
-// Timestamps sort in the order they happen, so a folder listing reads as a
-// walk through the film.
+// A brace inside the tag would close it early and confuse the manager reading
+// it.
+func TestEditionTagHasNoBraces(t *testing.T) {
+	got := ClipName("Film", 2, "odd{setting}name", time.Minute)
+
+	if strings.Count(got, "{") != 1 || strings.Count(got, "}") != 1 {
+		t.Errorf("the edition tag is not closed exactly once: %q", got)
+	}
+}
+
+// Timestamps sort in the order they happen, so a listing reads as a walk
+// through the film.
 func TestClipTimestampsSort(t *testing.T) {
-	early := ClipName("m.mkv", "x", 9*time.Minute)
-	later := ClipName("m.mkv", "x", 70*time.Minute)
+	early := ClipName("Film", 1, "x", 9*time.Minute)
+	later := ClipName("Film", 1, "x", 70*time.Minute)
 
 	if !(early < later) {
 		t.Errorf("%q does not sort before %q", early, later)
+	}
+}
+
+// The folder is the record, so run numbers survive a restart and carry on
+// rather than starting again at one.
+func TestNextRunContinuesFromWhatIsThere(t *testing.T) {
+	dir := t.TempDir()
+
+	if got := NextRun(dir); got != 1 {
+		t.Errorf("an empty folder starts at run %d, want 1", got)
+	}
+
+	for _, name := range []string{
+		ClipName("Film", 1, "crf20", time.Minute),
+		ClipName("Film", 2, "crf22", time.Minute),
+		"something-else.mp4",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := NextRun(dir); got != 3 {
+		t.Errorf("NextRun = %d, want 3", got)
+	}
+}
+
+// Clips from one afternoon's comparison stay together under one number.
+func TestOneRunSharesItsNumber(t *testing.T) {
+	first := ClipName("Film", 7, "crf20", time.Minute)
+	second := ClipName("Film", 7, "crf22", time.Minute)
+
+	if !strings.Contains(first, "Lab 007") || !strings.Contains(second, "Lab 007") {
+		t.Errorf("clips from one run do not share a number: %q, %q", first, second)
 	}
 }

@@ -123,6 +123,7 @@ func (s *Server) handleMasters(w http.ResponseWriter, r *http.Request) {
 // yesterday rather than an empty table.
 func (s *Server) handleLabClips(w http.ResponseWriter, r *http.Request) {
 	type clip struct {
+		Film string    `json:"film"`
 		Name string    `json:"name"`
 		Path string    `json:"path"`
 		Size int64     `json:"size"`
@@ -131,22 +132,36 @@ func (s *Server) handleLabClips(w http.ResponseWriter, r *http.Request) {
 
 	clips := []clip{}
 
-	entries, err := os.ReadDir(s.Config.Paths.Lab)
+	// A folder per film, as everywhere else, so the listing groups the way
+	// the folder does.
+	films, err := os.ReadDir(s.Config.Paths.Lab)
 	if err == nil {
-		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".mp4" {
+		for _, film := range films {
+			if !film.IsDir() {
 				continue
 			}
-			info, err := e.Info()
+			dir := filepath.Join(s.Config.Paths.Lab, film.Name())
+
+			entries, err := os.ReadDir(dir)
 			if err != nil {
 				continue
 			}
-			clips = append(clips, clip{
-				Name: strings.TrimSuffix(e.Name(), ".mp4"),
-				Path: filepath.Join(s.Config.Paths.Lab, e.Name()),
-				Size: info.Size(),
-				Made: info.ModTime(),
-			})
+			for _, e := range entries {
+				if e.IsDir() || filepath.Ext(e.Name()) != ".mp4" {
+					continue
+				}
+				info, err := e.Info()
+				if err != nil {
+					continue
+				}
+				clips = append(clips, clip{
+					Film: film.Name(),
+					Name: editionOf(e.Name()),
+					Path: filepath.Join(dir, e.Name()),
+					Size: info.Size(),
+					Made: info.ModTime(),
+				})
+			}
 		}
 	}
 
@@ -159,11 +174,27 @@ func (s *Server) handleLabClips(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// editionOf pulls the edition out of a clip's filename, which is the part
+// that says what was tried.
+func editionOf(name string) string {
+	start := strings.Index(name, "{edition-")
+	if start < 0 {
+		return strings.TrimSuffix(name, ".mp4")
+	}
+
+	tag := name[start+len("{edition-"):]
+	if end := strings.Index(tag, "}"); end >= 0 {
+		tag = tag[:end]
+	}
+	return tag
+}
+
 // handleLab renders clips under several settings so a quality can be chosen by
 // watching rather than guessing.
 func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Master   string     `json:"master"`
+		Film     string     `json:"film"`
 		At       float64    `json:"at"`
 		Length   float64    `json:"length"`
 		Settings []lab.Clip `json:"settings"`
@@ -190,6 +221,7 @@ func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 
 		clips, err := lab.Run(context.Background(), lab.Request{
 			Master:    req.Master,
+			Film:      req.Film,
 			At:        time.Duration(req.At * float64(time.Second)),
 			Length:    time.Duration(req.Length * float64(time.Second)),
 			Settings:  req.Settings,
