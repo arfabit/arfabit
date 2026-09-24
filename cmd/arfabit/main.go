@@ -108,6 +108,10 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	}
 	server.Profiles = profileStore
 
+	// A disc gets whichever profile is currently the default, which can be
+	// changed on the page while ARFABIT runs.
+	runner.DefaultProfile = func() config.Profile { return profileStore.DefaultProfile(cfg) }
+
 	// Stopping from the page matters for anyone whose computer starts ARFABIT
 	// on its own: they have no terminal to press Ctrl+C in.
 	// One shutdown, one announcement. The reason is carried to the single

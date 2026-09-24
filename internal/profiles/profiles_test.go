@@ -81,6 +81,9 @@ func TestEditingKeepsWhenItWasMade(t *testing.T) {
 }
 
 func TestDelete(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Profiles = map[string]config.Profile{cfg.Profile.Name: cfg.Profile}
+
 	store, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -89,15 +92,118 @@ func TestDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.Delete("Temporary"); err != nil {
+	if err := store.Delete(cfg, "Temporary"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := store.Saved["Temporary"]; ok {
 		t.Error("the profile is still there after being deleted")
 	}
 
-	if err := store.Delete("Temporary"); err == nil {
+	if err := store.Delete(cfg, "Temporary"); err == nil {
 		t.Error("deleting something that is not there reported success")
+	}
+}
+
+// Any profile can be made the default, including one made here, and the old
+// default can then be removed.
+func TestAnyProfileCanBecomeTheDefault(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Profiles = map[string]config.Profile{cfg.Profile.Name: cfg.Profile}
+
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mine := testProfile("Mine")
+	mine.CRFBluray = 22
+	if _, err := store.Save(mine); err != nil {
+		t.Fatal(err)
+	}
+
+	// Until it is chosen, the settings file's profile is the default.
+	if got := store.DefaultName(cfg); got != cfg.Profile.Name {
+		t.Errorf("DefaultName = %q before anything was chosen", got)
+	}
+
+	if err := store.SetDefault(cfg, "Mine"); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.DefaultName(cfg); got != "Mine" {
+		t.Errorf("DefaultName = %q after choosing Mine", got)
+	}
+	if got := store.DefaultProfile(cfg).CRFBluray; got != 22 {
+		t.Errorf("the default profile reads %d, want Mine's 22", got)
+	}
+
+	// And now the old one can go.
+	if err := store.Delete(cfg, cfg.Profile.Name); err != nil {
+		t.Errorf("the old default could not be removed: %v", err)
+	}
+
+	for _, p := range store.All(cfg) {
+		if p.Name == cfg.Profile.Name {
+			t.Error("the removed profile is still being offered")
+		}
+	}
+
+	// It survives being written and read back: a line left in the settings
+	// file should not bring it back.
+	reopened, err := Open(store.path[:len(store.path)-len("/profiles.json")])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range reopened.All(cfg) {
+		if p.Name == cfg.Profile.Name {
+			t.Error("the removed profile came back after a restart")
+		}
+	}
+}
+
+// Something has to be the default, and something has to be there at all.
+func TestTheLastProfileAndTheDefaultCannotGo(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Profiles = map[string]config.Profile{cfg.Profile.Name: cfg.Profile}
+
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.Delete(cfg, cfg.Profile.Name)
+	if err == nil {
+		t.Fatal("the only profile, which is also the default, was removed")
+	}
+	if !strings.Contains(err.Error(), "make another the default") {
+		t.Errorf("the message does not say what to do instead: %v", err)
+	}
+
+	// With a second one present, the default still cannot go until another
+	// is chosen.
+	if _, err := store.Save(testProfile("Second")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Delete(cfg, cfg.Profile.Name); err == nil {
+		t.Error("the default was removed while it was still the default")
+	}
+}
+
+// Choosing something that is not there is refused rather than silently
+// leaving no default at all.
+func TestDefaultMustExist(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Profiles = map[string]config.Profile{cfg.Profile.Name: cfg.Profile}
+
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.SetDefault(cfg, "Nonexistent"); err == nil {
+		t.Error("a profile that does not exist was made the default")
+	}
+	if got := store.DefaultName(cfg); got != cfg.Profile.Name {
+		t.Errorf("DefaultName = %q; it should have been left alone", got)
 	}
 }
 

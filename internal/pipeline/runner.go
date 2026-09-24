@@ -32,6 +32,11 @@ type Runner struct {
 	// regardless; it is the processor that has to take turns.
 	Slots *Slots
 
+	// DefaultProfile is the settings a disc gets. Set by whatever owns the
+	// profiles, since which one is the default can be changed while ARFABIT
+	// is running.
+	DefaultProfile func() config.Profile
+
 	// Index is the offline film list, used to confirm a title and find its
 	// year. Nil when it has not been downloaded, in which case the disc's own
 	// name is used.
@@ -247,7 +252,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 		return job, fmt.Errorf("no usable title")
 	}
 
-	plan, err := BuildPlan(d, sel, r.Config.Profile)
+	plan, err := BuildPlan(d, sel, r.profile())
 	if err != nil {
 		r.stop(job, "ARFABIT could not work out what to do with this disc.", err.Error())
 		return job, err
@@ -895,6 +900,14 @@ func (r *Runner) SetCurrentForTest(job *Job) {
 }
 
 // retirePreviousScan closes off a Plan nobody acted on.
+// profile is the settings a disc gets unless something says otherwise.
+func (r *Runner) profile() config.Profile {
+	if r.DefaultProfile != nil {
+		return r.DefaultProfile()
+	}
+	return r.Config.Profile
+}
+
 func (r *Runner) retirePreviousScan() {
 	r.mu.Lock()
 	previous := r.pending

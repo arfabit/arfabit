@@ -316,7 +316,7 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		out = append(out, reply{
 			Name:            p.Name,
 			Description:     p.Describe(),
-			Default:         p.Name == s.Config.Profile.Name,
+			Default:         p.Name == s.Profiles.DefaultName(s.Config),
 			Editable:        p.Editable,
 			Source:          p.Source,
 			Preset:          p.Preset,
@@ -330,6 +330,25 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{"profiles": out})
+}
+
+// handleDefaultProfile chooses which profile a disc gets unless something says
+// otherwise.
+func (s *Server) handleDefaultProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that.", err)
+		return
+	}
+
+	if err := s.Profiles.SetDefault(s.Config, req.Name); err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
+
+	writeJSON(w, map[string]string{"default": req.Name})
 }
 
 // handleSaveProfile makes or changes a profile.
@@ -350,13 +369,10 @@ func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDeleteProfile removes a profile.
-//
-// Only profiles made here can be removed: one written in the settings file
-// belongs to whoever wrote it, and the place to remove it is there.
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	if err := s.Profiles.Delete(name); err != nil {
+	if err := s.Profiles.Delete(s.Config, name); err != nil {
 		writeError(w, capitalise(err.Error())+".", nil)
 		return
 	}

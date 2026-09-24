@@ -1218,6 +1218,17 @@ function renderProfileManager(profiles) {
     const buttons = document.createElement("div");
     buttons.className = "button-row";
 
+    if (!profile.default) {
+      const makeDefault = document.createElement("button");
+      makeDefault.textContent = "Use by default";
+      makeDefault.addEventListener("click", async (e) => {
+        const result = await busy(e.target, "Setting\u2026", null, () =>
+          post("/api/profiles/default", { name: profile.name }));
+        if (result) loadProfiles();
+      });
+      buttons.append(makeDefault);
+    }
+
     const edit = document.createElement("button");
     edit.textContent = "Change";
     edit.addEventListener("click", () => openProfileEditor(profile));

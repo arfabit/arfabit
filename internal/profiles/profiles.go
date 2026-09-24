@@ -40,6 +40,19 @@ type Store struct {
 
 	// Saved are the ones made here, by name.
 	Saved map[string]Profile `json:"profiles"`
+
+	// Default is the profile a disc gets unless something says otherwise.
+	// Empty means the one named in the settings file.
+	Default string `json:"default,omitempty"`
+
+	// Hidden are profiles from the settings file that somebody has removed
+	// here.
+	//
+	// ARFABIT does not rewrite the settings file — that file is somebody's,
+	// with their comments and their arrangement — so removing one written
+	// there means no longer offering it. The line stays in the file and does
+	// nothing, which is what "removed" means from where the person is sitting.
+	Hidden []string `json:"hidden,omitempty"`
 }
 
 // Open reads the store, creating nothing until something is saved.
@@ -93,13 +106,88 @@ func (s *Store) Save(p config.Profile) (Profile, error) {
 	return saved, s.write()
 }
 
-// Delete removes a profile.
-func (s *Store) Delete(name string) error {
-	if _, ok := s.Saved[name]; !ok {
+// SetDefault chooses which profile a disc gets unless something says
+// otherwise.
+func (s *Store) SetDefault(cfg config.Config, name string) error {
+	if !s.exists(cfg, name) {
 		return fmt.Errorf("there is no profile called %s", name)
 	}
-	delete(s.Saved, name)
+
+	s.Default = name
 	return s.write()
+}
+
+// DefaultName is the profile currently chosen as the default.
+func (s *Store) DefaultName(cfg config.Config) string {
+	// Checked directly rather than through All, which needs to know the
+	// default in order to sort by it.
+	if s.Default != "" && s.knows(cfg, s.Default) {
+		return s.Default
+	}
+	return cfg.Profile.Name
+}
+
+// knows reports whether a profile exists and has not been removed here.
+func (s *Store) knows(cfg config.Config, name string) bool {
+	if s.hidden(name) {
+		return false
+	}
+	if _, made := s.Saved[name]; made {
+		return true
+	}
+	if name == cfg.Profile.Name {
+		return true
+	}
+	_, fromFile := cfg.Profiles[name]
+	return fromFile
+}
+
+// DefaultProfile is the settings a disc gets unless something says otherwise.
+func (s *Store) DefaultProfile(cfg config.Config) config.Profile {
+	p, _ := s.Named(cfg, s.DefaultName(cfg))
+	return p
+}
+
+// Delete removes a profile.
+//
+// One written in the settings file is hidden rather than deleted, since
+// ARFABIT does not rewrite that file. Either way it stops being offered,
+// which is what removing it means to the person doing it.
+func (s *Store) Delete(cfg config.Config, name string) error {
+	if !s.exists(cfg, name) {
+		return fmt.Errorf("there is no profile called %s", name)
+	}
+
+	if name == s.DefaultName(cfg) {
+		return fmt.Errorf("%s is the one used by default; make another the default first", name)
+	}
+	if len(s.All(cfg)) <= 1 {
+		return fmt.Errorf("%s is the only profile there is", name)
+	}
+
+	if _, made := s.Saved[name]; made {
+		delete(s.Saved, name)
+	} else {
+		// From the settings file, so it is hidden instead.
+		s.Hidden = append(s.Hidden, name)
+	}
+
+	return s.write()
+}
+
+// exists reports whether a profile is known and not hidden.
+func (s *Store) exists(cfg config.Config, name string) bool {
+	return s.knows(cfg, name)
+}
+
+// hidden reports whether a name has been removed here.
+func (s *Store) hidden(name string) bool {
+	for _, h := range s.Hidden {
+		if h == name {
+			return true
+		}
+	}
+	return false
 }
 
 // All returns every profile ARFABIT knows about: the default, any written in
@@ -111,33 +199,43 @@ func (s *Store) All(cfg config.Config) []Profile {
 	// Everything is editable. Changing one here keeps a version in ARFABIT's
 	// own file, which takes precedence; the settings file is left as it was
 	// written, for anybody who prefers to work that way.
-	def := Profile{Profile: cfg.Profile, Editable: true, Source: "your settings file"}
-	if saved, ok := s.Saved[cfg.Profile.Name]; ok {
-		def = saved
-	}
-	out := []Profile{def}
+	byName := map[string]Profile{}
 
-	var fromFile []Profile
+	if !s.hidden(cfg.Profile.Name) {
+		byName[cfg.Profile.Name] = Profile{
+			Profile:  cfg.Profile,
+			Editable: true,
+			Source:   "your settings file",
+		}
+	}
 	for name, p := range cfg.Profiles {
-		if name == cfg.Profile.Name {
+		if s.hidden(name) {
 			continue
 		}
-		if _, made := s.Saved[name]; made {
-			// A profile made here with the same name is the one that wins,
-			// and is listed below.
-			continue
+		byName[name] = Profile{Profile: p, Editable: true, Source: "your settings file"}
+	}
+
+	// A version kept here wins over one in the settings file.
+	for name, p := range s.Saved {
+		byName[name] = p
+	}
+
+	out := make([]Profile, 0, len(byName))
+	for _, p := range byName {
+		out = append(out, p)
+	}
+
+	// The default first, the rest by name, so the list does not rearrange
+	// itself between visits.
+	def := s.DefaultName(cfg)
+	sort.Slice(out, func(a, b int) bool {
+		if (out[a].Name == def) != (out[b].Name == def) {
+			return out[a].Name == def
 		}
-		fromFile = append(fromFile, Profile{Profile: p, Editable: true, Source: "your settings file"})
-	}
-	sort.Slice(fromFile, func(a, b int) bool { return fromFile[a].Name < fromFile[b].Name })
+		return out[a].Name < out[b].Name
+	})
 
-	made := make([]Profile, 0, len(s.Saved))
-	for _, p := range s.Saved {
-		made = append(made, p)
-	}
-	sort.Slice(made, func(a, b int) bool { return made[a].Name < made[b].Name })
-
-	return append(append(out, fromFile...), made...)
+	return out
 }
 
 // Named finds a profile by name, preferring one made here.
