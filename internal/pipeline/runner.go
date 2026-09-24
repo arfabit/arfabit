@@ -435,57 +435,124 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 }
 
 // audioTracks turns the Plan's audio choices into encoder tracks.
+//
+// The Plan records the disc's own stream numbers, which are not the master's:
+// MakeMKV keeps only some streams and renumbers what it keeps. So each planned
+// track is matched back to a real stream in the master by what it is, and the
+// decision about copying is taken from the master rather than from the Plan —
+// the master is what gets muxed, and trusting the Plan here put DTS in an MP4.
 func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTrack {
 	sources := info.StreamsOfKind("audio")
+	if len(sources) == 0 {
+		return nil
+	}
+
+	used := map[int]bool{}
 	var tracks []ffmpeg.AudioTrack
 
 	for _, planned := range job.Plan.Audio {
 		if !planned.Selected {
 			continue
 		}
-		// The master contains only the streams MakeMKV kept, so positions are
-		// matched by order rather than by the disc's own indexes.
-		idx := audioIndexFor(sources, planned, len(tracks))
-		if idx < 0 {
+
+		// A downmix is made from a track that is already being kept, so it
+		// looks among all the streams rather than the unclaimed ones.
+		claimed := used
+		if planned.Stereo {
+			claimed = nil
+		}
+
+		source := matchStream(sources, planned, claimed)
+		if source == nil {
+			job.Log.Printf(store.StagePackage,
+				"The %s track is not in the copy, so it has been left out.", planned.Label)
 			continue
+		}
+		if !planned.Stereo {
+			// A downmix shares its source with the track it came from; every
+			// other track takes one of its own.
+			used[source.Index] = true
+		}
+
+		// Copying is decided from what the master actually holds. A track the
+		// Apple TV cannot decode is converted whatever the Plan said.
+		canCopy := ffmpeg.CanCopyAudio(source.Codec) && !planned.Stereo
+		if planned.Copy && !canCopy {
+			job.Log.Printf(store.StagePackage,
+				"The %s track is %s, which an Apple TV cannot play, so it is being converted.",
+				planned.Label, source.Codec)
 		}
 
 		track := ffmpeg.AudioTrack{
-			SourceIndex: idx,
-			Copy:        planned.Copy,
+			SourceIndex: source.Index,
+			Copy:        canCopy && planned.Copy,
 			Codec:       planned.Codec,
 			Bitrate:     planned.Bitrate,
 			Lang:        planned.Lang,
 			Title:       shortTrackName(planned),
 			Default:     len(tracks) == 0,
 		}
-		// Only a stereo downmix asks for a channel count. Surround keeps the
-		// source's own layout, and the codec was chosen in the Plan to be one
-		// that can hold it.
-		if planned.Stereo || (planned.Channels <= 2 && !planned.Copy) {
-			track.Channels = 2
+
+		if !track.Copy {
+			if planned.Stereo || planned.Channels <= 2 {
+				track.Channels = 2
+			}
+			if track.Codec == "" || track.Codec == source.Codec {
+				// Nothing usable was planned, so fall back to something an
+				// Apple TV certainly plays.
+				track.Codec = "aac"
+			}
 		}
+
 		tracks = append(tracks, track)
 	}
 
 	return tracks
 }
 
-// audioIndexFor maps a planned track onto a stream in the copied file.
-func audioIndexFor(sources []ffmpeg.Stream, planned store.PlannedAudio, position int) int {
-	if len(sources) == 0 {
-		return -1
-	}
-	// The stereo downmix is derived from the track before it.
-	if planned.Stereo && position > 0 {
-		return sources[0].Index
-	}
-	for _, s := range sources {
-		if s.Lang == planned.Lang {
-			return s.Index
+// matchStream finds the stream in the master that a planned track refers to.
+//
+// Language and channel count together identify a track well enough in
+// practice; the codec breaks ties between, say, the DTS and Dolby versions of
+// the same mix. Streams already claimed are skipped so that two planned tracks
+// cannot both resolve to the same one, which is exactly what went wrong before.
+func matchStream(sources []ffmpeg.Stream, planned store.PlannedAudio, used map[int]bool) *ffmpeg.Stream {
+	best := -1
+	bestScore := 0
+
+	for i := range sources {
+		s := &sources[i]
+		if used[s.Index] {
+			continue
+		}
+
+		score := 0
+		if strings.EqualFold(s.Lang, planned.Lang) {
+			score += 4
+		}
+		if s.Channels == planned.Channels {
+			score += 3
+		} else if planned.Channels > 2 && s.Channels > 2 {
+			// Close enough: surround of one width stands in for another
+			// rather than the track being dropped altogether.
+			score++
+		}
+		if strings.EqualFold(s.Codec, planned.SourceCodec) {
+			score += 2
+		}
+		if score == 0 {
+			continue
+		}
+		if score > bestScore {
+			best, bestScore = i, score
 		}
 	}
-	return sources[0].Index
+
+	// A track must at least be in the right language, or it is not the track.
+	if best < 0 || bestScore < 4 {
+		return nil
+	}
+	return &sources[best]
 }
 
 // deliver records the finished file and copies it onward if asked.

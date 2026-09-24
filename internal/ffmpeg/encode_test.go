@@ -201,3 +201,26 @@ func TestDispositionClearsInheritedFlags(t *testing.T) {
 		t.Errorf("dispositionOf(false,false) = %q, want \"0\"", got)
 	}
 }
+
+// "-ac:N" counts every stream in the file, not the audio ones, so the bare
+// form silently applied the downmix to the wrong stream and the track came out
+// with all its channels intact.
+func TestChannelCountUsesAnAudioStreamSpecifier(t *testing.T) {
+	got := argString(t, EncodeRequest{
+		Input:            "master.mkv",
+		Output:           "out.mp4",
+		VideoSourceIndex: 0,
+		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
+		Audio: []AudioTrack{
+			{SourceIndex: 1, Codec: "eac3", Bitrate: "768k"},
+			{SourceIndex: 1, Codec: "aac", Bitrate: "256k", Channels: 2},
+		},
+	})
+
+	if !strings.Contains(got, "-ac:a:1 2") {
+		t.Errorf("the downmix does not use an audio stream specifier: %s", got)
+	}
+	if strings.Contains(got, "-ac:1 ") {
+		t.Errorf("the bare form is still being used, which applies to the wrong stream: %s", got)
+	}
+}

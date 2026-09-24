@@ -246,7 +246,10 @@ func (r EncodeRequest) audioArgs() []string {
 				args = append(args, "-b:a:"+out, a.Bitrate)
 			}
 			if a.Channels > 0 {
-				args = append(args, "-ac:"+out, strconv.Itoa(a.Channels))
+				// "-ac:a:N", not "-ac:N": the bare form counts every stream in
+				// the file, so it silently applied to the wrong one and the
+				// downmix never happened.
+				args = append(args, "-ac:a:"+out, strconv.Itoa(a.Channels))
 			}
 		}
 
