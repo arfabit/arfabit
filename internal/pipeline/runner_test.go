@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/arfabit/arfabit/internal/config"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,21 @@ func TestStopCancelsAndSaysSo(t *testing.T) {
 	if !said {
 		t.Error("the message does not admit that stopping is not instant")
 	}
+}
+
+// waitUntilIdle waits for every job to finish, so nothing is still writing
+// when a test's temporary directory is removed.
+func waitUntilIdle(t *testing.T, r *Runner) {
+	t.Helper()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(r.Active()) == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Log("a job was still running when the test ended")
 }
 
 func testStore(t *testing.T) *store.Store {
@@ -368,17 +384,32 @@ func TestTranscodeIsAJob(t *testing.T) {
 
 	r := &Runner{Config: cfg, Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
 
+	// Somewhere of its own, cleaned up by hand: the job runs in the
+	// background and would otherwise still be writing when the test ended.
+	labDir, err := os.MkdirTemp("", "arfabit-lab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(labDir) })
+
 	job, err := r.StartTranscode(context.Background(), LabRequest{
 		Master:   "/nowhere/master.mkv",
 		Film:     "Crime 101 (2025)",
 		At:       10 * time.Minute,
 		Length:   30 * time.Second,
 		Profiles: []string{cfg.Profile.Name},
-		LabDir:   t.TempDir(),
+		LabDir:   labDir,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Stopped and waited for before the test ends: a job still writing its
+	// record when the temporary directory is removed fails the cleanup.
+	t.Cleanup(func() {
+		_ = r.StopJob(job.ID)
+		waitUntilIdle(t, r)
+	})
 
 	if job.Log == nil {
 		t.Error("a transcode has no log")
