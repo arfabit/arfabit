@@ -13,21 +13,21 @@ import (
 	"github.com/arfabit/arfabit/internal/eject"
 )
 
-// How often the drive is asked what it holds.
+// driveWatchEmpty is how often an empty drive is asked what it holds.
 //
-// Asking wakes the drive, so it is asked as seldom as the situation allows:
+// Asking wakes the drive, so it is only asked when the answer could change in
+// a way somebody is waiting on — which means an empty drive, and nothing else:
 //
-//   - While a job is running the drive is not asked at all. The disc is known,
-//     nothing can change, and a job takes hours — during which a poll every
-//     five seconds would keep the drive spinning the whole time for nothing.
-//   - An empty drive is asked often, because somebody putting a disc in wants
-//     it noticed.
-//   - A drive with a disc already in it is asked rarely: the only thing left
-//     to notice is the disc being taken out, which nobody is waiting on.
-const (
-	driveWatchEmpty  = 5 * time.Second
-	driveWatchLoaded = 30 * time.Second
-)
+//   - A drive with a disc in it is not asked at all. The only thing left to
+//     notice is the disc being taken out, and nobody is standing there waiting
+//     to be told that. Asking anyway spun the drive up every thirty seconds
+//     for as long as a disc sat in it.
+//   - A drive being used by a job is not asked either. The disc is known, it
+//     cannot change, and a job takes hours.
+//
+// Anything that might have changed the answer pokes the watcher instead, so
+// the page is still right after ejecting or finishing a disc.
+const driveWatchEmpty = 5 * time.Second
 
 // driveWatcher keeps the page told what is in the drive.
 //
@@ -36,6 +36,39 @@ const (
 type driveWatcher struct {
 	mu     sync.Mutex
 	drives []disc.Drive
+	poke   chan struct{}
+}
+
+// Poke asks the watcher to look again.
+//
+// Called after anything that could have changed what is in the drive, which is
+// how the page stays right without the drive being asked on a timer.
+func (s *Server) Poke() {
+	s.drives.mu.Lock()
+	poke := s.drives.poke
+	s.drives.mu.Unlock()
+
+	if poke == nil {
+		return
+	}
+	select {
+	case poke <- struct{}{}:
+	default:
+		// One pending look is as good as two.
+	}
+}
+
+// discLoaded reports whether a disc is known to be in the drive.
+func (s *Server) discLoaded() bool {
+	s.drives.mu.Lock()
+	defer s.drives.mu.Unlock()
+
+	for _, d := range s.drives.drives {
+		if d.Loaded {
+			return true
+		}
+	}
+	return false
 }
 
 // Drives returns what was last seen.
@@ -76,32 +109,32 @@ func (s *Server) WatchDrives(ctx context.Context) {
 		}
 	}
 
+	s.drives.mu.Lock()
+	s.drives.poke = make(chan struct{}, 1)
+	poke := s.drives.poke
+	s.drives.mu.Unlock()
+
 	check()
 
 	for {
+		// A disc already in the drive, or one being read, means there is
+		// nothing worth waking the drive to find out. Wait to be poked.
+		var tick <-chan time.Time
+		if !s.discLoaded() && s.Runner.DriveIsBusy() == nil {
+			timer := time.NewTimer(driveWatchEmpty)
+			tick = timer.C
+			defer timer.Stop()
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(s.nextWatchDelay()):
+		case <-poke:
+			check()
+		case <-tick:
 			check()
 		}
 	}
-}
-
-// nextWatchDelay is how long to leave the drive alone before asking again.
-func (s *Server) nextWatchDelay() time.Duration {
-	if s.Runner.DriveIsBusy() != nil {
-		// Come back soon enough to notice the disc coming out, without
-		// touching the drive in the meantime.
-		return driveWatchLoaded
-	}
-
-	for _, d := range s.Drives() {
-		if d.Loaded {
-			return driveWatchLoaded
-		}
-	}
-	return driveWatchEmpty
 }
 
 func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +163,10 @@ func (s *Server) handleEject(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	result := eject.Eject(ctx, device)
+
+	// The drive has certainly changed, so look rather than wait to be asked.
+	s.Poke()
+
 	writeJSON(w, map[string]any{
 		"ok":      result.OK,
 		"message": result.Describe(hadDisc),

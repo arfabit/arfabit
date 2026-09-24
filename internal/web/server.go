@@ -83,6 +83,16 @@ func New(cfg config.Config, st *store.Store, runner *pipeline.Runner, backend *m
 	// reloads underneath the reader (§14).
 	runner.OnUpdate = func(job *pipeline.Job) {
 		s.events.send("job", job)
+
+		// A disc that has been ejected or a job that has ended changes what
+		// is in the drive, and is the moment to look rather than a timer.
+		switch job.Stage {
+		case store.StageEject, store.StageDeliver:
+			s.Poke()
+		}
+		if job.State != store.StateRunning {
+			s.Poke()
+		}
 	}
 
 	// Log lines go out as they are written, so a stage that takes minutes

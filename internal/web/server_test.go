@@ -436,34 +436,41 @@ func TestStaticFilesAreNotCached(t *testing.T) {
 	}
 }
 
-// Asking the drive anything wakes it. During a job that would keep it
-// spinning for hours to learn nothing: the disc is known and cannot change.
-func TestDriveIsLeftAloneDuringAJob(t *testing.T) {
+// Asking the drive anything wakes it, so it is only asked when the answer
+// could change in a way somebody is waiting on.
+func TestDriveIsLeftAloneWhenThereIsNothingToLearn(t *testing.T) {
 	s := newTestServer(t)
+
+	// A disc already in it: the only thing left to notice is it being taken
+	// out, and nobody is waiting to be told that.
 	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: true}}
+	if !s.discLoaded() {
+		t.Error("a loaded drive was not recognised as loaded")
+	}
 
-	s.Runner.SetCurrentForTest(&pipeline.Job{
-		Job: &store.Job{ID: "busy", State: store.StateRunning, Stage: store.StagePackage},
-	})
-
-	if got := s.nextWatchDelay(); got < driveWatchLoaded {
-		t.Errorf("delay during a job = %v; the drive should be left alone", got)
+	// Empty: somebody putting a disc in does want it noticed.
+	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: false}}
+	if s.discLoaded() {
+		t.Error("an empty drive was reported as loaded")
 	}
 }
 
-// An empty drive is asked often, because somebody putting a disc in wants it
-// noticed. One with a disc already in it is asked rarely.
-func TestEmptyDriveIsCheckedMoreOften(t *testing.T) {
+// Anything that could have changed what is in the drive pokes the watcher, so
+// the page stays right without the drive being asked on a timer.
+func TestPokeIsSafeAndDoesNotBlock(t *testing.T) {
 	s := newTestServer(t)
 
-	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: false}}
-	empty := s.nextWatchDelay()
+	// Before the watcher is running there is nothing to poke, and that must
+	// not be a problem.
+	s.Poke()
 
-	s.drives.drives = []disc.Drive{{Index: 0, Name: "BD-RE", Loaded: true}}
-	loaded := s.nextWatchDelay()
+	s.drives.poke = make(chan struct{}, 1)
+	for i := 0; i < 5; i++ {
+		s.Poke()
+	}
 
-	if !(empty < loaded) {
-		t.Errorf("empty = %v, loaded = %v; an empty drive should be checked more often", empty, loaded)
+	if len(s.drives.poke) != 1 {
+		t.Errorf("%d pokes are queued; one pending look is as good as two", len(s.drives.poke))
 	}
 }
 
