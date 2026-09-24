@@ -22,6 +22,7 @@ let activeJobs = [];
 let queueFilter = "all";
 let focusedJob = "";
 let masterTracks = [];
+let resumable = {};
 let clockTimer = null;
 
 // --- problems the page cannot hide --------------------------------------
@@ -766,6 +767,20 @@ function renderRecent(jobs) {
     right.textContent = `${jobOutcome(job)} · ${whenText(job.started)}`;
 
     row.append(name, right);
+
+    // Anything working from a copy can simply be started again, because the
+    // copy is still there.
+    if (resumable[job.id]) {
+      const again = document.createElement("button");
+      again.textContent = "Start again";
+      again.addEventListener("click", async (e) => {
+        const result = await busy(e.target, "Starting\u2026", "Added", () =>
+          post("/api/resume", { id: job.id }));
+        if (result) refresh();
+      });
+      row.append(again);
+    }
+
     return row;
   }));
 }
@@ -773,6 +788,7 @@ function renderRecent(jobs) {
 async function refresh() {
   const state = await fetch("/api/state").then((r) => r.json());
   driveBusy = state.drive_busy || "";
+  resumable = state.resumable || {};
   renderDrives(state.drives);
   renderActive(state.active || []);
   renderJob(state.job);

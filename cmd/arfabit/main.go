@@ -96,6 +96,15 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		Slots:       pipeline.NewSlots(cfg.Profile.MaxConversions),
 	}
 
+	// Anything left running by a restart is settled before the page opens, so
+	// nobody sees a job that claims to be working when nothing is.
+	if interrupted, err := runner.Reconcile(); err == nil && len(interrupted) > 0 {
+		fmt.Printf("\n%d job%s %s interrupted when ARFABIT last stopped.\n",
+			len(interrupted),
+			map[bool]string{true: "", false: "s"}[len(interrupted) == 1],
+			map[bool]string{true: "was", false: "were"}[len(interrupted) == 1])
+	}
+
 	// Profiles made here, as opposed to written in the settings file.
 	profileStore, err := profiles.Open(cfg.Paths.Data)
 	if err != nil {

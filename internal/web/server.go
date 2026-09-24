@@ -137,6 +137,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/profiles/default", s.handleDefaultProfile)
 	mux.HandleFunc("POST /api/transcode", s.handleTranscode)
 	mux.HandleFunc("GET /api/master-tracks", s.handleMasterTracks)
+	mux.HandleFunc("POST /api/resume", s.handleResume)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
 	mux.HandleFunc("GET /api/log", s.handleLog)
@@ -189,6 +190,10 @@ type state struct {
 	ConversionsAtOnce int `json:"conversions_at_once"`
 	Queued            int `json:"queued"`
 
+	// Resumable names the stopped jobs that can simply be started again,
+	// which is anything working from a copy that is still there.
+	Resumable map[string]bool `json:"resumable,omitempty"`
+
 	Recent   []*store.Job `json:"recent"`
 	Drives   []disc.Drive `json:"drives"`
 	NodeName string       `json:"node_name"`
@@ -201,6 +206,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		recent = recent[:20]
 	}
 
+	resumable := map[string]bool{}
+	for _, job := range recent {
+		if job.State == store.StateStopped && pipeline.Resumable(job) {
+			resumable[job.ID] = true
+		}
+	}
+
 	current := s.Runner.Current()
 	if current != nil && current.State != store.StateWaiting {
 		// Only a Plan awaiting an answer belongs in the decision slot.
@@ -208,12 +220,13 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := state{
-		Job:      current,
-		Active:   s.Runner.Active(),
-		Recent:   recent,
-		Drives:   s.Drives(),
-		NodeName: s.Config.Node.Name,
-		Paths:    s.Config.Paths,
+		Resumable: resumable,
+		Job:       current,
+		Active:    s.Runner.Active(),
+		Recent:    recent,
+		Drives:    s.Drives(),
+		NodeName:  s.Config.Node.Name,
+		Paths:     s.Config.Paths,
 	}
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
 		reply.DriveBusy = busy.Title

@@ -441,6 +441,25 @@ func applyProfileForm(
 	return p
 }
 
+// handleResume starts an interrupted job again from its copy.
+func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that.", err)
+		return
+	}
+
+	job, err := s.Runner.ResumeJob(req.ID)
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
+
+	writeJSON(w, map[string]string{"job": job.ID})
+}
+
 // handleMasterTracks lists what is inside a master, so tracks can be chosen.
 //
 // A master holds everything the disc had, which is the point of keeping it.
