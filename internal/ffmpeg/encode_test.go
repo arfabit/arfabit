@@ -158,7 +158,7 @@ func TestEncodeArgsAudioCopyAndFallback(t *testing.T) {
 	if !strings.Contains(got, "-c:a:1 aac") || !strings.Contains(got, "-b:a:1 256k") {
 		t.Errorf("stereo fallback missing\ngot: %s", got)
 	}
-	if !strings.Contains(got, "-ac:1 2") {
+	if !strings.Contains(got, "-ac:a:1 2") {
 		t.Errorf("stereo downmix missing\ngot: %s", got)
 	}
 	// Apple TV picks the first compatible track, so multichannel is mapped first.
