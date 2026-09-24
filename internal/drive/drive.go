@@ -8,6 +8,13 @@ import (
 
 // State is what stands between ARFABIT and the disc.
 type State struct {
+	// Present reports whether there is still a disc in the drive.
+	//
+	// Checked after letting go of a volume, because releasing one and
+	// ejecting the disc are different operations and it would be a poor
+	// outcome to find out the hard way.
+	Present bool
+
 	// Mounted reports whether the operating system has the disc open.
 	//
 	// This is the thing that usually makes a Blu-ray take four hours instead

@@ -739,14 +739,24 @@ func (r *Runner) freeTheDisc(ctx context.Context, job *Job, device string) {
 	job.Log.Printf(job.Stage, "Your computer has this disc open, which would make reading it much slower. Letting go of it.")
 
 	after := drive.Unmount(ctx, device)
-	if after.Mounted {
+
+	switch {
+	case !after.Present:
+		// Letting go of a volume and ejecting a disc are meant to be
+		// different things. If this drive treats them as the same, say so
+		// plainly rather than leaving somebody watching an empty drive.
+		job.Log.Detail(job.Stage,
+			"The disc came out when your computer let go of it. Put it back in and ARFABIT will read it as it is.",
+			after.Output)
+
+	case after.Mounted:
 		job.Log.Detail(job.Stage,
 			"Your computer would not let go of the disc, so reading it will be slower than it could be.",
 			after.Output)
-		return
-	}
 
-	job.Log.Printf(job.Stage, "Done. The disc is still in the drive.")
+	default:
+		job.Log.Printf(job.Stage, "Done. The disc is still in the drive.")
+	}
 }
 
 // stageWords names a stage the way the page does, for messages that mention

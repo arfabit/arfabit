@@ -39,3 +39,22 @@ func TestCheckWithNoDevice(t *testing.T) {
 		t.Error("an empty device was reported as mounted")
 	}
 }
+
+// Letting go of a volume and ejecting a disc are meant to be different
+// operations. If a drive treats them as the same, that has to be noticed
+// rather than leaving somebody watching an empty drive.
+func TestAbsentDiscIsDistinctFromMounted(t *testing.T) {
+	ejected := State{Present: false}
+	held := State{Present: true, Mounted: true}
+	ready := State{Present: true}
+
+	if ejected.Present {
+		t.Error("an ejected disc is reported as present")
+	}
+	if !held.Mounted || !held.Present {
+		t.Error("a held disc should be both present and mounted")
+	}
+	if ready.Mounted {
+		t.Error("a freed disc is reported as still mounted")
+	}
+}

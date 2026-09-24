@@ -101,12 +101,15 @@ func (s *Server) handleFreeDrive(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	state := drive.Unmount(ctx, device)
-	if state.Mounted {
-		writeError(w, "Your computer would not let go of the disc.", nil)
-		return
-	}
 
-	writeJSON(w, map[string]any{"freed": true})
+	switch {
+	case !state.Present:
+		writeError(w, "The disc came out when your computer let go of it. Put it back in — ARFABIT will read it as it is.", nil)
+	case state.Mounted:
+		writeError(w, "Your computer would not let go of the disc.", nil)
+	default:
+		writeJSON(w, map[string]any{"freed": true})
+	}
 }
 
 // handleMasters lists the copies available to experiment on.
