@@ -93,6 +93,16 @@ type Request struct {
 	// a comparison stays recognisable weeks later.
 	Run int
 
+	// WholeFilm says this is a film rather than a test clip, which changes
+	// both where it goes and what it is called.
+	WholeFilm bool
+
+	// FilmTitle names the film when the whole of it is being made, so the
+	// result is named the way the library names everything else.
+	FilmTitle interface {
+		VideoName(edition string) string
+	}
+
 	// OnClip is called as each clip finishes, so the page fills in rather
 	// than waiting for the whole set.
 	OnClip func(Clip)
@@ -120,21 +130,23 @@ func Run(ctx context.Context, req Request) ([]Clip, error) {
 	if req.Master == "" {
 		return nil, fmt.Errorf("the lab needs a master file to take a clip from")
 	}
-	if req.Length <= 0 {
-		req.Length = 30 * time.Second
-	}
+
 	if req.Film == "" {
 		req.Film = strings.TrimSuffix(filepath.Base(req.Master), filepath.Ext(req.Master))
 	}
 
-	// A folder per film, as elsewhere, so a media manager pointed at the lab
-	// sees films rather than a heap of clips.
-	filmDir := filepath.Join(req.OutputDir, req.Film)
+	// A whole film goes where films go, under the name films have. A clip
+	// goes into a folder per film in the lab, as elsewhere, so a media
+	// manager pointed at it sees films rather than a heap of clips.
+	filmDir := req.OutputDir
+	if !req.WholeFilm {
+		filmDir = filepath.Join(req.OutputDir, req.Film)
+	}
 	if err := os.MkdirAll(filmDir, 0o755); err != nil {
 		return nil, err
 	}
 
-	if req.Run == 0 {
+	if req.Run == 0 && !req.WholeFilm {
 		req.Run = NextRun(filmDir)
 	}
 
@@ -163,7 +175,7 @@ func Run(ctx context.Context, req Request) ([]Clip, error) {
 
 // render makes one clip.
 func render(ctx context.Context, req Request, setting Clip, video *ffmpeg.Stream) Clip {
-	setting.Path = filepath.Join(req.OutputDir, req.Film, ClipName(req.Film, req.Run, setting.Name, req.At))
+	setting.Path = outputPath(req, setting.Name)
 
 	args := clipArgs(req, setting, video)
 
@@ -193,14 +205,24 @@ func render(ctx context.Context, req Request, setting Clip, video *ffmpeg.Stream
 // right place instead of decoding everything up to it — the difference
 // between a clip taking seconds and taking as long as the film.
 func clipArgs(req Request, setting Clip, video *ffmpeg.Stream) []string {
-	args := []string{
-		"-hide_banner", "-y",
-		"-ss", fmt.Sprintf("%.3f", req.At.Seconds()),
-		"-i", req.Master,
-		"-t", fmt.Sprintf("%.3f", req.Length.Seconds()),
+	args := []string{"-hide_banner", "-y"}
+
+	// Seeking before the input makes ffmpeg jump straight to the right place
+	// instead of decoding everything up to it.
+	if req.At > 0 {
+		args = append(args, "-ss", fmt.Sprintf("%.3f", req.At.Seconds()))
+	}
+	args = append(args, "-i", req.Master)
+
+	// A whole film has no length to give: it runs to the end.
+	if req.Length > 0 {
+		args = append(args, "-t", fmt.Sprintf("%.3f", req.Length.Seconds()))
+	}
+
+	args = append(args,
 		"-map", fmt.Sprintf("0:%d", video.Index),
 		"-map", fmt.Sprintf("0:%d", setting.Audio.SourceIndex),
-	}
+	)
 
 	if setting.Video.Copy {
 		args = append(args, "-c:v", "copy")
@@ -335,6 +357,16 @@ func Compare(clips []Clip, clipLength, filmLength time.Duration) Comparison {
 
 	c.Clips = rows
 	return c
+}
+
+// outputPath decides where one result goes and what it is called.
+func outputPath(req Request, setting string) string {
+	if req.WholeFilm && req.FilmTitle != nil {
+		// A film, named the way the library names every film, with the
+		// profile as the edition so several versions sit side by side.
+		return filepath.Join(req.OutputDir, req.FilmTitle.VideoName(setting))
+	}
+	return filepath.Join(req.OutputDir, req.Film, ClipName(req.Film, req.Run, setting, req.At))
 }
 
 // ClipName names a clip the way the library names a film, with the setting as

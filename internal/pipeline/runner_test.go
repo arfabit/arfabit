@@ -13,7 +13,6 @@ import (
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
-	"github.com/arfabit/arfabit/internal/lab"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -362,35 +361,34 @@ func TestQueuedStageIsNamedPlainly(t *testing.T) {
 	}
 }
 
-// A lab run is work like any other: it belongs in the queue, waits its turn at
-// the processor, and keeps a log. The alternative is two of everything and a
-// page that tells two stories.
-func TestLabRunIsAJob(t *testing.T) {
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+// A transcode is work like any other: it belongs in the queue, waits its turn
+// at the processor, and keeps a log. The alternative is two of everything and
+// a page that tells two stories.
+func TestTranscodeIsAJob(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Profiles = map[string]config.Profile{cfg.Profile.Name: cfg.Profile}
 
-	job, err := r.StartLab(context.Background(), LabRequest{
-		Master:    "/nowhere/master.mkv",
-		Film:      "Crime 101 (2025)",
-		At:        10 * time.Minute,
-		Length:    30 * time.Second,
-		Settings:  []lab.Clip{{Name: "crf20-slow"}},
-		OutputDir: t.TempDir(),
+	r := &Runner{Config: cfg, Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	job, err := r.StartTranscode(context.Background(), LabRequest{
+		Master:   "/nowhere/master.mkv",
+		Film:     "Crime 101 (2025)",
+		At:       10 * time.Minute,
+		Length:   30 * time.Second,
+		Profiles: []string{cfg.Profile.Name},
+		LabDir:   t.TempDir(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if job.Kind != store.KindLab {
-		t.Errorf("Kind = %q, want %q", job.Kind, store.KindLab)
-	}
 	if job.Log == nil {
-		t.Error("a lab run has no log")
+		t.Error("a transcode has no log")
 	}
 	if job.Title != "Crime 101 (2025)" {
 		t.Errorf("Title = %q", job.Title)
 	}
 
-	// It is in the queue, not off to one side.
 	var found bool
 	for _, active := range r.Active() {
 		if active.ID == job.ID {
@@ -398,24 +396,38 @@ func TestLabRunIsAJob(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("the lab run is not in the queue")
+		t.Error("the transcode is not in the queue")
 	}
 
-	// And it does not hold the drive: clips are made from a copy.
+	// And it does not hold the drive: it works from a copy.
 	if busy := r.DriveIsBusy(); busy != nil {
-		t.Errorf("a lab run is holding the drive: %s", busy.Title)
+		t.Errorf("a transcode is holding the drive: %s", busy.Title)
 	}
 }
 
-// Nothing to work from is refused plainly rather than queued to fail later.
-func TestLabRunNeedsSomethingToDo(t *testing.T) {
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+// The whole film is not a test clip: it is a film, and belongs in the library.
+func TestWholeFilmIsNotAClip(t *testing.T) {
+	clip := LabRequest{Length: 30 * time.Second}
+	whole := LabRequest{Length: 0}
 
-	if _, err := r.StartLab(context.Background(), LabRequest{Film: "x"}); err == nil {
-		t.Error("a lab run with no copy was accepted")
+	if clip.WholeFilm() {
+		t.Error("a thirty-second clip was treated as the whole film")
 	}
-	if _, err := r.StartLab(context.Background(), LabRequest{Master: "/m.mkv"}); err == nil {
-		t.Error("a lab run with nothing to try was accepted")
+	if !whole.WholeFilm() {
+		t.Error("no length given should mean the whole film")
+	}
+}
+
+// Nothing to work from, or nothing chosen, is refused plainly rather than
+// queued to fail later.
+func TestTranscodeNeedsSomethingToDo(t *testing.T) {
+	r := &Runner{Config: config.Defaults(), Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	if _, err := r.StartTranscode(context.Background(), LabRequest{Profiles: []string{"Archive"}}); err == nil {
+		t.Error("a transcode with no copy was accepted")
+	}
+	if _, err := r.StartTranscode(context.Background(), LabRequest{Master: "/m.mkv"}); err == nil {
+		t.Error("a transcode with nothing chosen was accepted")
 	}
 }
 

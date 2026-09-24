@@ -10,16 +10,24 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 )
 
 // Config is the whole of ARFABIT's settings.
 type Config struct {
-	Node    Node
-	Paths   Paths
-	Server  Server
+	Node   Node
+	Paths  Paths
+	Server Server
+
+	// Profile is what a disc gets unless something says otherwise.
 	Profile Profile
+
+	// Profiles are the named settings available to choose between, including
+	// the default. Every one starts from the default and changes what it
+	// names, so a profile that only differs in quality says only that.
+	Profiles map[string]Profile
 
 	// Sources records where each setting came from, so the UI can show
 	// provenance and the user never has to guess which file to edit.
@@ -136,8 +144,48 @@ func Defaults() Config {
 			MinTitleLength:    120 * time.Second,
 			MaxConversions:    1,
 		},
-		Sources: map[string]string{},
+		Profiles: map[string]Profile{},
+		Sources:  map[string]string{},
 	}
+}
+
+// ProfileNames lists the profiles in a settled order, the default first.
+func (c Config) ProfileNames() []string {
+	names := make([]string, 0, len(c.Profiles))
+	for name := range c.Profiles {
+		if name != c.Profile.Name {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	return append([]string{c.Profile.Name}, names...)
+}
+
+// ProfileNamed finds a profile by name, falling back to the default.
+func (c Config) ProfileNamed(name string) (Profile, bool) {
+	if name == "" || name == c.Profile.Name {
+		return c.Profile, true
+	}
+	if p, ok := c.Profiles[name]; ok {
+		return p, true
+	}
+	return c.Profile, false
+}
+
+// Describe summarises a profile in one line, for choosing between them.
+func (p Profile) Describe() string {
+	picture := fmt.Sprintf("HEVC quality %d, %s", p.CRFBluray, p.Preset)
+	if p.AllowUHDCopy {
+		picture += "; 4K kept as-is"
+	}
+
+	sound := "sound converted"
+	if p.CopyNativeAudio {
+		sound = "Dolby kept as-is"
+	}
+
+	return picture + " · " + sound
 }
 
 // Load reads the layered configuration.
@@ -181,6 +229,13 @@ func Load(localPath string) (Config, error) {
 			return cfg, fmt.Errorf("%s: %w", layer.path, err)
 		}
 	}
+
+	// The default profile is one of the profiles, so everything that chooses
+	// between them has the whole list.
+	if cfg.Profiles == nil {
+		cfg.Profiles = map[string]Profile{}
+	}
+	cfg.Profiles[cfg.Profile.Name] = cfg.Profile
 
 	return cfg, cfg.Validate()
 }
@@ -288,6 +343,27 @@ func (c *Config) apply(doc document, source string) error {
 		c.Profile.SubLanguages = v.list
 		c.note("profile", "sub_languages", source)
 	}
+	// Sections like [profile.Small] are profiles of their own. Each starts
+	// from the default and changes only what it names.
+	for section := range doc {
+		name, ok := strings.CutPrefix(section, "profile.")
+		if !ok || name == "" {
+			continue
+		}
+
+		named := c.Profile
+		named.Name = strings.Trim(name, `"`)
+		if err := applyProfile(doc, section, &named); err != nil {
+			return err
+		}
+
+		if c.Profiles == nil {
+			c.Profiles = map[string]Profile{}
+		}
+		c.Profiles[named.Name] = named
+		c.note("profiles", named.Name, source)
+	}
+
 	if v, ok := doc.lookup("profile", "min_title_seconds"); ok {
 		n, err := v.asInt()
 		if err != nil {
@@ -313,6 +389,61 @@ func (c Config) SourceOf(section, key string) string {
 		return s
 	}
 	return "built-in default"
+}
+
+// applyProfile reads one profile's settings over a copy of the default.
+func applyProfile(doc document, section string, p *Profile) error {
+	if v, ok := doc.lookup(section, "preset"); ok {
+		p.Preset = v.asString()
+	}
+	if v, ok := doc.lookup(section, "audio_bitrate"); ok {
+		p.AudioBitrate = v.asString()
+	}
+
+	for _, n := range []struct {
+		key string
+		dst *int
+	}{
+		{"crf_uhd", &p.CRFUHD},
+		{"crf_bluray", &p.CRFBluray},
+		{"crf_dvd", &p.CRFDVD},
+	} {
+		v, ok := doc.lookup(section, n.key)
+		if !ok {
+			continue
+		}
+		number, err := v.asInt()
+		if err != nil {
+			return fmt.Errorf("line %d: %s.%s should be a whole number", v.line, section, n.key)
+		}
+		*n.dst = number
+	}
+
+	for _, b := range []struct {
+		key string
+		dst *bool
+	}{
+		{"copy_native_audio", &p.CopyNativeAudio},
+		{"allow_uhd_copy", &p.AllowUHDCopy},
+		{"include_forced_subs", &p.IncludeForcedSubs},
+		{"include_full_subs", &p.IncludeFullSubs},
+	} {
+		v, ok := doc.lookup(section, b.key)
+		if !ok {
+			continue
+		}
+		value, err := v.asBool()
+		if err != nil {
+			return fmt.Errorf("line %d: %s.%s should be true or false", v.line, section, b.key)
+		}
+		*b.dst = value
+	}
+
+	if v, ok := doc.lookup(section, "sub_languages"); ok {
+		p.SubLanguages = v.list
+	}
+
+	return nil
 }
 
 // Validate checks settings that would otherwise fail much later, when a disc

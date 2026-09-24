@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/arfabit/arfabit/internal/drive"
-	"github.com/arfabit/arfabit/internal/lab"
 	"github.com/arfabit/arfabit/internal/pipeline"
 )
 
@@ -231,31 +230,31 @@ func editionOf(name string) string {
 	return tag
 }
 
-// handleLab puts a set of test clips in the queue.
+// handleTranscode renders a copy under the chosen profiles.
 //
-// The work itself belongs to the runner, so that a lab run is a job like any
-// other: it waits its turn at the processor, keeps a log, can be stopped, and
-// shows up in the queue beside the discs.
-func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
+// A stretch of the film becomes clips to compare; the whole of it becomes
+// films, one per profile, each an edition in the library.
+func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Master   string     `json:"master"`
-		Film     string     `json:"film"`
-		At       float64    `json:"at"`
-		Length   float64    `json:"length"`
-		Settings []lab.Clip `json:"settings"`
+		Master   string   `json:"master"`
+		Film     string   `json:"film"`
+		At       float64  `json:"at"`
+		Length   float64  `json:"length"`
+		Profiles []string `json:"profiles"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
 
-	job, err := s.Runner.StartLab(context.Background(), pipeline.LabRequest{
-		Master:    req.Master,
-		Film:      req.Film,
-		At:        time.Duration(req.At * float64(time.Second)),
-		Length:    time.Duration(req.Length * float64(time.Second)),
-		Settings:  req.Settings,
-		OutputDir: s.Config.Paths.Lab,
+	job, err := s.Runner.StartTranscode(context.Background(), pipeline.LabRequest{
+		Master:     req.Master,
+		Film:       req.Film,
+		At:         time.Duration(req.At * float64(time.Second)),
+		Length:     time.Duration(req.Length * float64(time.Second)),
+		Profiles:   req.Profiles,
+		LabDir:     s.Config.Paths.Lab,
+		LibraryDir: s.Config.Paths.Library,
 	})
 	if err != nil {
 		writeError(w, capitalise(err.Error())+".", nil)
@@ -263,6 +262,29 @@ func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]string{"job": job.ID})
+}
+
+// handleProfiles lists the named settings available to choose between.
+func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	type profile struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Default     bool   `json:"default"`
+	}
+
+	names := s.Config.ProfileNames()
+	profiles := make([]profile, 0, len(names))
+
+	for _, name := range names {
+		p, _ := s.Config.ProfileNamed(name)
+		profiles = append(profiles, profile{
+			Name:        name,
+			Description: p.Describe(),
+			Default:     name == s.Config.Profile.Name,
+		})
+	}
+
+	writeJSON(w, map[string]any{"profiles": profiles})
 }
 
 // handleConvert turns a copy that already exists into a film.

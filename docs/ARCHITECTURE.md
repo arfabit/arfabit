@@ -307,8 +307,17 @@ Aspect matters mostly for DVDs, where 4:3 and letterboxed 16:9 want different
 treatment. Cropping is **never** automatic — cropdetect misfires on dark scenes —
 but the Plan offers it with the savings shown.
 
-**Day 1 ships exactly one profile.** The matcher structure exists from the start so
-that adding more is data, not code.
+**Profiles are named and defined in the settings file.** A section like
+`[profile.Small]` starts from the default and changes only what it names, so a
+profile differing in quality alone says only that. The default is itself one of
+the profiles, so anything choosing between them sees the whole list.
+
+They are chosen in the Transcode section, several at a time: comparing means
+having both to watch. The same mechanism produces clips and films — a stretch
+of a film becomes clips in the lab folder, the whole of it becomes films in the
+library, one per profile, each an edition. Treating those as two features would
+mean two of everything differing only in how long a piece of film was passed
+in.
 
 ---
 

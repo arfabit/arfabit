@@ -202,3 +202,86 @@ func write(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// Profiles were meant to be the way quality is chosen, and there was nowhere
+// to define one. A section like [profile.Small] is a profile of its own.
+func TestNamedProfiles(t *testing.T) {
+	dir := t.TempDir()
+	local := filepath.Join(dir, "config.local.toml")
+	write(t, local, `
+[profile]
+name = "Archive"
+crf_bluray = 20
+preset = "slow"
+
+[profile.Small]
+crf_bluray = 24
+preset = "medium"
+
+[profile.Exact]
+allow_uhd_copy = true
+copy_native_audio = true
+`)
+
+	cfg, err := Load(local)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Profiles) != 3 {
+		t.Fatalf("got %d profiles, want the default and two named: %v", len(cfg.Profiles), cfg.ProfileNames())
+	}
+
+	// A named profile changes what it names and keeps the rest.
+	small, ok := cfg.ProfileNamed("Small")
+	if !ok {
+		t.Fatal("Small was not found")
+	}
+	if small.CRFBluray != 24 || small.Preset != "medium" {
+		t.Errorf("Small = crf %d, preset %q", small.CRFBluray, small.Preset)
+	}
+	if small.CRFDVD != cfg.Profile.CRFDVD {
+		t.Errorf("Small changed a setting it did not name: crf_dvd = %d", small.CRFDVD)
+	}
+	if small.Name != "Small" {
+		t.Errorf("Small is named %q", small.Name)
+	}
+
+	// The default is one of the profiles, so anything choosing between them
+	// sees the whole list.
+	if _, ok := cfg.Profiles["Archive"]; !ok {
+		t.Error("the default profile is missing from the list")
+	}
+
+	// The default comes first; the rest are in a settled order.
+	names := cfg.ProfileNames()
+	if names[0] != "Archive" {
+		t.Errorf("ProfileNames starts with %q, want the default", names[0])
+	}
+}
+
+// An unknown name falls back to the default rather than failing, and says so.
+func TestUnknownProfileFallsBack(t *testing.T) {
+	cfg := Defaults()
+	cfg.Profiles = map[string]Profile{cfg.Profile.Name: cfg.Profile}
+
+	got, ok := cfg.ProfileNamed("Nonexistent")
+	if ok {
+		t.Error("an unknown profile was reported as found")
+	}
+	if got.Name != cfg.Profile.Name {
+		t.Errorf("fell back to %q, want the default", got.Name)
+	}
+}
+
+// Choosing between profiles means reading a line about each.
+func TestProfileDescribe(t *testing.T) {
+	p := Defaults().Profile
+	got := p.Describe()
+
+	for _, want := range []string{"quality 20", "slow", "Dolby"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the description %q is missing %q", got, want)
+		}
+	}
+}

@@ -125,8 +125,8 @@
   </section>
 
   <section class="card">
-    <h2>Try different quality settings</h2>
-    <p class="muted small">Makes short clips from a copy you already have, so you can watch them and decide. Nothing else is changed.</p>
+    <h2>Transcode</h2>
+    <p class="muted small">Makes films or test clips from a copy you already have. Pick as many profiles as you want to compare; each one produces its own file.</p>
 
     <div class="lab-controls">
       <label>
@@ -135,28 +135,26 @@
       </label>
       <label>
         <span>Start at</span>
-        <input id="lab-at" type="text" value="0:10:00" placeholder="h:mm:ss">
+        <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
       </label>
       <label>
         <span>Length</span>
         <select id="lab-length">
+          <option value="0" selected>The whole film</option>
           <option value="10">10 seconds</option>
-          <option value="30" selected>30 seconds</option>
+          <option value="30">30 seconds</option>
           <option value="60">1 minute</option>
           <option value="120">2 minutes</option>
           <option value="600">10 minutes</option>
         </select>
       </label>
-      <label>
-        <span>Try</span>
-        <select id="lab-what">
-          <option value="video" selected>Picture quality</option>
-          <option value="audio">Sound</option>
-        </select>
-      </label>
     </div>
 
-    <button id="lab-run" class="primary">Make the clips</button>
+    <h3>Profiles</h3>
+    <div id="profile-list"></div>
+    <p id="lab-destination" class="muted small"></p>
+
+    <button id="lab-run" class="primary">Start</button>
     <p id="lab-status" class="muted small"></p>
     <div id="lab-results"></div>
 
@@ -167,16 +165,17 @@
 
   <section class="card">
     <h2>Settings</h2>
-    <div class="setting">
-      <div>Converting at once</div>
-      <p id="conversions-detail" class="muted small"></p>
-    </div>
 
     <label class="track">
       <input id="autostart" type="checkbox">
       <span>Start ARFABIT when this computer starts</span>
     </label>
     <p id="autostart-detail" class="muted small"></p>
+
+    <div class="setting">
+      <div>Converting at once</div>
+      <p id="conversions-detail" class="muted small"></p>
+    </div>
 
     <div class="setting">
       <div>ARFABIT itself</div>

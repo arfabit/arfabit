@@ -79,6 +79,20 @@ sub_languages = ["eng"]
 # next disc goes in as soon as the last one comes out, whatever is converting.
 max_conversions = 1
 
+# Other profiles you can choose between.
+#
+# Each one starts from the settings above and changes only what it names, so a
+# profile that differs in quality alone says only that. They appear in the
+# Transcode section, where you can tick several and compare the results.
+#
+# [profile.Small]
+# crf_bluray = 24
+# preset = "medium"
+#
+# [profile.Exact]
+# allow_uhd_copy = true
+# copy_native_audio = true
+
 # Ignore anything shorter than this when looking for the movie. Two minutes
 # hides menus and studio logos. Set it lower only if a disc seems to be hiding
 # something.

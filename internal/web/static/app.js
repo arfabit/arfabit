@@ -983,28 +983,67 @@ function renderMasterList(masters) {
   }));
 }
 
-// Settings the lab tries, which differ by what is being judged.
+// loadProfiles lists the named settings to choose between.
 //
-// Picture and sound are tried separately on purpose: changing both at once
-// tells you only that something changed.
-function labSettings(what) {
-  if (what === "audio") {
-    return [
-      { name: "untouched", video: { copy: true }, audio: { copy: true } },
-      { name: "dolby-768", video: { copy: true }, audio: { codec: "eac3", bitrate: "768k" } },
-      { name: "dolby-640", video: { copy: true }, audio: { codec: "eac3", bitrate: "640k" } },
-      { name: "aac-256-stereo", video: { copy: true }, audio: { codec: "aac", bitrate: "256k", channels: 2 } },
-      { name: "aac-192-stereo", video: { copy: true }, audio: { codec: "aac", bitrate: "192k", channels: 2 } },
-    ];
+// Several at once is the point: comparing means having both to watch, and a
+// whole film under two profiles is two editions to pick between in Plex.
+async function loadProfiles() {
+  const { profiles } = await fetch("/api/profiles").then((r) => r.json());
+  const box = $("profile-list");
+
+  if (!profiles || profiles.length === 0) {
+    box.textContent = "No profiles are defined.";
+    return;
   }
 
-  return [
-    { name: "untouched", video: { copy: true }, audio: { copy: true } },
-    { name: "crf18-slow", video: { crf: 18, preset: "slow" }, audio: { copy: true } },
-    { name: "crf20-slow", video: { crf: 20, preset: "slow" }, audio: { copy: true } },
-    { name: "crf20-medium", video: { crf: 20, preset: "medium" }, audio: { copy: true } },
-    { name: "crf22-medium", video: { crf: 22, preset: "medium" }, audio: { copy: true } },
-  ];
+  box.replaceChildren(...profiles.map((profile, i) => {
+    const row = document.createElement("label");
+    row.className = "track";
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = profile.name;
+    box.className = "profile-choice";
+    // The default is ticked, so pressing Start without thinking does the
+    // ordinary thing.
+    box.checked = profile.default;
+    box.addEventListener("change", describeDestination);
+
+    const text = document.createElement("span");
+    text.textContent = `${profile.name} — ${profile.description}`;
+
+    row.append(box, text);
+    return row;
+  }));
+
+  describeDestination();
+}
+
+// chosenProfiles is what is ticked, in the order shown.
+function chosenProfiles() {
+  return [...document.querySelectorAll(".profile-choice")]
+    .filter((box) => box.checked)
+    .map((box) => box.value);
+}
+
+// describeDestination says what pressing Start will produce and where it goes.
+//
+// A whole film is a film and belongs in the library; a stretch of one is a
+// clip to watch and compare. Saying which avoids the surprise.
+function describeDestination() {
+  const chosen = chosenProfiles();
+  const whole = Number($("lab-length").value) === 0;
+
+  if (chosen.length === 0) {
+    $("lab-destination").textContent = "Tick at least one profile.";
+    $("lab-run").disabled = true;
+    return;
+  }
+
+  $("lab-run").disabled = false;
+  $("lab-destination").textContent = whole
+    ? `${chosen.length} full film${chosen.length === 1 ? "" : "s"}, saved to your library as separate editions. This takes hours.`
+    : `${chosen.length} test clip${chosen.length === 1 ? "" : "s"}, saved to the lab folder to watch and compare.`;
 }
 
 // parseTimestamp reads "1:15:20", "15:20" or plain seconds.
@@ -1389,20 +1428,25 @@ function wireButtons() {
     refresh();
   });
 
-  on("lab-run", "click", (e) => {
-    e.target.disabled = true;
-    $("lab-status").textContent = "Making the clips. Each one takes a few seconds.";
-    $("lab-results").replaceChildren();
+  on("lab-length", "change", describeDestination);
 
+  on("lab-run", "click", async (e) => {
     const chosen = $("lab-master").selectedOptions[0];
 
-    post("/api/lab", {
-      master: $("lab-master").value,
-      film: chosen ? chosen.dataset.film : "",
-      at: parseTimestamp($("lab-at").value),
-      length: Number($("lab-length").value),
-      settings: labSettings($("lab-what").value),
-    });
+    const result = await busy(e.target, "Adding\u2026", "Added to the queue", () =>
+      post("/api/transcode", {
+        master: $("lab-master").value,
+        film: chosen ? chosen.dataset.film : "",
+        at: parseTimestamp($("lab-at").value),
+        length: Number($("lab-length").value),
+        profiles: chosenProfiles(),
+      }));
+
+    if (result) {
+      $("lab-status").textContent =
+        "Added to the queue. Its progress and log are there with everything else.";
+      refresh();
+    }
   });
 
   on("index-build", "click", (e) => {
@@ -1421,6 +1465,7 @@ function start() {
   loadIndexStatus();
   loadConversionLimit();
   loadMasters();
+  loadProfiles();
   loadLabClips();
   loadDriveHealth();
 }
