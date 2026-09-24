@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/drive"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/lab"
 )
@@ -36,6 +37,8 @@ func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 
 	type driveReport struct {
 		Name        string  `json:"name"`
+		Mounted     bool    `json:"mounted"`
+		MountNote   string  `json:"mount_note,omitempty"`
 		Access      string  `json:"access"`
 		Fast        bool    `json:"fast"`
 		Explanation string  `json:"explanation"`
@@ -54,6 +57,13 @@ func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 			Explanation: h.Explain(),
 		}
 
+		// The system holding the disc open is the usual reason a drive reads
+		// slowly, and it is something a person can act on.
+		if mount := drive.Check(ctx, h.Drive.Device); mount.Mounted {
+			report.Mounted = true
+			report.MountNote = mount.Describe()
+		}
+
 		// What this drive has actually managed, which beats any claim about
 		// what it ought to manage.
 		if stats := s.Runner.Calibration.Drives[h.Drive.Device]; stats != nil {
@@ -68,6 +78,35 @@ func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{"drives": reports})
+}
+
+// handleFreeDrive asks the operating system to let go of the disc.
+func (s *Server) handleFreeDrive(w http.ResponseWriter, r *http.Request) {
+	if busy := s.Runner.DriveIsBusy(); busy != nil {
+		writeError(w, "The drive is busy with "+busy.Title+".", nil)
+		return
+	}
+
+	device := ""
+	for _, d := range s.Drives() {
+		device = d.Device
+		break
+	}
+	if device == "" {
+		writeError(w, "There is no disc drive to free.", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	state := drive.Unmount(ctx, device)
+	if state.Mounted {
+		writeError(w, "Your computer would not let go of the disc.", nil)
+		return
+	}
+
+	writeJSON(w, map[string]any{"freed": true})
 }
 
 // handleMasters lists the copies available to experiment on.

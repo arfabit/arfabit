@@ -713,6 +713,10 @@ async function loadDriveHealth() {
     return;
   }
 
+  // The system holding the disc is the usual reason a drive reads slowly, and
+  // unlike the access mode it is something a person can fix in one click.
+  $("drive-free").hidden = !drives.some((d) => d.mounted);
+
   box.replaceChildren(...drives.map((drive) => {
     const block = document.createElement("div");
 
@@ -724,6 +728,13 @@ async function loadDriveHealth() {
     mode.className = drive.fast ? "drive-fast" : "drive-slow";
     mode.textContent = drive.explanation;
     block.append(mode);
+
+    if (drive.mount_note) {
+      const mount = document.createElement("div");
+      mount.className = "drive-slow";
+      mount.textContent = drive.mount_note;
+      block.append(mount);
+    }
 
     if (drive.observed > 0) {
       const observed = document.createElement("div");
@@ -1155,6 +1166,13 @@ function wireButtons() {
     busy(e.target, "Checking\u2026", null, async () => {
       await loadDriveHealth();
       return true;
+    }));
+
+  on("drive-free", "click", (e) =>
+    busy(e.target, "Letting go\u2026", "Done", async () => {
+      const result = await post("/api/drive-free");
+      if (result) await loadDriveHealth();
+      return result;
     }));
 
   on("lab-run", "click", (e) => {

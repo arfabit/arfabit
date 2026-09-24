@@ -13,6 +13,7 @@ import (
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
+	"github.com/arfabit/arfabit/internal/drive"
 	"github.com/arfabit/arfabit/internal/eject"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/meta"
@@ -190,6 +191,12 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 
 	job.Progress = Progress{Since: time.Now(), Operation: "Reading the disc"}
 	log.Printf(store.StageScan, "Reading the disc in %s. This takes a minute or two.", drive.Name)
+
+	// While the system holds the disc open, MakeMKV cannot claim the drive
+	// exclusively, and an encrypted disc then reads at roughly the speed it
+	// would play at — hours rather than tens of minutes. Letting go of it
+	// leaves the disc exactly where it is.
+	r.freeTheDisc(ctx, job, drive.Device)
 
 	// MakeMKV talks while it works; passing that through is the difference
 	// between a page that looks busy and one that looks broken.
@@ -717,6 +724,29 @@ func (r *Runner) ripEstimate(job *Job) time.Duration {
 		return 0
 	}
 	return r.Calibration.EstimateRip(job.Drive, disc.Kind(job.DiscKind), job.Plan.SourceSize).Time
+}
+
+// freeTheDisc asks the operating system to let go of the disc.
+//
+// Nothing here is fatal: if it cannot be done the disc is still readable, just
+// slowly, and saying so is more use than refusing to continue.
+func (r *Runner) freeTheDisc(ctx context.Context, job *Job, device string) {
+	state := drive.Check(ctx, device)
+	if !state.Mounted {
+		return
+	}
+
+	job.Log.Printf(job.Stage, "Your computer has this disc open, which would make reading it much slower. Letting go of it.")
+
+	after := drive.Unmount(ctx, device)
+	if after.Mounted {
+		job.Log.Detail(job.Stage,
+			"Your computer would not let go of the disc, so reading it will be slower than it could be.",
+			after.Output)
+		return
+	}
+
+	job.Log.Printf(job.Stage, "Done. The disc is still in the drive.")
 }
 
 // stageWords names a stage the way the page does, for messages that mention
