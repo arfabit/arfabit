@@ -383,11 +383,14 @@ function spaceMessage(space) {
 }
 
 function sendPlanChange() {
-  const change = { audio: {}, subtitles: {} };
+  const change = { audio: {}, subtitles: {}, convert: $("plan-convert").checked };
+
   for (const box of document.querySelectorAll("#plan input[type=checkbox]")) {
+    if (!box.dataset.kind) continue;
     change[box.dataset.kind][Number(box.dataset.source)] = box.checked;
   }
-  post("/api/plan", change);
+
+  post("/api/plan", change).then(() => refresh());
 }
 
 async function saveTitle() {
@@ -451,6 +454,13 @@ function renderPlan(job) {
   }
 
   renderTitleChoice(job);
+
+  // Stopping at the copy is often the right choice: the copy is the only part
+  // that needs the disc, and converting can be done any time afterwards.
+  $("plan-convert").checked = plan.convert !== false;
+  $("convert-note").textContent = plan.convert !== false
+    ? "Turn this off to stop after copying the disc. The copy is the slow part that needs the drive; you can make the Apple TV file later from Your copies."
+    : "ARFABIT will copy the disc and stop. Make the Apple TV file whenever you like, from Your copies below.";
 
   const est = plan.estimated_time ? Math.round(plan.estimated_time / 60000000000) : 0;
   $("plan-estimate").textContent = est
@@ -642,6 +652,8 @@ function updateJobCard(job) {
   const elapsed = elapsedSince(progress.since);
   if (elapsed) now.push(elapsed);
   if (pct > 0) now.push(`${pct}%`);
+  // A speed is the only figure here that can be compared to anything.
+  if (progress.rate) now.push(progress.rate);
   if (progress.operation) now.push(progress.operation);
   card.querySelector(".job-detail").textContent = now.join(" · ");
 
@@ -924,6 +936,8 @@ async function loadDriveHealth() {
 
 async function loadMasters() {
   const { masters } = await fetch("/api/masters").then((r) => r.json());
+  renderMasterList(masters);
+
   const select = $("lab-master");
 
   if (!masters || masters.length === 0) {
@@ -938,6 +952,35 @@ async function loadMasters() {
     return option;
   }));
   $("lab-run").disabled = false;
+}
+
+// renderMasterList shows the copies, each with a way to make a film from it.
+function renderMasterList(masters) {
+  const box = $("master-list");
+
+  if (!masters || masters.length === 0) {
+    box.textContent = "No copies yet. Read a disc and one will appear here.";
+    return;
+  }
+
+  box.replaceChildren(...masters.map((master) => {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.textContent = `${master.title} · ${bytes(master.size)}`;
+
+    const convert = document.createElement("button");
+    convert.textContent = "Make the movie file";
+    convert.addEventListener("click", async (e) => {
+      const result = await busy(e.target, "Adding\u2026", "Added to the queue", () =>
+        post("/api/convert", { master: master.path, title: master.title }));
+      if (result) refresh();
+    });
+
+    row.append(name, convert);
+    return row;
+  }));
 }
 
 // Settings the lab tries, which differ by what is being judged.
@@ -1263,6 +1306,7 @@ function wireButtons() {
   });
 
   on("title-save", "click", saveTitle);
+  on("plan-convert", "change", sendPlanChange);
 
   on("log-filter", "input", applyFilter);
 

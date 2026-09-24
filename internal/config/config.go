@@ -85,6 +85,13 @@ type Profile struct {
 	// MinTitleLength hides titles shorter than this during a scan.
 	MinTitleLength time.Duration
 
+	// ConvertAfterRip decides whether a disc becomes a film straight away, or
+	// stops at the copy.
+	//
+	// Stopping at the copy is the fast way through a stack of discs: only the
+	// copy needs the drive, and converting can be done later from the copy.
+	ConvertAfterRip bool
+
 	// MaxConversions is how many films may be converted at once, counting
 	// lab clips. One is right for most machines: x265 already uses every
 	// core, so a second conversion makes both later rather than either
@@ -125,6 +132,7 @@ func Defaults() Config {
 			IncludeForcedSubs: true,
 			IncludeFullSubs:   true,
 			SubLanguages:      []string{"eng"},
+			ConvertAfterRip:   true,
 			MinTitleLength:    120 * time.Second,
 			MaxConversions:    1,
 		},
@@ -269,6 +277,7 @@ func (c *Config) apply(doc document, source string) error {
 		{"allow_uhd_copy", &c.Profile.AllowUHDCopy},
 		{"include_forced_subs", &c.Profile.IncludeForcedSubs},
 		{"include_full_subs", &c.Profile.IncludeFullSubs},
+		{"convert_after_rip", &c.Profile.ConvertAfterRip},
 	} {
 		if err := boolean("profile", b.key, b.dst); err != nil {
 			return err

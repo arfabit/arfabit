@@ -128,6 +128,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/masters", s.handleMasters)
 	mux.HandleFunc("GET /api/lab", s.handleLabClips)
 	mux.HandleFunc("POST /api/lab", s.handleLab)
+	mux.HandleFunc("POST /api/convert", s.handleConvert)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
 	mux.HandleFunc("GET /api/log", s.handleLog)
@@ -317,10 +318,15 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	var change struct {
 		Audio     map[int]bool `json:"audio"`
 		Subtitles map[int]bool `json:"subtitles"`
+		Convert   *bool        `json:"convert"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
 		writeError(w, "ARFABIT could not read that change.", err)
 		return
+	}
+
+	if change.Convert != nil {
+		job.Plan.Convert = *change.Convert
 	}
 
 	for i := range job.Plan.Audio {

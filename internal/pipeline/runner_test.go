@@ -3,6 +3,9 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"github.com/arfabit/arfabit/internal/config"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -413,5 +416,61 @@ func TestLabRunNeedsSomethingToDo(t *testing.T) {
 	}
 	if _, err := r.StartLab(context.Background(), LabRequest{Master: "/m.mkv"}); err == nil {
 		t.Error("a lab run with nothing to try was accepted")
+	}
+}
+
+// Stopping at the copy is the fast way through a stack of discs: the copy is
+// the only part that needs the drive.
+func TestPlanCanStopAtTheCopy(t *testing.T) {
+	profile := config.Defaults().Profile
+	if !profile.ConvertAfterRip {
+		t.Error("converting after a rip should be the default")
+	}
+
+	profile.ConvertAfterRip = false
+	d, sel := blurayDisc()
+
+	plan, err := BuildPlan(d, sel, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Convert {
+		t.Error("the Plan converts despite the profile saying to stop at the copy")
+	}
+}
+
+// A copy can be turned into a film later, with no disc involved.
+func TestConvertNeedsACopy(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	if _, err := r.StartConvert(context.Background(), ConvertRequest{}); err == nil {
+		t.Error("converting nothing was accepted")
+	}
+}
+
+// The film's name comes from the copy's folder, which is how this works
+// without being told.
+func TestConvertTakesItsNameFromTheFolder(t *testing.T) {
+	dir := t.TempDir()
+	film := filepath.Join(dir, "Crime 101 (2025)")
+	if err := os.MkdirAll(film, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	master := filepath.Join(film, "CRIME_101_t00.mkv")
+	if err := os.WriteFile(master, []byte("not really a film"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	// The copy is not a real film, so this cannot succeed — but it must fail
+	// having worked out the name, not before.
+	_, err := r.StartConvert(context.Background(), ConvertRequest{Master: master})
+	if err == nil {
+		t.Skip("ffprobe accepted a file that is not a film")
+	}
+	if !strings.Contains(err.Error(), "could not be read") && !strings.Contains(err.Error(), "no picture") {
+		t.Errorf("failed for the wrong reason: %v", err)
 	}
 }

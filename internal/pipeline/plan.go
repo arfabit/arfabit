@@ -23,6 +23,7 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, profile config.Profile) (*store
 
 	plan := &store.Plan{
 		Profile:    profile.Name,
+		Convert:    profile.ConvertAfterRip,
 		TitleIndex: title.Index,
 		Duration:   formatDuration(title.Duration),
 		SourceSize: title.SizeBytes,

@@ -79,6 +79,14 @@ type Progress struct {
 	// Expected is how long the stage was estimated to take, for context
 	// beside the clock.
 	Expected string `json:"expected,omitempty"`
+
+	// Rate is how fast the disc is being read or the file written, averaged
+	// over the last few seconds. Empty until there is enough to measure.
+	//
+	// A rate is worth showing because it is comparable: a percentage climbing
+	// slowly means nothing on its own, but 2.6 MB/s against 12 MB/s is an
+	// answer.
+	Rate string `json:"rate,omitempty"`
 }
 
 // Current returns the job waiting on a decision, or the newest running one.
@@ -404,6 +412,8 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 		job.Progress.Expected)
 	r.save(job)
 
+	var ripRate rateTracker
+
 	res, err := r.Backend.Rip(ctx, makemkv.RipRequest{
 		DriveIndex: 0,
 		Titles:     []int{job.Plan.TitleIndex},
@@ -417,11 +427,17 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 				percent = p.CurrentPercent()
 			}
 
+			// MakeMKV reports progress as a fraction, so bytes read is that
+			// fraction of the title. Near enough to measure a speed with,
+			// which is the only figure here that can be compared to anything.
+			done := int64(percent / 100 * float64(job.Plan.SourceSize))
+
 			job.Progress = Progress{
 				Percent:   percent,
 				Operation: p.Operation,
 				Since:     ripStart,
 				Expected:  job.Progress.Expected,
+				Rate:      HumanRate(ripRate.Observe(done)),
 			}
 			r.notify(job)
 		},
@@ -446,6 +462,17 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 
 	ejected := eject.Eject(ctx, job.Drive)
 	job.Log.Printf(store.StageEject, "%s The rest happens on the copy.", ejected.Describe(true))
+
+	// Stopping at the copy is a perfectly good outcome, and often the right
+	// one: the copy is the only part that needed the disc.
+	if !job.Plan.Convert {
+		job.State = store.StateDone
+		job.Progress = Progress{Percent: 100}
+		job.Note = fmt.Sprintf("%s is copied. Convert it whenever you like.", job.Title)
+		job.Log.Printf(store.StageRip, "%s", job.Note)
+		r.save(job)
+		return nil
+	}
 
 	// OCR belongs here. Until it exists, the delivery carries no subtitles and
 	// says so plainly rather than quietly omitting them.
@@ -547,6 +574,8 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 	}
 
 	start := time.Now()
+	var writeRate rateTracker
+
 	err = ffmpeg.Run(ctx, args, ffmpeg.RunOptions{
 		Duration: time.Duration(info.Duration * float64(time.Second)),
 		OnProgress: func(p ffmpeg.Progress) {
@@ -555,6 +584,7 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 				Operation: "Making the movie file",
 				Remaining: humanDuration(p.Remaining().Round(time.Minute)),
 				Since:     start,
+				Rate:      HumanRate(writeRate.Observe(p.Bytes)),
 			}
 			r.notify(job)
 		},

@@ -63,6 +63,9 @@ const (
 
 	// KindLab is a set of test clips rendered from a copy.
 	KindLab Kind = "lab"
+
+	// KindConvert is a copy being turned into a film, with no disc involved.
+	KindConvert Kind = "convert"
 )
 
 // Job is one piece of work: a disc on its way through the pipeline, or a set
@@ -132,6 +135,13 @@ type Plan struct {
 	// EstimatedSize and EstimatedTime are the numbers shown before starting.
 	EstimatedSize int64         `json:"estimated_size"`
 	EstimatedTime time.Duration `json:"estimated_time"`
+
+	// Convert says whether to make the Apple TV file after copying the disc.
+	//
+	// Turning it off stops after the copy, which is the fast way through a
+	// stack of discs: the copy is the only part that needs the drive, and
+	// converting can be done later from the copy at any time.
+	Convert bool `json:"convert"`
 
 	// Obfuscated records that the disc hid its main feature among decoys.
 	Obfuscated bool   `json:"obfuscated"`

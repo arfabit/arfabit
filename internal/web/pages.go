@@ -265,6 +265,31 @@ func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"job": job.ID})
 }
 
+// handleConvert turns a copy that already exists into a film.
+func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Master string `json:"master"`
+		Title  string `json:"title"`
+		Year   int    `json:"year"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that request.", err)
+		return
+	}
+
+	job, err := s.Runner.StartConvert(context.Background(), pipeline.ConvertRequest{
+		Master: req.Master,
+		Title:  req.Title,
+		Year:   req.Year,
+	})
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
+
+	writeJSON(w, map[string]string{"job": job.ID})
+}
+
 // capitalise makes a sentence of a message that was written as a fragment.
 func capitalise(s string) string {
 	if s == "" {

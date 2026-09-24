@@ -204,3 +204,7 @@ table.results tr.best td { font-weight: 600; }
 /* The disc whose log is being shown on its own. */
 .job-card { cursor: pointer; }
 .job-card.focused { border-color: var(--accent); }
+
+.convert-choice { margin: 0.75rem 0 0.25rem; }
+#master-list .row { align-items: center; }
+#master-list button { font-size: 0.85rem; padding: 0.3rem 0.7rem; }
