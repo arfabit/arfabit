@@ -306,6 +306,38 @@ func languageFilter(profile config.Profile) func(string) bool {
 	return func(lang string) bool { return strings.EqualFold(lang, primary) }
 }
 
+// DescribeStream names a track from a master in plain words.
+//
+// What a person needs in order to choose between tracks is the language, how
+// wide it is and what it is — not a codec identifier.
+func DescribeStream(s ffmpeg.Stream) string {
+	name := languageName(s.Lang)
+
+	switch s.Kind {
+	case "audio":
+		label := fmt.Sprintf("%s · %s · %s", name, layoutName(s.Channels, s.Layout), codecName(s.Codec))
+		if isLossless("", s.Codec) {
+			label += " (lossless)"
+		}
+		if s.Title != "" {
+			label += " · " + s.Title
+		}
+		return label
+
+	case "subtitle":
+		label := name
+		if s.Forced {
+			label += " · only for foreign speech"
+		}
+		if s.Title != "" {
+			label += " · " + s.Title
+		}
+		return label
+	}
+
+	return name
+}
+
 // layoutName describes a channel layout plainly.
 //
 // MakeMKV reports layouts like "5.1(side)", which is accurate and means

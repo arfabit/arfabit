@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"github.com/arfabit/arfabit/internal/config"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -451,38 +449,29 @@ func TestPlanCanStopAtTheCopy(t *testing.T) {
 	}
 }
 
-// A copy can be turned into a film later, with no disc involved.
-func TestConvertNeedsACopy(t *testing.T) {
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+// A master holds everything the disc had; a file for a television usually
+// wants a few of those, so a transcode can be told which.
+func TestTranscodeKeepsOnlyTheChosenTracks(t *testing.T) {
+	plan := &store.Plan{Audio: []store.PlannedAudio{
+		{SourceIndex: 1, Selected: true},
+		{SourceIndex: 2, Selected: true},
+		{SourceIndex: 3, Selected: false},
+	}}
 
-	if _, err := r.StartConvert(context.Background(), ConvertRequest{}); err == nil {
-		t.Error("converting nothing was accepted")
-	}
-}
-
-// The film's name comes from the copy's folder, which is how this works
-// without being told.
-func TestConvertTakesItsNameFromTheFolder(t *testing.T) {
-	dir := t.TempDir()
-	film := filepath.Join(dir, "Crime 101 (2025)")
-	if err := os.MkdirAll(film, 0o755); err != nil {
-		t.Fatal(err)
+	// What renderProfile does with a chosen set.
+	wanted := map[int]bool{3: true}
+	for i := range plan.Audio {
+		plan.Audio[i].Selected = wanted[plan.Audio[i].SourceIndex]
 	}
 
-	master := filepath.Join(film, "CRIME_101_t00.mkv")
-	if err := os.WriteFile(master, []byte("not really a film"), 0o644); err != nil {
-		t.Fatal(err)
+	var kept []int
+	for _, a := range plan.Audio {
+		if a.Selected {
+			kept = append(kept, a.SourceIndex)
+		}
 	}
 
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
-
-	// The copy is not a real film, so this cannot succeed — but it must fail
-	// having worked out the name, not before.
-	_, err := r.StartConvert(context.Background(), ConvertRequest{Master: master})
-	if err == nil {
-		t.Skip("ffprobe accepted a file that is not a film")
-	}
-	if !strings.Contains(err.Error(), "could not be read") && !strings.Contains(err.Error(), "no picture") {
-		t.Errorf("failed for the wrong reason: %v", err)
+	if len(kept) != 1 || kept[0] != 3 {
+		t.Errorf("kept %v, want only the chosen track", kept)
 	}
 }

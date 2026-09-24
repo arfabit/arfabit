@@ -214,7 +214,8 @@ func clipArgs(req Request, setting Clip, video *ffmpeg.Stream) []string {
 	}
 	args = append(args, "-i", req.Master)
 
-	// A whole film has no length to give: it runs to the end.
+	// No length means run to the end. A length longer than what remains does
+	// the same thing, which is why nothing here has to check.
 	if req.Length > 0 {
 		args = append(args, "-t", fmt.Sprintf("%.3f", req.Length.Seconds()))
 	}

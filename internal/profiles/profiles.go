@@ -108,11 +108,14 @@ func (s *Store) Delete(name string) error {
 // Ordered with the default first and the rest by name, so the list does not
 // rearrange itself between visits.
 func (s *Store) All(cfg config.Config) []Profile {
-	out := []Profile{{
-		Profile:  cfg.Profile,
-		Editable: false,
-		Source:   "your settings file",
-	}}
+	// Everything is editable. Changing one here keeps a version in ARFABIT's
+	// own file, which takes precedence; the settings file is left as it was
+	// written, for anybody who prefers to work that way.
+	def := Profile{Profile: cfg.Profile, Editable: true, Source: "your settings file"}
+	if saved, ok := s.Saved[cfg.Profile.Name]; ok {
+		def = saved
+	}
+	out := []Profile{def}
 
 	var fromFile []Profile
 	for name, p := range cfg.Profiles {
@@ -124,7 +127,7 @@ func (s *Store) All(cfg config.Config) []Profile {
 			// and is listed below.
 			continue
 		}
-		fromFile = append(fromFile, Profile{Profile: p, Source: "your settings file"})
+		fromFile = append(fromFile, Profile{Profile: p, Editable: true, Source: "your settings file"})
 	}
 	sort.Slice(fromFile, func(a, b int) bool { return fromFile[a].Name < fromFile[b].Name })
 

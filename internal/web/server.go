@@ -135,7 +135,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/profiles", s.handleSaveProfile)
 	mux.HandleFunc("DELETE /api/profiles/{name}", s.handleDeleteProfile)
 	mux.HandleFunc("POST /api/transcode", s.handleTranscode)
-	mux.HandleFunc("POST /api/convert", s.handleConvert)
+	mux.HandleFunc("GET /api/master-tracks", s.handleMasterTracks)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
 	mux.HandleFunc("GET /api/log", s.handleLog)

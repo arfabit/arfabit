@@ -12,6 +12,7 @@ import (
 
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/drive"
+	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/pipeline"
 )
 
@@ -242,6 +243,7 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 		At       float64  `json:"at"`
 		Length   float64  `json:"length"`
 		Profiles []string `json:"profiles"`
+		Audio    []int    `json:"audio"`
 
 		// Custom is a one-off used for this job and not kept.
 		Custom *struct {
@@ -274,6 +276,7 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 		At:         time.Duration(req.At * float64(time.Second)),
 		Length:     time.Duration(req.Length * float64(time.Second)),
 		Profiles:   req.Profiles,
+		Audio:      req.Audio,
 		Custom:     custom,
 		Lookup:     func(name string) (config.Profile, bool) { return s.Profiles.Named(s.Config, name) },
 		LabDir:     s.Config.Paths.Lab,
@@ -422,29 +425,79 @@ func applyProfileForm(
 	return p
 }
 
-// handleConvert turns a copy that already exists into a film.
-func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Master string `json:"master"`
-		Title  string `json:"title"`
-		Year   int    `json:"year"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "ARFABIT could not read that request.", err)
+// handleMasterTracks lists what is inside a master, so tracks can be chosen.
+//
+// A master holds everything the disc had, which is the point of keeping it.
+// A file for a television usually wants a few of those and not the rest.
+func (s *Server) handleMasterTracks(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("master")
+	if path == "" {
+		writeError(w, "No master was given.", nil)
 		return
 	}
 
-	job, err := s.Runner.StartConvert(context.Background(), pipeline.ConvertRequest{
-		Master: req.Master,
-		Title:  req.Title,
-		Year:   req.Year,
-	})
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	info, err := ffmpeg.Probe(ctx, path)
 	if err != nil {
-		writeError(w, capitalise(err.Error())+".", nil)
+		writeError(w, "That master could not be read.", err)
 		return
 	}
 
-	writeJSON(w, map[string]string{"job": job.ID})
+	type track struct {
+		Index    int    `json:"index"`
+		Kind     string `json:"kind"`
+		Label    string `json:"label"`
+		Lang     string `json:"lang"`
+		Channels int    `json:"channels"`
+		Selected bool   `json:"selected"`
+
+		// Carriable says whether ARFABIT can put this into the finished file
+		// at all. Picture subtitles cannot be, yet.
+		Carriable bool   `json:"carriable"`
+		Note      string `json:"note,omitempty"`
+	}
+
+	tracks := []track{}
+
+	for _, a := range info.StreamsOfKind("audio") {
+		tracks = append(tracks, track{
+			Index:     a.Index,
+			Kind:      "audio",
+			Label:     pipeline.DescribeStream(a),
+			Lang:      a.Lang,
+			Channels:  a.Channels,
+			Carriable: true,
+			Selected:  wantedLanguage(a.Lang, s.Config.Profile.SubLanguages),
+		})
+	}
+
+	for _, sub := range info.StreamsOfKind("subtitle") {
+		tracks = append(tracks, track{
+			Index:     sub.Index,
+			Kind:      "subtitle",
+			Label:     pipeline.DescribeStream(sub),
+			Lang:      sub.Lang,
+			Carriable: false,
+			Note:      "ARFABIT cannot read picture subtitles into text yet, so these cannot be carried across.",
+		})
+	}
+
+	writeJSON(w, map[string]any{"tracks": tracks})
+}
+
+// wantedLanguage reports whether a language is one the settings ask for.
+func wantedLanguage(lang string, wanted []string) bool {
+	if len(wanted) == 0 {
+		return true
+	}
+	for _, w := range wanted {
+		if strings.EqualFold(lang, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // capitalise makes a sentence of a message that was written as a fragment.

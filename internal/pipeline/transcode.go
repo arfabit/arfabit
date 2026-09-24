@@ -33,6 +33,10 @@ type LabRequest struct {
 	// once should not mean naming it and remembering it forever.
 	Custom *config.Profile
 
+	// Audio are the stream indexes to keep. Empty means whatever the profile
+	// would have chosen, which is the ordinary case.
+	Audio []int
+
 	// Lookup finds a profile by name. Set by whatever owns the profiles,
 	// since they can be made and changed while ARFABIT runs.
 	Lookup func(string) (config.Profile, bool)
@@ -211,6 +215,18 @@ func (r *Runner) renderProfile(
 	plan, err := planFromMaster(ctx, req.Master, profile)
 	if err != nil {
 		return lab.Clip{}, err
+	}
+
+	// A master holds everything the disc had; a file for a television usually
+	// wants a few of those. When tracks were chosen, they are what is kept.
+	if len(req.Audio) > 0 {
+		wanted := map[int]bool{}
+		for _, index := range req.Audio {
+			wanted[index] = true
+		}
+		for i := range plan.Audio {
+			plan.Audio[i].Selected = wanted[plan.Audio[i].SourceIndex]
+		}
 	}
 
 	setting := lab.Clip{

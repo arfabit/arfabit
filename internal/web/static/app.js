@@ -21,6 +21,7 @@ let driveBusy = "";
 let activeJobs = [];
 let queueFilter = "all";
 let focusedJob = "";
+let masterTracks = [];
 let clockTimer = null;
 
 // --- problems the page cannot hide --------------------------------------
@@ -251,6 +252,7 @@ function appendLog(entries) {
   }
 
   applyFilter();
+  show("log-card", box.children.length > 0);
   if (followLog && atBottom) box.scrollTop = box.scrollHeight;
 }
 
@@ -936,12 +938,10 @@ async function loadDriveHealth() {
 
 async function loadMasters() {
   const { masters } = await fetch("/api/masters").then((r) => r.json());
-  renderMasterList(masters);
-
   const select = $("lab-master");
 
   if (!masters || masters.length === 0) {
-    select.replaceChildren(new Option("No copies yet — rip a disc first", ""));
+    select.replaceChildren(new Option("No masters yet — read a disc first", ""));
     $("lab-run").disabled = true;
     return;
   }
@@ -954,33 +954,88 @@ async function loadMasters() {
   $("lab-run").disabled = false;
 }
 
-// renderMasterList shows the copies, each with a way to make a film from it.
-function renderMasterList(masters) {
-  const box = $("master-list");
+// Remembering the Transcode settings between visits.
+//
+// Kept in the browser rather than saved as defaults: where somebody last took
+// a clip from is a convenience, not a decision about how ARFABIT should work.
+const REMEMBERED = "arfabit.transcode";
 
-  if (!masters || masters.length === 0) {
-    box.textContent = "No copies yet. Read a disc and one will appear here.";
+function rememberTranscode() {
+  try {
+    localStorage.setItem(REMEMBERED, JSON.stringify({
+      at: $("lab-at").value,
+      length: $("lab-length").value,
+    }));
+  } catch {
+    // Private windows and cleared storage are ordinary; there is simply
+    // nothing to remember with.
+  }
+}
+
+function recallTranscode() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REMEMBERED) || "null");
+    if (!saved) return;
+
+    if (saved.at) $("lab-at").value = saved.at;
+    if (saved.length !== undefined) $("lab-length").value = String(saved.length);
+  } catch {
+    // Anything unreadable simply leaves the defaults in place.
+  }
+}
+
+// loadMasterTracks shows what is inside the chosen master.
+//
+// A master holds everything the disc had, which is the point of keeping it. A
+// file for a television usually wants a few of those and not the rest.
+async function loadMasterTracks() {
+  const master = $("lab-master").value;
+  masterTracks = [];
+
+  if (!master) {
+    $("tracks-heading").hidden = true;
+    $("track-list").replaceChildren();
     return;
   }
 
-  box.replaceChildren(...masters.map((master) => {
-    const row = document.createElement("div");
-    row.className = "row";
+  let reply;
+  try {
+    reply = await fetch(`/api/master-tracks?master=${encodeURIComponent(master)}`)
+      .then((r) => r.json());
+  } catch {
+    $("tracks-heading").hidden = true;
+    return;
+  }
 
-    const name = document.createElement("span");
-    name.textContent = `${master.title} · ${bytes(master.size)}`;
+  masterTracks = reply.tracks || [];
+  $("tracks-heading").hidden = masterTracks.length === 0;
 
-    const convert = document.createElement("button");
-    convert.textContent = "Make the movie file";
-    convert.addEventListener("click", async (e) => {
-      const result = await busy(e.target, "Adding\u2026", "Added to the queue", () =>
-        post("/api/convert", { master: master.path, title: master.title }));
-      if (result) refresh();
-    });
+  $("track-list").replaceChildren(...masterTracks.map((track, i) => {
+    const row = document.createElement("label");
+    row.className = "track";
 
-    row.append(name, convert);
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "track-choice";
+    box.value = String(track.index);
+    box.dataset.kind = track.kind;
+    box.checked = track.carriable && track.selected;
+    box.disabled = !track.carriable;
+
+    const text = document.createElement("span");
+    text.textContent = track.note ? `${track.label} — ${track.note}` : track.label;
+    if (!track.carriable) text.className = "muted";
+
+    row.append(box, text);
     return row;
   }));
+}
+
+// chosenAudio is which sound tracks to keep.
+function chosenAudio() {
+  return [...document.querySelectorAll(".track-choice")]
+    .filter((box) => box.checked && box.dataset.kind === "audio")
+    .map((box) => Number(box.value));
 }
 
 // loadProfiles lists the named settings to choose between.
@@ -1158,21 +1213,24 @@ function renderProfileManager(profiles) {
 
     left.append(name, detail);
 
-    if (!profile.editable) {
-      const where = document.createElement("div");
-      where.className = "from-file";
-      where.textContent = `From ${profile.source} — change it there`;
-      left.append(where);
-    }
+
 
     const buttons = document.createElement("div");
     buttons.className = "button-row";
 
-    if (profile.editable) {
-      const edit = document.createElement("button");
-      edit.textContent = "Change";
-      edit.addEventListener("click", () => openProfileEditor(profile));
+    const edit = document.createElement("button");
+    edit.textContent = "Change";
+    edit.addEventListener("click", () => openProfileEditor(profile));
+    buttons.append(edit);
 
+    const copy = document.createElement("button");
+    copy.textContent = "Copy";
+    copy.addEventListener("click", () =>
+      openProfileEditor({ ...profile, name: `${profile.name} copy` }));
+    buttons.append(copy);
+
+    // The default is always needed, so it is never offered for removal.
+    if (!profile.default) {
       const remove = document.createElement("button");
       remove.textContent = "Remove";
       remove.addEventListener("click", async (e) => {
@@ -1181,14 +1239,7 @@ function renderProfileManager(profiles) {
             .then((res) => (res.ok ? res.json() : null)));
         if (result) loadProfiles();
       });
-
-      buttons.append(edit, remove);
-    } else {
-      const copy = document.createElement("button");
-      copy.textContent = "Make a copy";
-      copy.addEventListener("click", () =>
-        openProfileEditor({ ...profile, name: `${profile.name} copy`, editable: true }));
-      buttons.append(copy);
+      buttons.append(remove);
     }
 
     row.append(left, buttons);
@@ -1244,8 +1295,8 @@ function describeDestination() {
   const count = chosen.length + custom;
   $("lab-run").disabled = false;
   $("lab-destination").textContent = whole
-    ? `${count} full film${count === 1 ? "" : "s"}, saved to your library as separate editions. This takes hours.`
-    : `${count} test clip${count === 1 ? "" : "s"}, saved to the lab folder to watch and compare.`;
+    ? `${count} full-length file${count === 1 ? "" : "s"}, saved to your library as separate editions. This takes hours.`
+    : `${count} clip${count === 1 ? "" : "s"}, saved to the lab folder to watch and compare.`;
 }
 
 // parseTimestamp reads "1:15:20", "15:20" or plain seconds.
@@ -1264,8 +1315,8 @@ async function loadLabClips() {
   const { folder, clips } = await fetch("/api/lab").then((r) => r.json());
 
   $("lab-folder").textContent = clips && clips.length
-    ? `The clips are in ${folder}, a folder per film. Point Plex at it and each setting appears as an edition of the same film, so they play one after another.`
-    : `Clips will be saved in ${folder}, a folder per film.`;
+    ? `The clips are in ${folder}, a folder per master. Point Plex at it and each setting appears as an edition of the same title, so they play one after another.`
+    : `Clips will be saved in ${folder}, a folder per master.`;
 
   $("lab-clips-heading").hidden = !clips || clips.length === 0;
 
@@ -1630,7 +1681,13 @@ function wireButtons() {
     refresh();
   });
 
-  on("lab-length", "change", describeDestination);
+  on("lab-length", "change", () => {
+    rememberTranscode();
+    describeDestination();
+  });
+
+  on("lab-at", "input", rememberTranscode);
+  on("lab-master", "change", loadMasterTracks);
 
   on("use-custom", "change", (e) => {
     const box = $("custom-form");
@@ -1655,6 +1712,7 @@ function wireButtons() {
         at: parseTimestamp($("lab-at").value),
         length: Number($("lab-length").value),
         profiles: chosenProfiles(),
+        audio: chosenAudio(),
         custom: customProfile(),
       }));
 
@@ -1680,7 +1738,8 @@ function start() {
   loadAutostart();
   loadIndexStatus();
   loadConversionLimit();
-  loadMasters();
+  recallTranscode();
+  loadMasters().then(loadMasterTracks);
   loadProfiles();
   loadLabClips();
   loadDriveHealth();

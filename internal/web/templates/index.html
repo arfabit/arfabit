@@ -102,9 +102,9 @@
     <p id="done-detail" class="muted"></p>
   </section>
 
-  <section class="card">
+  <section id="log-card" class="card" hidden>
     <div class="log-head">
-      <h2>What's happening</h2>
+      <h2>Logs</h2>
       <div class="log-controls">
         <span id="log-scope" class="muted small"></span>
         <input id="log-filter" type="search" placeholder="Filter" autocomplete="off">
@@ -126,29 +126,34 @@
 
   <section class="card">
     <h2>Transcode</h2>
-    <p class="muted small">Makes films or test clips from a copy you already have. Pick as many profiles as you want to compare; each one produces its own file.</p>
+    <p class="muted small">Makes a playable file from a master you already have. Pick as many profiles as you want to compare; each one produces its own file.</p>
 
     <div class="lab-controls">
       <label>
-        <span>Film</span>
+        <span>Master</span>
         <select id="lab-master"></select>
       </label>
       <label>
-        <span>Start at</span>
+        <span>Start</span>
         <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
       </label>
       <label>
         <span>Length</span>
         <select id="lab-length">
-          <option value="0" selected>The whole film</option>
+          <option value="5">5 seconds</option>
           <option value="10">10 seconds</option>
+          <option value="15">15 seconds</option>
           <option value="30">30 seconds</option>
           <option value="60">1 minute</option>
-          <option value="120">2 minutes</option>
+          <option value="300">5 minutes</option>
           <option value="600">10 minutes</option>
+          <option value="0" selected>Full</option>
         </select>
       </label>
     </div>
+
+    <h3 id="tracks-heading" hidden>Tracks to keep</h3>
+    <div id="track-list"></div>
 
     <h3>Profiles</h3>
     <div id="profile-list"></div>
@@ -173,7 +178,7 @@
 
   <section class="card">
     <h2>Profiles</h2>
-    <p class="muted small">Named settings you can pick when transcoding. Profiles written in your settings file are shown here but changed there.</p>
+    <p class="muted small">Named settings you can pick when transcoding.</p>
 
     <div id="profile-manager"></div>
 
@@ -212,12 +217,6 @@
       <p id="index-detail" class="muted small">Used to confirm a movie's name and find its year.</p>
       <button id="index-build">Download the film list</button>
     </div>
-  </section>
-
-  <section class="card">
-    <h2>Your copies</h2>
-    <p class="muted small">Every disc you have read. Converting one makes a file for your Apple TV; the copy is untouched.</p>
-    <div id="master-list"></div>
   </section>
 
   <section class="card">

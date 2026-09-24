@@ -140,6 +140,19 @@ const answers = {
     folder: "/tmp/lab",
     clips: [{ film: "Crime 101 (2025)", name: "Lab 001 - crf20-slow - 0h10m00s", path: "/tmp/lab/x.mp4", size: 60000000, made: new Date().toISOString() }],
   },
+  "/api/master-tracks": {
+    tracks: [
+      { index: 1, kind: "audio", label: "English · 7.1 · DTS-HD MA (lossless)", lang: "eng", channels: 8, selected: true, carriable: true },
+      { index: 3, kind: "audio", label: "English · Stereo · Dolby Digital", lang: "eng", channels: 2, selected: true, carriable: true },
+      { index: 7, kind: "subtitle", label: "English", lang: "eng", carriable: false, note: "cannot be carried yet" },
+    ],
+  },
+  "/api/profiles": {
+    profiles: [
+      { name: "Archive", description: "HEVC quality 20, slow", default: true, editable: true, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, copy_native_audio: true },
+      { name: "Small", description: "HEVC quality 24, medium", default: false, editable: true, source: "made here", preset: "medium", crf_uhd: 24, crf_bluray: 24, crf_dvd: 22, audio_bitrate: "192k", allow_uhd_copy: false, copy_native_audio: true },
+    ],
+  },
   "/api/drive-health": {
     drives: [{
       name: "BD-RE BU40N", access: "os", fast: false, mounted: true,
@@ -157,6 +170,11 @@ global.fetch = async (path) => ({
 global.setInterval = () => 0;
 global.clearInterval = () => {};
 global.setTimeout = () => 0;
+global.localStorage = {
+  store: {},
+  getItem(k) { return this.store[k] ?? null; },
+  setItem(k, v) { this.store[k] = String(v); },
+};
 global.console = { ...console, warn() {} };
 
 process.on("uncaughtException", (err) => problems.push(String(err)));

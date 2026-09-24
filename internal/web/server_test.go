@@ -694,3 +694,30 @@ func TestTranscodeAcceptsAOneOff(t *testing.T) {
 		t.Error("a one-off was saved as a profile")
 	}
 }
+
+// A master holds everything the disc had; a file for a television usually
+// wants a few of those and not the rest.
+func TestMasterTracksNeedsAMaster(t *testing.T) {
+	s := newTestServer(t)
+
+	rec := get(t, s, "/api/master-tracks")
+	if rec.Code == http.StatusOK {
+		t.Error("tracks were listed for no master at all")
+	}
+}
+
+// Picture subtitles cannot be carried across yet, and saying so is better than
+// offering them and quietly leaving them out.
+func TestSubtitlesAreOfferedHonestly(t *testing.T) {
+	// The shape of the reply is what matters here; the probe itself needs a
+	// real file, which the smoke test covers.
+	s := newTestServer(t)
+
+	rec := get(t, s, "/api/master-tracks?master=/nowhere/at/all.mkv")
+	if rec.Code == http.StatusOK {
+		t.Error("a master that does not exist was read")
+	}
+	if !strings.Contains(rec.Body.String(), "could not be read") {
+		t.Errorf("the message does not say what went wrong: %s", rec.Body)
+	}
+}

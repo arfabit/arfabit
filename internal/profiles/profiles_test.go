@@ -128,8 +128,10 @@ func TestSaveRefusesNonsense(t *testing.T) {
 	}
 }
 
-// A profile written by hand in the settings file belongs to whoever wrote it.
-func TestProfilesFromTheSettingsFileAreNotEditable(t *testing.T) {
+// Every profile can be changed here, including one written by hand and
+// including the default. Changing one keeps a version in ARFABIT's own file,
+// which takes precedence; the settings file is left as it was written.
+func TestEveryProfileCanBeChanged(t *testing.T) {
 	cfg := config.Defaults()
 	cfg.Profiles = map[string]config.Profile{
 		cfg.Profile.Name: cfg.Profile,
@@ -150,14 +152,26 @@ func TestProfilesFromTheSettingsFileAreNotEditable(t *testing.T) {
 		byName[p.Name] = p
 	}
 
-	if byName["FromFile"].Editable {
-		t.Error("a profile from the settings file is offered as editable")
+	for _, name := range []string{cfg.Profile.Name, "FromFile", "MadeHere"} {
+		if !byName[name].Editable {
+			t.Errorf("%s cannot be changed here", name)
+		}
 	}
 	if !strings.Contains(byName["FromFile"].Source, "settings file") {
-		t.Errorf("Source = %q; it should say where it came from", byName["FromFile"].Source)
+		t.Errorf("Source = %q; it should still say where it came from", byName["FromFile"].Source)
 	}
-	if !byName["MadeHere"].Editable {
-		t.Error("a profile made here is not editable")
+
+	// A version kept here wins over the one in the settings file.
+	changed := testProfile(cfg.Profile.Name)
+	changed.CRFBluray = 26
+	if _, err := store.Save(changed); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, p := range store.All(cfg) {
+		if p.Name == cfg.Profile.Name && p.CRFBluray != 26 {
+			t.Errorf("the default still reads %d; the version kept here should win", p.CRFBluray)
+		}
 	}
 
 	// The default comes first, so the list does not rearrange between visits.
