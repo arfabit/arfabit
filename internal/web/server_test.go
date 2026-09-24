@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -19,8 +21,14 @@ import (
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
+	// Every path points somewhere temporary. A test that wrote to the real
+	// masters folder would be touching somebody's films.
+	root := t.TempDir()
 	cfg := config.Defaults()
-	cfg.Paths.Data = t.TempDir()
+	cfg.Paths.Data = filepath.Join(root, "data")
+	cfg.Paths.Masters = filepath.Join(root, "masters")
+	cfg.Paths.Library = filepath.Join(root, "library")
+	cfg.Paths.Lab = filepath.Join(root, "lab")
 	cfg.Node.Name = "test-node"
 
 	st, err := store.New(cfg.Paths.Data, "test-node")
@@ -517,5 +525,57 @@ func TestEjectAllowedWhileConverting(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("ejecting was refused while a film was merely being converted: %s", rec.Body.String())
+	}
+}
+
+// The lab needs to find the copies that already exist, in the folder-per-film
+// layout the rest of ARFABIT uses.
+func TestMastersAreListed(t *testing.T) {
+	s := newTestServer(t)
+
+	film := filepath.Join(s.Config.Paths.Masters, "Crime 101 (2025)")
+	if err := os.MkdirAll(film, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A real master's name, en dash and all.
+	if err := os.WriteFile(filepath.Join(film, "CRIME 101 – BLU-RAY_t04.mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Something that is not a copy, which must not be offered.
+	if err := os.WriteFile(filepath.Join(film, "job.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := get(t, s, "/api/masters")
+
+	var got struct {
+		Masters []struct {
+			Title string `json:"title"`
+			Path  string `json:"path"`
+		} `json:"masters"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Masters) != 1 {
+		t.Fatalf("got %d masters, want 1: %+v", len(got.Masters), got.Masters)
+	}
+	if got.Masters[0].Title != "Crime 101 (2025)" {
+		t.Errorf("Title = %q; the film's folder name is what names it", got.Masters[0].Title)
+	}
+	if !strings.HasSuffix(got.Masters[0].Path, ".mkv") {
+		t.Errorf("Path = %q, want the copy itself", got.Masters[0].Path)
+	}
+}
+
+// Nothing ripped yet is an ordinary state, and must come back as an empty list
+// rather than as nothing at all.
+func TestMastersWithNothingRipped(t *testing.T) {
+	s := newTestServer(t)
+
+	rec := get(t, s, "/api/masters")
+	if !strings.Contains(rec.Body.String(), "masters") {
+		t.Errorf("body = %q", rec.Body.String())
 	}
 }
