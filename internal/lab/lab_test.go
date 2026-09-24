@@ -172,3 +172,30 @@ func TestSafeName(t *testing.T) {
 		t.Errorf("an unnamed setting got %q", got)
 	}
 }
+
+// The clips are meant to be carried to a television and watched, so the name
+// has to say which film, which setting and which moment.
+func TestClipNameReadsInAFolderListing(t *testing.T) {
+	got := ClipName(
+		"/masters/Crime 101 (2025)/CRIME_101_t00.mkv",
+		"crf20-medium",
+		75*time.Minute+20*time.Second,
+	)
+
+	for _, want := range []string{"CRIME_101_t00", "crf20-medium", "1h15m20s", ".mp4"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("name %q is missing %q", got, want)
+		}
+	}
+}
+
+// Timestamps sort in the order they happen, so a folder listing reads as a
+// walk through the film.
+func TestClipTimestampsSort(t *testing.T) {
+	early := ClipName("m.mkv", "x", 9*time.Minute)
+	later := ClipName("m.mkv", "x", 70*time.Minute)
+
+	if !(early < later) {
+		t.Errorf("%q does not sort before %q", early, later)
+	}
+}

@@ -43,6 +43,10 @@ type Paths struct {
 	// Library holds the finished files, laid out the way Plex expects.
 	Library string
 
+	// Lab holds the test clips. A folder of its own, and a visible one:
+	// the clips exist to be carried to a television and watched.
+	Lab string
+
 	// Deliver is an optional folder to copy finished files into. Empty by
 	// default, which leaves them in Library.
 	Deliver string
@@ -96,6 +100,7 @@ func Defaults() Config {
 			Data:    defaultDataDir(),
 			Masters: filepath.Join(root, "masters"),
 			Library: filepath.Join(root, "library"),
+			Lab:     filepath.Join(root, "lab"),
 		},
 		Server: Server{
 			// All interfaces, so the UI is reachable from any device in the
@@ -229,6 +234,7 @@ func (c *Config) apply(doc document, source string) error {
 	path("paths", "data", &c.Paths.Data)
 	path("paths", "masters", &c.Paths.Masters)
 	path("paths", "library", &c.Paths.Library)
+	path("paths", "lab", &c.Paths.Lab)
 	path("paths", "deliver", &c.Paths.Deliver)
 	str("profile", "name", &c.Profile.Name)
 	str("profile", "preset", &c.Profile.Preset)

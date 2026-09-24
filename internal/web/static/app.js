@@ -795,6 +795,40 @@ function parseTimestamp(text) {
   return parts.reduce((total, part) => total * 60 + part, 0);
 }
 
+// loadLabClips shows what is already in the lab folder.
+//
+// The folder is the record: clips outlive the program, and somebody coming
+// back tomorrow should find yesterday's work rather than an empty table.
+async function loadLabClips() {
+  const { folder, clips } = await fetch("/api/lab").then((r) => r.json());
+
+  $("lab-folder").textContent = clips && clips.length
+    ? `The clips are in ${folder} — copy them to your Apple TV or Plex and watch.`
+    : `Clips will be saved in ${folder}.`;
+
+  $("lab-clips-heading").hidden = !clips || clips.length === 0;
+
+  if (!clips || clips.length === 0) {
+    $("lab-clips").replaceChildren();
+    return;
+  }
+
+  $("lab-clips").replaceChildren(...clips.map((clip) => {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const name = document.createElement("span");
+    name.textContent = clip.name;
+
+    const right = document.createElement("span");
+    right.className = "muted small";
+    right.textContent = `${bytes(clip.size)} · ${whenText(clip.made)}`;
+
+    row.append(name, right);
+    return row;
+  }));
+}
+
 function renderLabResults(comparison) {
   const rows = (comparison && comparison.clips) || [];
   if (rows.length === 0) {
@@ -858,7 +892,7 @@ function renderLabResults(comparison) {
   note.className = "muted small";
   note.textContent =
     "Size and speed are shown against the best in each column, where the best is 100%. " +
-    "The clips are in the .lab folder beside your copies — play them and pick.";
+    "Play them and pick.";
 
   $("lab-results").replaceChildren(table, note);
 }
@@ -999,8 +1033,9 @@ function connect() {
     $("lab-run").disabled = false;
 
     if (status.state === "done") {
-      $("lab-status").textContent = `Clips are in ${status.folder}`;
+      $("lab-status").textContent = "Finished.";
       renderLabResults(status.comparison);
+      loadLabClips();
       return;
     }
     $("lab-status").textContent = `The clips could not be made. ${status.detail || ""}`;
@@ -1136,6 +1171,7 @@ function start() {
   loadAutostart();
   loadIndexStatus();
   loadMasters();
+  loadLabClips();
   loadDriveHealth();
 }
 

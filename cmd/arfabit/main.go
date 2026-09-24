@@ -300,7 +300,7 @@ func explainListenFailure(addr string, err error) error {
 // Problems are not fatal: Doctor reports them properly a moment later, and
 // stopping here would mean the page never opens to explain why.
 func prepareFolders(cfg config.Config) {
-	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Masters, cfg.Paths.Library} {
+	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Masters, cfg.Paths.Library, cfg.Paths.Lab} {
 		if dir != "" {
 			_ = os.MkdirAll(dir, 0o755)
 		}

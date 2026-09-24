@@ -32,6 +32,10 @@ masters = "~/Downloads/arfabit/masters"
 # The finished movies, named the way Plex, Infuse and Jellyfin expect.
 library = "~/Downloads/arfabit/library"
 
+# Test clips from the quality lab. They are named so a folder listing reads
+# plainly, and they are meant to be copied to a television and watched.
+lab = "~/Downloads/arfabit/lab"
+
 [server]
 # Where the web page is served. The default listens on every network, so you
 # can open it from any device in the house.

@@ -112,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/drives", s.handleDrives)
 	mux.HandleFunc("GET /api/drive-health", s.handleDriveHealth)
 	mux.HandleFunc("GET /api/masters", s.handleMasters)
+	mux.HandleFunc("GET /api/lab", s.handleLabClips)
 	mux.HandleFunc("POST /api/lab", s.handleLab)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)

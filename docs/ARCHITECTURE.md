@@ -203,6 +203,9 @@ job, and no "are you sure" dialog, because the program simply does not have that
       master.mkv
       eng-sdh.srt   eng-forced.srt
       job.json      log.txt
+  lab/
+    CRIME_101_t00 - crf20-medium - at 1h15m20s.mp4
+    CRIME_101_t00 - crf22-medium - at 1h15m20s.mp4
   library/
     Blade Runner (1982)/
       Blade Runner (1982) {edition-Archive}.mp4

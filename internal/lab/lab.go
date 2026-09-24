@@ -143,7 +143,7 @@ func Run(ctx context.Context, req Request) ([]Clip, error) {
 
 // render makes one clip.
 func render(ctx context.Context, req Request, setting Clip, video *ffmpeg.Stream) Clip {
-	setting.Path = filepath.Join(req.OutputDir, safeName(setting.Name)+".mp4")
+	setting.Path = filepath.Join(req.OutputDir, ClipName(req.Master, setting.Name, req.At))
 
 	args := clipArgs(req, setting, video)
 
@@ -315,6 +315,41 @@ func Compare(clips []Clip, clipLength, filmLength time.Duration) Comparison {
 
 	c.Clips = rows
 	return c
+}
+
+// ClipName names a clip so that a folder of them can be read at a glance.
+//
+// These files are meant to be carried to a television and watched, so the name
+// has to say which film, which setting and which moment without anybody having
+// to remember.
+func ClipName(master, setting string, at time.Duration) string {
+	film := strings.TrimSuffix(filepath.Base(master), filepath.Ext(master))
+	if film == "" {
+		film = "clip"
+	}
+
+	return fmt.Sprintf("%s - %s - at %s.mp4",
+		trimName(film, 60),
+		setting,
+		timestamp(at),
+	)
+}
+
+// timestamp renders a position as something that sorts and reads properly.
+func timestamp(d time.Duration) string {
+	return fmt.Sprintf("%dh%02dm%02ds",
+		int(d/time.Hour),
+		int(d/time.Minute)%60,
+		int(d/time.Second)%60,
+	)
+}
+
+func trimName(s string, limit int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= limit {
+		return s
+	}
+	return strings.TrimSpace(s[:limit])
 }
 
 // safeName turns a setting name into a filename.

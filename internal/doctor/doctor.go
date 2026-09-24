@@ -206,7 +206,7 @@ func settingsPath() (string, error) {
 
 // checkFolders makes sure ARFABIT can write where it intends to.
 func checkFolders(cfg config.Config) Check {
-	for _, dir := range []string{cfg.Paths.Masters, cfg.Paths.Library, cfg.Paths.Data} {
+	for _, dir := range []string{cfg.Paths.Masters, cfg.Paths.Library, cfg.Paths.Lab, cfg.Paths.Data} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return Check{
 				Name:    "Folders",

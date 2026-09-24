@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/arfabit/arfabit/internal/ffmpeg"
@@ -114,6 +116,49 @@ func (s *Server) handleMasters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"masters": masters})
 }
 
+// handleLabClips lists the clips already made.
+//
+// The folder is the record, not a list held in memory: clips outlive the
+// program, and somebody coming back tomorrow should find what they made
+// yesterday rather than an empty table.
+func (s *Server) handleLabClips(w http.ResponseWriter, r *http.Request) {
+	type clip struct {
+		Name string    `json:"name"`
+		Path string    `json:"path"`
+		Size int64     `json:"size"`
+		Made time.Time `json:"made"`
+	}
+
+	clips := []clip{}
+
+	entries, err := os.ReadDir(s.Config.Paths.Lab)
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".mp4" {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			clips = append(clips, clip{
+				Name: strings.TrimSuffix(e.Name(), ".mp4"),
+				Path: filepath.Join(s.Config.Paths.Lab, e.Name()),
+				Size: info.Size(),
+				Made: info.ModTime(),
+			})
+		}
+	}
+
+	// Newest first: the ones just made are the ones being judged.
+	sort.Slice(clips, func(a, b int) bool { return clips[a].Made.After(clips[b].Made) })
+
+	writeJSON(w, map[string]any{
+		"folder": s.Config.Paths.Lab,
+		"clips":  clips,
+	})
+}
+
 // handleLab renders clips under several settings so a quality can be chosen by
 // watching rather than guessing.
 func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +185,7 @@ func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer s.lab.Store(false)
 
-		outDir := filepath.Join(s.Config.Paths.Masters, ".lab")
+		outDir := s.Config.Paths.Lab
 		s.events.send("lab", map[string]any{"state": "working"})
 
 		clips, err := lab.Run(context.Background(), lab.Request{
