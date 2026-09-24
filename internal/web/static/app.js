@@ -27,7 +27,7 @@ let clockTimer = null;
 //
 // A silent failure in here used to leave buttons that did nothing and a page
 // that looked merely slow. Anything that goes wrong now says so.
-function showProblem(text) {
+function showProblem(text, kind) {
   let banner = $("page-problem");
   if (!banner) {
     banner = document.createElement("div");
@@ -35,11 +35,15 @@ function showProblem(text) {
     banner.className = "page-problem";
     document.body.prepend(banner);
   }
-  banner.textContent = `Something in this page stopped working: ${text}. Reloading may help.`;
+
+  banner.hidden = false;
+  banner.textContent = kind === "script"
+    ? `Something in this page stopped working: ${text}. Reloading may help.`
+    : text;
 }
 
-window.addEventListener("error", (e) => showProblem(e.message));
-window.addEventListener("unhandledrejection", (e) => showProblem(String(e.reason)));
+window.addEventListener("error", (e) => showProblem(e.message, "script"));
+window.addEventListener("unhandledrejection", (e) => showProblem(String(e.reason), "script"));
 
 // --- small helpers --------------------------------------------------------
 
@@ -127,12 +131,27 @@ async function post(path, body) {
   return res.json();
 }
 
+// showNotice puts a problem where it will be seen.
+//
+// It used to write into the Plan card, which is hidden whenever there is no
+// disc waiting — so every failure from the settings buttons went nowhere at
+// all, and a click that did not work was indistinguishable from one that had
+// not registered.
 function showNotice(problem) {
-  const notice = $("plan-notice");
-  notice.hidden = false;
-  notice.textContent = problem.detail
+  const text = problem.detail
     ? `${problem.message}\n\n${problem.detail}`
     : problem.message;
+
+  const plan = $("plan");
+  const notice = $("plan-notice");
+
+  if (plan && !plan.hidden && notice) {
+    notice.hidden = false;
+    notice.textContent = text;
+    return;
+  }
+
+  showProblem(text);
 }
 
 // --- the log --------------------------------------------------------------
@@ -194,6 +213,14 @@ function appendLog(entries) {
 
   applyFilter();
   if (followLog && atBottom) box.scrollTop = box.scrollHeight;
+}
+
+// note makes a line of text for prepending to a section.
+function note(text) {
+  const el = document.createElement("div");
+  el.className = "drive-fast";
+  el.textContent = text;
+  return el;
 }
 
 // --- the drive ------------------------------------------------------------
@@ -576,6 +603,45 @@ function renderJob(job) {
   }
 }
 
+// jobOutcome says what became of a disc, in words rather than state names.
+function jobOutcome(job) {
+  switch (job.state) {
+    case "done":
+      return "Finished";
+    case "running":
+      return stageWords(job.stage);
+    case "waiting":
+      return "Waiting for you to start it";
+    default:
+      // A stopped job carries its own explanation, which is more useful than
+      // the word "stopped".
+      return job.note || "Stopped";
+  }
+}
+
+// whenText says when something happened, in the terms a person would use.
+function whenText(when) {
+  if (!when) return "";
+
+  const then = new Date(when);
+  if (Number.isNaN(then.getTime())) return "";
+
+  const clock = { hour: "numeric", minute: "2-digit" };
+  const today = new Date();
+
+  if (then.toDateString() === today.toDateString()) {
+    return then.toLocaleTimeString([], clock);
+  }
+
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (then.toDateString() === yesterday.toDateString()) {
+    return `yesterday, ${then.toLocaleTimeString([], clock)}`;
+  }
+
+  return then.toLocaleDateString();
+}
+
 function renderRecent(jobs) {
   const box = $("recent");
   if (!jobs || jobs.length === 0) {
@@ -681,6 +747,14 @@ async function runDoctor() {
     row.append(dot, body);
     return row;
   }));
+}
+
+// note makes a line of text for prepending to a section.
+function note(text) {
+  const el = document.createElement("div");
+  el.className = "drive-fast";
+  el.textContent = text;
+  return el;
 }
 
 // --- the drive ------------------------------------------------------------
@@ -1168,12 +1242,22 @@ function wireButtons() {
       return true;
     }));
 
-  on("drive-free", "click", (e) =>
-    busy(e.target, "Letting go\u2026", "Done", async () => {
-      const result = await post("/api/drive-free");
-      if (result) await loadDriveHealth();
-      return result;
-    }));
+  on("drive-free", "click", async (e) => {
+    const box = $("drive-health");
+    box.textContent = "Asking your computer to let go of the disc\u2026";
+
+    const result = await busy(e.target, "Letting go\u2026", null, () => post("/api/drive-free"));
+
+    // Either way the drive is re-read, so the section says what is true now
+    // rather than leaving the old answer on screen.
+    await loadDriveHealth();
+
+    if (result) {
+      $("drive-health").prepend(note("Your computer has let go of the disc. It is still in the drive."));
+    }
+  });
+
+
 
   on("lab-run", "click", (e) => {
     e.target.disabled = true;
