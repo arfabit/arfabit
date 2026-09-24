@@ -52,9 +52,11 @@ type Server struct {
 	drives  driveWatcher
 	started time.Time
 
-	// building guards the film list download. A button can be clicked twice;
-	// the server is where "once" has to be true.
+	// building guards the film list download, and lab guards the clip
+	// renderer. A button can be clicked twice; the server is where "once" has
+	// to be true.
 	building atomic.Bool
+	lab      atomic.Bool
 }
 
 // New prepares the server.
@@ -108,6 +110,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /api/state", s.handleState)
 	mux.HandleFunc("GET /api/drives", s.handleDrives)
+	mux.HandleFunc("GET /api/drive-health", s.handleDriveHealth)
+	mux.HandleFunc("GET /api/masters", s.handleMasters)
+	mux.HandleFunc("POST /api/lab", s.handleLab)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
 	mux.HandleFunc("GET /api/log", s.handleLog)

@@ -94,6 +94,49 @@
   </section>
 
   <section class="card">
+    <h2>Your disc drive</h2>
+    <p id="drive-health" class="muted">Checking how ARFABIT is reaching the drive…</p>
+    <button id="drive-check">Check the drive</button>
+  </section>
+
+  <section class="card">
+    <h2>Try different quality settings</h2>
+    <p class="muted small">Makes short clips from a copy you already have, so you can watch them and decide. Nothing else is changed.</p>
+
+    <div class="lab-controls">
+      <label>
+        <span>Film</span>
+        <select id="lab-master"></select>
+      </label>
+      <label>
+        <span>Start at</span>
+        <input id="lab-at" type="text" value="0:10:00" placeholder="h:mm:ss">
+      </label>
+      <label>
+        <span>Length</span>
+        <select id="lab-length">
+          <option value="10">10 seconds</option>
+          <option value="30" selected>30 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="120">2 minutes</option>
+          <option value="600">10 minutes</option>
+        </select>
+      </label>
+      <label>
+        <span>Try</span>
+        <select id="lab-what">
+          <option value="video" selected>Picture quality</option>
+          <option value="audio">Sound</option>
+        </select>
+      </label>
+    </div>
+
+    <button id="lab-run" class="primary">Make the clips</button>
+    <p id="lab-status" class="muted small"></p>
+    <div id="lab-results"></div>
+  </section>
+
+  <section class="card">
     <h2>Settings</h2>
     <label class="track">
       <input id="autostart" type="checkbox">

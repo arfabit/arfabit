@@ -683,6 +683,186 @@ async function runDoctor() {
   }));
 }
 
+// --- the drive ------------------------------------------------------------
+
+// loadDriveHealth reports how ARFABIT is reaching the drive.
+//
+// This is the single thing that most decides how long a disc takes: reached
+// directly, a film is read in tens of minutes; reached through the operating
+// system, an encrypted disc crawls at roughly the speed it would play at.
+async function loadDriveHealth() {
+  const box = $("drive-health");
+  box.textContent = "Checking how ARFABIT is reaching the drive\u2026";
+
+  let report;
+  try {
+    report = await fetch("/api/drive-health").then((r) => r.json());
+  } catch (err) {
+    box.textContent = String(err);
+    return;
+  }
+
+  if (report.message) {
+    box.textContent = report.message;
+    return;
+  }
+
+  const drives = report.drives || [];
+  if (drives.length === 0) {
+    box.textContent = "No disc drive found.";
+    return;
+  }
+
+  box.replaceChildren(...drives.map((drive) => {
+    const block = document.createElement("div");
+
+    const name = document.createElement("div");
+    name.textContent = drive.name;
+    block.append(name);
+
+    const mode = document.createElement("div");
+    mode.className = drive.fast ? "drive-fast" : "drive-slow";
+    mode.textContent = drive.explanation;
+    block.append(mode);
+
+    if (drive.observed > 0) {
+      const observed = document.createElement("div");
+      observed.className = "small";
+      const hours = (40700 / drive.observed / 3600).toFixed(1);
+      observed.textContent =
+        `Measured at ${drive.observed.toFixed(1)} MB per second over ${drive.samples} disc${drive.samples === 1 ? "" : "s"}` +
+        ` — a 40 GB film would take about ${hours} hours at that rate.`;
+      block.append(observed);
+    } else {
+      const observed = document.createElement("div");
+      observed.className = "small";
+      observed.textContent = "No disc has been copied yet, so there is nothing measured to compare.";
+      block.append(observed);
+    }
+
+    return block;
+  }));
+}
+
+// --- the lab --------------------------------------------------------------
+
+async function loadMasters() {
+  const { masters } = await fetch("/api/masters").then((r) => r.json());
+  const select = $("lab-master");
+
+  if (!masters || masters.length === 0) {
+    select.replaceChildren(new Option("No copies yet — rip a disc first", ""));
+    $("lab-run").disabled = true;
+    return;
+  }
+
+  select.replaceChildren(...masters.map((m) => {
+    const option = new Option(`${m.title} (${bytes(m.size)})`, m.path);
+    return option;
+  }));
+  $("lab-run").disabled = false;
+}
+
+// Settings the lab tries, which differ by what is being judged.
+//
+// Picture and sound are tried separately on purpose: changing both at once
+// tells you only that something changed.
+function labSettings(what) {
+  if (what === "audio") {
+    return [
+      { name: "untouched", video: { copy: true }, audio: { copy: true } },
+      { name: "dolby-768", video: { copy: true }, audio: { codec: "eac3", bitrate: "768k" } },
+      { name: "dolby-640", video: { copy: true }, audio: { codec: "eac3", bitrate: "640k" } },
+      { name: "aac-256-stereo", video: { copy: true }, audio: { codec: "aac", bitrate: "256k", channels: 2 } },
+      { name: "aac-192-stereo", video: { copy: true }, audio: { codec: "aac", bitrate: "192k", channels: 2 } },
+    ];
+  }
+
+  return [
+    { name: "untouched", video: { copy: true }, audio: { copy: true } },
+    { name: "crf18-slow", video: { crf: 18, preset: "slow" }, audio: { copy: true } },
+    { name: "crf20-slow", video: { crf: 20, preset: "slow" }, audio: { copy: true } },
+    { name: "crf20-medium", video: { crf: 20, preset: "medium" }, audio: { copy: true } },
+    { name: "crf22-medium", video: { crf: 22, preset: "medium" }, audio: { copy: true } },
+  ];
+}
+
+// parseTimestamp reads "1:15:20", "15:20" or plain seconds.
+function parseTimestamp(text) {
+  const parts = String(text).trim().split(":").map(Number);
+  if (parts.some(Number.isNaN)) return 0;
+
+  return parts.reduce((total, part) => total * 60 + part, 0);
+}
+
+function renderLabResults(comparison) {
+  const rows = (comparison && comparison.clips) || [];
+  if (rows.length === 0) {
+    $("lab-results").replaceChildren();
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.className = "results";
+
+  const head = document.createElement("tr");
+  for (const heading of ["Setting", "Whole film", "Encode time", "Size", "Speed"]) {
+    const th = document.createElement("th");
+    th.textContent = heading;
+    head.append(th);
+  }
+  table.append(head);
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    if (row.size_share === 100) tr.className = "best";
+
+    const name = document.createElement("td");
+    if (row.clip.path) {
+      const link = document.createElement("a");
+      link.textContent = row.clip.name;
+      link.href = "#";
+      link.title = row.clip.path;
+      name.append(link);
+    } else {
+      name.textContent = row.clip.name;
+    }
+    tr.append(name);
+
+    if (row.clip.problem) {
+      const cell = document.createElement("td");
+      cell.colSpan = 4;
+      cell.className = "muted small";
+      cell.textContent = "did not finish";
+      tr.append(cell);
+      table.append(tr);
+      continue;
+    }
+
+    for (const value of [
+      bytes(row.whole_film),
+      humanMs(row.encode_time / 1000000),
+      `${Math.round(row.size_share)}%`,
+      `${Math.round(row.time_share)}%`,
+    ]) {
+      const td = document.createElement("td");
+      td.className = "num";
+      td.textContent = value;
+      tr.append(td);
+    }
+
+    table.append(tr);
+  }
+
+  const note = document.createElement("p");
+  note.className = "muted small";
+  note.textContent =
+    "Size and speed are shown against the best in each column, where the best is 100%. " +
+    "The clips are in the .lab folder beside your copies — play them and pick.";
+
+  $("lab-results").replaceChildren(table, note);
+}
+
 // --- settings -------------------------------------------------------------
 
 async function loadAutostart() {
@@ -803,6 +983,28 @@ function connect() {
   events.addEventListener("job", () => refresh());
   events.addEventListener("log", (e) => appendLog([JSON.parse(e.data)]));
   events.addEventListener("index", (e) => renderIndexStatus(JSON.parse(e.data)));
+
+  events.addEventListener("lab", (e) => {
+    const status = JSON.parse(e.data);
+
+    if (status.state === "working") {
+      $("lab-status").textContent = "Making the clips\u2026";
+      return;
+    }
+    if (status.state === "clip") {
+      $("lab-status").textContent = `Finished ${status.clip.name}\u2026`;
+      return;
+    }
+
+    $("lab-run").disabled = false;
+
+    if (status.state === "done") {
+      $("lab-status").textContent = `Clips are in ${status.folder}`;
+      renderLabResults(status.comparison);
+      return;
+    }
+    $("lab-status").textContent = `The clips could not be made. ${status.detail || ""}`;
+  });
   events.addEventListener("drives", (e) => {
     const list = JSON.parse(e.data);
     // Only redraw the idle card when nothing is in progress.
@@ -900,6 +1102,25 @@ function wireButtons() {
 
   // The download outlives the request that starts it, so the event stream
   // owns this button rather than busy().
+  $("drive-check").addEventListener("click", (e) =>
+    busy(e.target, "Checking\u2026", null, async () => {
+      await loadDriveHealth();
+      return true;
+    }));
+
+  $("lab-run").addEventListener("click", (e) => {
+    e.target.disabled = true;
+    $("lab-status").textContent = "Making the clips. Each one takes a few seconds.";
+    $("lab-results").replaceChildren();
+
+    post("/api/lab", {
+      master: $("lab-master").value,
+      at: parseTimestamp($("lab-at").value),
+      length: Number($("lab-length").value),
+      settings: labSettings($("lab-what").value),
+    });
+  });
+
   $("index-build").addEventListener("click", (e) => {
     e.target.disabled = true;
     e.target.textContent = "Starting…";
@@ -914,6 +1135,8 @@ function start() {
   runDoctor();
   loadAutostart();
   loadIndexStatus();
+  loadMasters();
+  loadDriveHealth();
 }
 
 start();

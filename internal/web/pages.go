@@ -1,0 +1,176 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/arfabit/arfabit/internal/ffmpeg"
+	"github.com/arfabit/arfabit/internal/lab"
+)
+
+// handleDriveHealth reports how the drive is being reached and how fast it has
+// been observed to read.
+//
+// The access mode matters more than anything else about the setup: it is the
+// difference between a film taking forty minutes and taking four hours.
+func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
+	if busy := s.Runner.DriveIsBusy(); busy != nil {
+		writeError(w, "The drive is busy with "+busy.Title+". Ask again once that disc is out.", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	health, err := s.Backend.CheckHealth(ctx)
+	if err != nil && len(health) == 0 {
+		writeError(w, "ARFABIT could not ask the drive anything.", err)
+		return
+	}
+
+	type driveReport struct {
+		Name        string  `json:"name"`
+		Access      string  `json:"access"`
+		Fast        bool    `json:"fast"`
+		Explanation string  `json:"explanation"`
+		Observed    float64 `json:"observed_mb_per_second"`
+		Samples     int     `json:"samples"`
+		Device      string  `json:"device"`
+	}
+
+	reports := make([]driveReport, 0, len(health))
+	for _, h := range health {
+		report := driveReport{
+			Name:        h.Drive.Name,
+			Device:      h.Drive.Device,
+			Access:      string(h.Access),
+			Fast:        h.Fast(),
+			Explanation: h.Explain(),
+		}
+
+		// What this drive has actually managed, which beats any claim about
+		// what it ought to manage.
+		if stats := s.Runner.Calibration.Drives[h.Drive.Device]; stats != nil {
+			for kind, rate := range stats.MBPerSecond {
+				if rate > report.Observed {
+					report.Observed = rate
+					report.Samples = stats.Samples[kind]
+				}
+			}
+		}
+		reports = append(reports, report)
+	}
+
+	writeJSON(w, map[string]any{"drives": reports})
+}
+
+// handleMasters lists the copies available to experiment on.
+func (s *Server) handleMasters(w http.ResponseWriter, r *http.Request) {
+	type master struct {
+		Title    string  `json:"title"`
+		Path     string  `json:"path"`
+		Size     int64   `json:"size"`
+		Duration float64 `json:"duration"`
+	}
+
+	var masters []master
+
+	entries, err := os.ReadDir(s.Config.Paths.Masters)
+	if err != nil {
+		writeJSON(w, map[string]any{"masters": masters})
+		return
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(s.Config.Paths.Masters, e.Name())
+
+		files, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if filepath.Ext(f.Name()) != ".mkv" {
+				continue
+			}
+			info, err := f.Info()
+			if err != nil {
+				continue
+			}
+			masters = append(masters, master{
+				Title: e.Name(),
+				Path:  filepath.Join(dir, f.Name()),
+				Size:  info.Size(),
+			})
+		}
+	}
+
+	writeJSON(w, map[string]any{"masters": masters})
+}
+
+// handleLab renders clips under several settings so a quality can be chosen by
+// watching rather than guessing.
+func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Master   string     `json:"master"`
+		At       float64    `json:"at"`
+		Length   float64    `json:"length"`
+		Settings []lab.Clip `json:"settings"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that request.", err)
+		return
+	}
+	if req.Master == "" || len(req.Settings) == 0 {
+		writeError(w, "The lab needs a copy to work from and something to try.", nil)
+		return
+	}
+
+	if !s.lab.CompareAndSwap(false, true) {
+		writeError(w, "The lab is already making clips.", nil)
+		return
+	}
+
+	go func() {
+		defer s.lab.Store(false)
+
+		outDir := filepath.Join(s.Config.Paths.Masters, ".lab")
+		s.events.send("lab", map[string]any{"state": "working"})
+
+		clips, err := lab.Run(context.Background(), lab.Request{
+			Master:    req.Master,
+			At:        time.Duration(req.At * float64(time.Second)),
+			Length:    time.Duration(req.Length * float64(time.Second)),
+			Settings:  req.Settings,
+			OutputDir: outDir,
+			OnClip: func(clip lab.Clip) {
+				s.events.send("lab", map[string]any{"state": "clip", "clip": clip})
+			},
+		})
+		if err != nil {
+			s.events.send("lab", map[string]any{"state": "stopped", "detail": err.Error()})
+			return
+		}
+
+		// The whole film's length is what makes a clip's numbers mean
+		// something.
+		filmLength := time.Duration(0)
+		if info, err := ffmpeg.Probe(context.Background(), req.Master); err == nil {
+			filmLength = time.Duration(info.Duration * float64(time.Second))
+		}
+
+		s.events.send("lab", map[string]any{
+			"state":      "done",
+			"comparison": lab.Compare(clips, time.Duration(req.Length*float64(time.Second)), filmLength),
+			"folder":     outDir,
+		})
+	}()
+
+	writeJSON(w, map[string]string{"state": "working"})
+}

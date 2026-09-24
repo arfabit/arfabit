@@ -177,3 +177,22 @@ button.done { border-color: var(--ok); }
 /* One card per disc being worked on. */
 .job-card h2 { margin-bottom: 0.15rem; }
 .job-card .stage { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.6rem; }
+
+.lab-controls {
+  display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0;
+}
+.lab-controls label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+.lab-controls select, .lab-controls input {
+  font: inherit; padding: 0.4rem 0.55rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+}
+.lab-controls #lab-master { max-width: 22rem; }
+
+table.results { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
+table.results th, table.results td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
+table.results th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; }
+table.results td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.results tr.best td { font-weight: 600; }
+
+.drive-fast { color: var(--ok); }
+.drive-slow { color: var(--warn); }
