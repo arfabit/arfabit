@@ -19,6 +19,7 @@ let events = null;
 let drives = [];
 let driveBusy = "";
 let activeJobs = [];
+let queueFilter = "all";
 let clockTimer = null;
 
 // --- problems the page cannot hide --------------------------------------
@@ -471,8 +472,27 @@ function elapsedSince(when) {
 //
 // More than one is ordinary: a film being converted has finished with the
 // drive, so the next disc can be going in while it runs.
+// kindOf groups a job by what it is waiting on, which is what somebody
+// filtering the queue actually cares about.
+function kindOf(job) {
+  switch (job.stage) {
+    case "SCAN":
+    case "PLAN":
+    case "RIP":
+    case "EJECT":
+      return "rip";
+    default:
+      return "convert";
+  }
+}
+
 function renderActive(jobs) {
-  activeJobs = jobs || [];
+  activeJobs = (jobs || []).filter((job) =>
+    queueFilter === "all" || kindOf(job) === queueFilter);
+
+  const all = jobs || [];
+  show("queue", all.length > 0);
+  $("queue-summary").textContent = queueSummary(all);
 
   const box = $("working-list");
   const wanted = new Set(activeJobs.map((j) => j.id));
@@ -493,6 +513,20 @@ function renderActive(jobs) {
 
   if (activeJobs.length > 0) startClock();
   else stopClock();
+}
+
+// queueSummary says what the queue amounts to in one line.
+function queueSummary(jobs) {
+  const reading = jobs.filter((j) => kindOf(j) === "rip").length;
+  const converting = jobs.filter((j) => j.stage === "PACKAGE").length;
+  const waiting = jobs.filter((j) => j.stage === "QUEUED").length;
+
+  const parts = [];
+  if (reading) parts.push(`${reading} disc${reading === 1 ? "" : "s"} being read`);
+  if (converting) parts.push(`${converting} converting`);
+  if (waiting) parts.push(`${waiting} waiting their turn`);
+
+  return parts.length ? parts.join(" · ") : "";
 }
 
 function jobCard(job) {
@@ -985,6 +1019,18 @@ function renderLabResults(comparison) {
 
 // --- settings -------------------------------------------------------------
 
+// loadConversionLimit says how many things convert at once, and where to
+// change it.
+async function loadConversionLimit() {
+  const state = await fetch("/api/state").then((r) => r.json());
+  const limit = state.conversions_at_once || 1;
+
+  $("conversions-detail").textContent = limit === 1
+    ? "One film at a time, which is usually fastest: converting already uses every core, so a second one makes both later. " +
+      "Change profile.max_conversions in your settings file to allow more."
+    : `Up to ${limit} at once. Change profile.max_conversions in your settings file to alter this.`;
+}
+
 async function loadAutostart() {
   const status = await fetch("/api/autostart").then((r) => r.json());
   $("autostart").checked = !!status.enabled;
@@ -1107,6 +1153,11 @@ function connect() {
   events.addEventListener("lab", (e) => {
     const status = JSON.parse(e.data);
 
+    if (status.state === "queued") {
+      $("lab-status").textContent =
+        "Waiting its turn: something else is converting. The clips will start when it finishes.";
+      return;
+    }
     if (status.state === "working") {
       $("lab-status").textContent = "Making the clips\u2026";
       return;
@@ -1259,6 +1310,11 @@ function wireButtons() {
 
 
 
+  on("queue-filter", "change", (e) => {
+    queueFilter = e.target.value;
+    refresh();
+  });
+
   on("lab-run", "click", (e) => {
     e.target.disabled = true;
     $("lab-status").textContent = "Making the clips. Each one takes a few seconds.";
@@ -1289,6 +1345,7 @@ function start() {
   runDoctor();
   loadAutostart();
   loadIndexStatus();
+  loadConversionLimit();
   loadMasters();
   loadLabClips();
   loadDriveHealth();

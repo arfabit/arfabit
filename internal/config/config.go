@@ -84,6 +84,12 @@ type Profile struct {
 
 	// MinTitleLength hides titles shorter than this during a scan.
 	MinTitleLength time.Duration
+
+	// MaxConversions is how many films may be converted at once, counting
+	// lab clips. One is right for most machines: x265 already uses every
+	// core, so a second conversion makes both later rather than either
+	// sooner.
+	MaxConversions int
 }
 
 // Defaults returns the built-in settings, before any file is read.
@@ -120,6 +126,7 @@ func Defaults() Config {
 			IncludeFullSubs:   true,
 			SubLanguages:      []string{"eng"},
 			MinTitleLength:    120 * time.Second,
+			MaxConversions:    1,
 		},
 		Sources: map[string]string{},
 	}
@@ -247,6 +254,7 @@ func (c *Config) apply(doc document, source string) error {
 		{"crf_uhd", &c.Profile.CRFUHD},
 		{"crf_bluray", &c.Profile.CRFBluray},
 		{"crf_dvd", &c.Profile.CRFDVD},
+		{"max_conversions", &c.Profile.MaxConversions},
 	} {
 		if err := num("profile", n.key, n.dst); err != nil {
 			return err

@@ -77,6 +77,23 @@ These words are used consistently in code, UI, and logs. No synonyms.
 | **Job**      | One disc's trip through the pipeline. Has a `job.json`.             |
 | **Library**  | Where Deliveries land, in Plex layout.                              |
 
+### What waits on what
+
+Two things are scarce, and they are scarce for different reasons.
+
+**The drive** can read one disc at a time. It is held during SCAN and RIP and
+released at EJECT, which is why ejecting comes early: from that point the next
+disc can go in while the last one converts.
+
+**The processor** could in principle run several conversions at once, and
+should not. x265 already uses every core, so a second conversion finishes both
+later than running them in turn would, and makes a nonsense of both estimates.
+Packaging and lab clips therefore share a small number of slots, one by default
+(`profile.max_conversions`), and whatever cannot start waits at stage QUEUED.
+
+The result is the arrangement that matters for ripping a shelf of discs: the
+drive never idles, and the processor works through a queue behind it.
+
 ### Pipeline stages
 
 ```

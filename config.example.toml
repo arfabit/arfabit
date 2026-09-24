@@ -71,6 +71,14 @@ include_forced_subs = true
 include_full_subs = true
 sub_languages = ["eng"]
 
+# How many films may be converted at once, counting test clips from the lab.
+#
+# One is usually fastest. Converting already uses every core your computer has,
+# so a second one at the same time does not finish sooner — it makes both
+# later, and makes both estimates wrong. Reading discs is not affected: the
+# next disc goes in as soon as the last one comes out, whatever is converting.
+max_conversions = 1
+
 # Ignore anything shorter than this when looking for the movie. Two minutes
 # hides menus and studio logos. Set it lower only if a disc seems to be hiding
 # something.

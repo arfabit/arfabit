@@ -332,3 +332,27 @@ func testJob(t *testing.T) *Job {
 	}
 	return &Job{Job: &store.Job{ID: "test"}, Log: log}
 }
+
+// A disc waiting for the processor must not be holding the drive: that is the
+// whole reason ejecting happens early.
+func TestQueuedJobDoesNotHoldTheDrive(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
+	r.SetCurrentForTest(&Job{Job: &store.Job{
+		ID:    "queued",
+		Title: "Crime 101",
+		State: store.StateRunning,
+		Stage: store.StageQueued,
+	}})
+
+	if busy := r.DriveIsBusy(); busy != nil {
+		t.Errorf("the drive is held by %s, which is only waiting for the processor", busy.Title)
+	}
+}
+
+// Waiting its turn is a stage of its own, because waiting and working look
+// identical otherwise.
+func TestQueuedStageIsNamedPlainly(t *testing.T) {
+	if got := stageWords(store.StageQueued); got != "Waiting its turn" {
+		t.Errorf("stageWords(QUEUED) = %q", got)
+	}
+}

@@ -27,6 +27,10 @@ type Runner struct {
 	Backend     *makemkv.Backend
 	Calibration *Calibration
 
+	// Slots limits how much converting happens at once. Discs keep going in
+	// regardless; it is the processor that has to take turns.
+	Slots *Slots
+
 	// Index is the offline film list, used to confirm a title and find its
 	// year. Nil when it has not been downloaded, in which case the disc's own
 	// name is used.
@@ -344,6 +348,15 @@ func (r *Runner) Stop() {
 	r.stopJob(job)
 }
 
+// Queued reports how many jobs are waiting for the processor.
+func (r *Runner) Queued() int {
+	if r.Slots == nil {
+		return 0
+	}
+	_, waiting := r.Slots.Busy()
+	return waiting
+}
+
 func (r *Runner) stopJob(job *Job) {
 
 	if job.cancel == nil {
@@ -432,6 +445,23 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	if r.hasSelectedSubtitles(job) {
 		job.Log.Printf(store.StageOCR,
 			"This disc has subtitles, but ARFABIT cannot read them into text yet, so the movie will not have any. They are still in the master copy.")
+	}
+
+	// Wait for a turn at the processor. Ripping is over by now and the drive
+	// is free, so the next disc can be going in while this one waits.
+	if r.Slots != nil {
+		if running, _ := r.Slots.Busy(); running > 0 {
+			job.Stage = store.StageQueued
+			job.Progress = Progress{Since: time.Now(), Operation: "Waiting for a turn"}
+			job.Log.Printf(store.StageQueued,
+				"Waiting to convert: something else is using the processor. The disc is already copied, so nothing is holding up the drive.")
+			r.save(job)
+		}
+
+		if err := r.Slots.Take(ctx); err != nil {
+			return r.stop(job, "Stopped while waiting to convert.", "")
+		}
+		defer r.Slots.Give()
 	}
 
 	job.Stage = store.StagePackage
@@ -769,6 +799,8 @@ func stageWords(stage store.Stage) string {
 		return "Copying the disc"
 	case store.StageOCR:
 		return "Reading the subtitles"
+	case store.StageQueued:
+		return "Waiting its turn"
 	case store.StagePackage:
 		return "Making the movie file"
 	case store.StageDeliver:

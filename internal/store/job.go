@@ -12,10 +12,15 @@ import (
 type Stage string
 
 const (
-	StageScan    Stage = "SCAN"
-	StagePlan    Stage = "PLAN"
-	StageRip     Stage = "RIP"
-	StageOCR     Stage = "OCR"
+	StageScan Stage = "SCAN"
+	StagePlan Stage = "PLAN"
+	StageRip  Stage = "RIP"
+	StageOCR  Stage = "OCR"
+	// StageQueued is waiting for a turn at the processor. It is a stage of its
+	// own because "waiting" and "working" look identical otherwise, and a
+	// person watching deserves to know which.
+	StageQueued Stage = "QUEUED"
+
 	StagePackage Stage = "PACKAGE"
 	StageDeliver Stage = "DELIVER"
 	StageEject   Stage = "EJECT"
@@ -27,7 +32,7 @@ const (
 // exists the disc has nothing left to give, and everything after it happens on
 // the copy. Holding the disc through a two-hour encode would be keeping it for
 // no reason.
-var Stages = []Stage{StageScan, StagePlan, StageRip, StageEject, StageOCR, StagePackage, StageDeliver}
+var Stages = []Stage{StageScan, StagePlan, StageRip, StageEject, StageOCR, StageQueued, StagePackage, StageDeliver}
 
 // State is where a job has got to.
 type State string

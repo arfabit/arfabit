@@ -258,6 +258,19 @@ func (s *Server) handleLab(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer s.lab.Store(false)
 
+		// Lab clips are the same work as packaging a film, so they queue
+		// behind it rather than competing with it for the same cores.
+		if slots := s.Runner.Slots; slots != nil {
+			if running, _ := slots.Busy(); running > 0 {
+				s.events.send("lab", map[string]any{"state": "queued"})
+			}
+			if err := slots.Take(context.Background()); err != nil {
+				s.events.send("lab", map[string]any{"state": "stopped", "detail": err.Error()})
+				return
+			}
+			defer slots.Give()
+		}
+
 		outDir := s.Config.Paths.Lab
 		s.events.send("lab", map[string]any{"state": "working"})
 

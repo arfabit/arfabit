@@ -162,6 +162,11 @@ type state struct {
 	// DriveBusy names the job holding the drive, if any.
 	DriveBusy string `json:"drive_busy,omitempty"`
 
+	// ConversionsAtOnce is how many films may convert simultaneously, and
+	// Queued how many are waiting for a turn.
+	ConversionsAtOnce int `json:"conversions_at_once"`
+	Queued            int `json:"queued"`
+
 	Recent   []*store.Job `json:"recent"`
 	Drives   []disc.Drive `json:"drives"`
 	NodeName string       `json:"node_name"`
@@ -190,6 +195,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
 		reply.DriveBusy = busy.Title
+	}
+	if s.Runner.Slots != nil {
+		reply.ConversionsAtOnce = s.Runner.Slots.Count()
+		reply.Queued = s.Runner.Queued()
 	}
 
 	writeJSON(w, reply)

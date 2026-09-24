@@ -74,7 +74,22 @@
     </div>
   </section>
 
-  <div id="working-list"></div>
+  <section id="queue" class="card" hidden>
+    <div class="log-head">
+      <h2>Queue</h2>
+      <div class="log-controls">
+        <label class="follow" for="queue-filter">Show</label>
+        <select id="queue-filter">
+          <option value="all" selected>Everything</option>
+          <option value="rip">Reading discs</option>
+          <option value="convert">Converting</option>
+          <option value="lab">Test clips</option>
+        </select>
+      </div>
+    </div>
+    <p id="queue-summary" class="muted small"></p>
+    <div id="working-list"></div>
+  </section>
 
   <section id="done" class="card" hidden>
     <h2 id="done-title">Ready</h2>
@@ -145,6 +160,11 @@
 
   <section class="card">
     <h2>Settings</h2>
+    <div class="setting">
+      <div>Converting at once</div>
+      <p id="conversions-detail" class="muted small"></p>
+    </div>
+
     <label class="track">
       <input id="autostart" type="checkbox">
       <span>Start ARFABIT when this computer starts</span>

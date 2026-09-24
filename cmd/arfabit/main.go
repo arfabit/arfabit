@@ -92,6 +92,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		Backend:     backend,
 		Calibration: calibration,
 		Index:       index,
+		Slots:       pipeline.NewSlots(cfg.Profile.MaxConversions),
 	}
 
 	server, err := web.New(cfg, st, runner, backend)
