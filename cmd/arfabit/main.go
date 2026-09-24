@@ -78,7 +78,10 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		return err
 	}
 
-	backend := &makemkv.Backend{MinLength: cfg.Profile.MinTitleLength}
+	backend := &makemkv.Backend{
+		MinLength: cfg.Profile.MinTitleLength,
+		CacheMB:   cfg.Profile.ReadCacheMB,
+	}
 
 	// A missing film list is not a problem: without it a disc's own name is
 	// used, which on many discs is already right.

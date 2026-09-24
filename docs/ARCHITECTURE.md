@@ -731,6 +731,16 @@ that survives wording changes and localization.
 `disc:9999` is a pseudo-index that enumerates drives, then fails to open disc 9999.
 Treating its trailing 5010 as an error is a bug.
 
+### Read speed
+
+`--cache=<megabytes>` is the read buffer, and it decides how fast a disc is
+copied more than anything else does. ARFABIT once passed `--cache=1` on the
+assumption that a small cache saved memory; reading a 40 GB disc a megabyte at
+a time is what that means, and it held a USB 3.0 drive to about 3 MB/s.
+
+Nothing is passed now unless `profile.read_cache_mb` asks for it, so MakeMKV
+chooses.
+
 ### DRV
 
 Sixteen slots always print. The second field is the drive's state:

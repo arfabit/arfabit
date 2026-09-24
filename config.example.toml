@@ -93,6 +93,13 @@ max_conversions = 1
 # allow_uhd_copy = true
 # copy_native_audio = true
 
+# How much ARFABIT buffers while reading a disc, in megabytes.
+#
+# Leave this out and MakeMKV chooses, which is almost always right. It is here
+# only because a wrong value has an enormous effect: reading a disc through a
+# very small buffer can hold a fast drive to walking pace.
+# read_cache_mb = 0
+
 # Ignore anything shorter than this when looking for the movie. Two minutes
 # hides menus and studio logos. Set it lower only if a disc seems to be hiding
 # something.

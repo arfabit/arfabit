@@ -63,6 +63,16 @@ type Backend struct {
 	// scratched disc can legitimately take many minutes as the drive retries.
 	Timeout time.Duration
 
+	// CacheMB is the read cache MakeMKV uses, in megabytes. Zero leaves the
+	// choice to MakeMKV, which is the right default.
+	//
+	// This matters more than anything else about how a disc is read. ARFABIT
+	// once passed 1 here, on the guess that a small cache would keep memory
+	// use down; reading a 40 GB disc a megabyte at a time is what that
+	// actually means, and it held a drive capable of far better to about
+	// 3 MB/s.
+	CacheMB int
+
 	// OnMessage receives MakeMKV's messages as they arrive, for live logging.
 	// Optional, and only a default: callers that want messages from one
 	// particular command pass a callback to that command instead, because a
@@ -200,9 +210,10 @@ var errNoTitles = fmt.Errorf("no titles found on disc")
 
 // args builds the argument list common to every invocation.
 func (b *Backend) args(extra ...string) []string {
-	// -r is robot mode; --cache=1 keeps memory use low, since ARFABIT re-reads
-	// nothing from MakeMKV's cache.
-	args := []string{"-r", "--cache=1"}
+	args := []string{"-r"}
+	if b.CacheMB > 0 {
+		args = append(args, fmt.Sprintf("--cache=%d", b.CacheMB))
+	}
 
 	switch {
 	case b.ShowAll:

@@ -93,6 +93,10 @@ type Profile struct {
 	// MinTitleLength hides titles shorter than this during a scan.
 	MinTitleLength time.Duration
 
+	// ReadCacheMB is how much MakeMKV buffers while reading a disc. Zero
+	// leaves the choice to MakeMKV, which is almost always right.
+	ReadCacheMB int
+
 	// ConvertAfterRip decides whether a disc becomes a film straight away, or
 	// stops at the copy.
 	//
@@ -318,6 +322,7 @@ func (c *Config) apply(doc document, source string) error {
 		{"crf_bluray", &c.Profile.CRFBluray},
 		{"crf_dvd", &c.Profile.CRFDVD},
 		{"max_conversions", &c.Profile.MaxConversions},
+		{"read_cache_mb", &c.Profile.ReadCacheMB},
 	} {
 		if err := num("profile", n.key, n.dst); err != nil {
 			return err

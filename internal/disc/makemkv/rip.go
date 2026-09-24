@@ -151,7 +151,10 @@ var errNoFilesWritten = fmt.Errorf("no files were written")
 func (b *Backend) ripArgs(req RipRequest) []string {
 	// --progress=-same puts progress records on stdout alongside everything
 	// else, so one stream carries the whole job.
-	args := []string{"-r", "--cache=1", "--progress=-same"}
+	args := []string{"-r", "--progress=-same"}
+	if b.CacheMB > 0 {
+		args = append(args, fmt.Sprintf("--cache=%d", b.CacheMB))
+	}
 
 	switch {
 	case b.ShowAll:

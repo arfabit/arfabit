@@ -128,3 +128,25 @@ func writeEmpty(path string) error {
 	}
 	return f.Close()
 }
+
+// How much MakeMKV buffers while reading matters more than anything else about
+// how fast a disc is copied.
+//
+// ARFABIT once passed --cache=1, on the guess that a small cache would keep
+// memory use down. Reading a 40 GB disc a megabyte at a time is what that
+// means, and it held a drive capable of far better to about 3 MB/s. Nothing
+// is passed now unless somebody asks for it, so MakeMKV chooses.
+func TestReadCacheIsLeftToMakeMKVByDefault(t *testing.T) {
+	b := &Backend{}
+	args := strings.Join(b.ripArgs(RipRequest{DriveIndex: 0, OutputDir: "/out"}), " ")
+
+	if strings.Contains(args, "--cache") {
+		t.Errorf("a read cache was imposed without being asked for: %s", args)
+	}
+
+	b.CacheMB = 512
+	args = strings.Join(b.ripArgs(RipRequest{DriveIndex: 0, OutputDir: "/out"}), " ")
+	if !strings.Contains(args, "--cache=512") {
+		t.Errorf("an asked-for cache did not reach MakeMKV: %s", args)
+	}
+}
