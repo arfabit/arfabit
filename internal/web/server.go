@@ -145,11 +145,20 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 
 // state is everything a page needs to render itself.
 type state struct {
-	Job      *pipeline.Job `json:"job"`
-	Recent   []*store.Job  `json:"recent"`
-	Drives   []disc.Drive  `json:"drives"`
-	NodeName string        `json:"node_name"`
-	Paths    config.Paths  `json:"paths"`
+	// Job is whatever is asking for a decision: a Plan waiting to be started.
+	Job *pipeline.Job `json:"job"`
+
+	// Active is everything being worked on. More than one is ordinary: a disc
+	// being converted does not need the drive, so the next one can go in.
+	Active []*pipeline.Job `json:"active"`
+
+	// DriveBusy names the job holding the drive, if any.
+	DriveBusy string `json:"drive_busy,omitempty"`
+
+	Recent   []*store.Job `json:"recent"`
+	Drives   []disc.Drive `json:"drives"`
+	NodeName string       `json:"node_name"`
+	Paths    config.Paths `json:"paths"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -158,13 +167,25 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		recent = recent[:20]
 	}
 
-	writeJSON(w, state{
-		Job:      s.Runner.Current(),
+	current := s.Runner.Current()
+	if current != nil && current.State != store.StateWaiting {
+		// Only a Plan awaiting an answer belongs in the decision slot.
+		current = nil
+	}
+
+	reply := state{
+		Job:      current,
+		Active:   s.Runner.Active(),
 		Recent:   recent,
 		Drives:   s.Drives(),
 		NodeName: s.Config.Node.Name,
 		Paths:    s.Config.Paths,
-	})
+	}
+	if busy := s.Runner.DriveIsBusy(); busy != nil {
+		reply.DriveBusy = busy.Title
+	}
+
+	writeJSON(w, reply)
 }
 
 func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +241,22 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
-	s.Runner.Stop()
+	var req struct {
+		ID string `json:"id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	// With several discs in flight, "stop" has to say which.
+	if req.ID == "" {
+		s.Runner.Stop()
+		writeJSON(w, map[string]bool{"stopped": true})
+		return
+	}
+
+	if err := s.Runner.StopJob(req.ID); err != nil {
+		writeError(w, "That disc is no longer being worked on.", err)
+		return
+	}
 	writeJSON(w, map[string]bool{"stopped": true})
 }
 
@@ -377,7 +413,7 @@ func (s *Server) handleQuit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
+	if len(s.Runner.Active()) > 0 {
 		writeError(w, "A disc is being worked on. Stop it first, or wait for it to finish.", nil)
 		return
 	}

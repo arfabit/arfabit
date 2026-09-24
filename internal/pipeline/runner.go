@@ -41,7 +41,8 @@ type Runner struct {
 	OnLog func(Entry)
 
 	mu      sync.Mutex
-	current *Job
+	pending *Job   // scanned, waiting for the user to say go
+	active  []*Job // being worked on
 }
 
 // Job is a job record plus the live state the UI needs.
@@ -70,27 +71,87 @@ type Progress struct {
 	Expected string `json:"expected,omitempty"`
 }
 
-// Current returns the job in flight, or nil.
+// Current returns the job waiting on a decision, or the newest running one.
+//
+// The page shows one Plan at a time, so "current" is whatever is asking for an
+// answer.
 func (r *Runner) Current() *Job {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.current
+
+	if r.pending != nil {
+		return r.pending
+	}
+	if len(r.active) > 0 {
+		return r.active[len(r.active)-1]
+	}
+	return nil
+}
+
+// Active returns every job being worked on, oldest first.
+func (r *Runner) Active() []*Job {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]*Job, len(r.active))
+	copy(out, r.active)
+	return out
+}
+
+// DriveIsBusy reports whether a job currently needs the disc drive.
+//
+// Only reading and copying need it. Everything after the disc comes out
+// happens on the copy, which is what lets the next disc go in while the last
+// one is still being converted.
+func (r *Runner) DriveIsBusy() *Job {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.pending != nil && r.pending.State == store.StateRunning {
+		return r.pending
+	}
+	for _, job := range r.active {
+		switch job.Stage {
+		case store.StageScan, store.StageRip:
+			return job
+		}
+	}
+	return nil
+}
+
+// finish moves a job off the active list.
+func (r *Runner) finish(job *Job) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for i, active := range r.active {
+		if active == job {
+			r.active = append(r.active[:i], r.active[i+1:]...)
+			break
+		}
+	}
+}
+
+// begin moves the pending job onto the active list.
+func (r *Runner) begin(job *Job) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.pending == job {
+		r.pending = nil
+	}
+	r.active = append(r.active, job)
 }
 
 // Scan reads the disc and builds a Plan, stopping short of doing anything to
 // it. Nothing starts until the user says so (§8).
 func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
-	// One job at a time, for now.
-	//
-	// Replacing a running job would leave it running with its progress
-	// invisible and Stop pointing at the wrong thing — an encode quietly
-	// orphaned mid-film. Refusing is not the eventual answer, since the drive
-	// is free once the disc is out and a second disc could perfectly well be
-	// read while the first is still encoding, but losing track of a job is
-	// worse than waiting.
-	if busy := r.Current(); busy != nil && busy.State == store.StateRunning {
+	// The drive can only do one thing at a time, but only reading and copying
+	// need it. A disc that has been ejected leaves its job converting on its
+	// own, and the next disc can go straight in.
+	if busy := r.DriveIsBusy(); busy != nil {
 		return nil, fmt.Errorf(
-			"%s is still being worked on (%s). ARFABIT can only manage one disc at a time for now",
+			"the drive is busy with %s (%s). It will be free once that disc comes out",
 			busy.Title, strings.ToLower(stageWords(busy.Stage)))
 	}
 
@@ -122,7 +183,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	// on for minutes.
 	ctx, cancel := context.WithCancel(ctx)
 	job := &Job{Job: rec, Log: log, cancel: cancel}
-	r.setCurrent(job)
+	r.setPending(job)
 
 	// Tell the page a disc is being read before doing it, not after.
 	r.notify(job)
@@ -210,12 +271,18 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 
 // Start runs the rest of the pipeline for a scanned job.
 func (r *Runner) Start(parent context.Context) error {
-	job := r.Current()
+	r.mu.Lock()
+	job := r.pending
+	r.mu.Unlock()
+
 	if job == nil {
 		return errors.New("there is no disc waiting")
 	}
-	if job.State == store.StateRunning && job.Stage != store.StagePlan {
+	if job.State == store.StateRunning {
 		return errors.New("this disc is already being worked on")
+	}
+	if busy := r.DriveIsBusy(); busy != nil && busy != job {
+		return fmt.Errorf("the drive is busy with %s", busy.Title)
 	}
 	if !job.Space.Fits {
 		return errors.New(job.Space.Describe())
@@ -224,14 +291,35 @@ func (r *Runner) Start(parent context.Context) error {
 	ctx, cancel := context.WithCancel(parent)
 	job.cancel = cancel
 	job.State = store.StateRunning
+	r.begin(job)
 	r.save(job)
 
 	go func() {
 		defer cancel()
-		if err := r.run(ctx, job); err != nil {
-			return
-		}
+		defer r.finish(job)
+		_ = r.run(ctx, job)
 	}()
+	return nil
+}
+
+// StopJob halts one job by its id.
+func (r *Runner) StopJob(id string) error {
+	r.mu.Lock()
+	var target *Job
+	if r.pending != nil && r.pending.ID == id {
+		target = r.pending
+	}
+	for _, job := range r.active {
+		if job.ID == id {
+			target = job
+		}
+	}
+	r.mu.Unlock()
+
+	if target == nil {
+		return fmt.Errorf("there is nothing here called %s", id)
+	}
+	r.stopJob(target)
 	return nil
 }
 
@@ -246,6 +334,10 @@ func (r *Runner) Stop() {
 	if job == nil {
 		return
 	}
+	r.stopJob(job)
+}
+
+func (r *Runner) stopJob(job *Job) {
 
 	if job.cancel == nil {
 		// Nothing is running, so there is nothing to interrupt.
@@ -680,11 +772,24 @@ func (r *Runner) stop(job *Job, note, detail string) error {
 }
 
 // SetCurrentForTest installs a job without running a scan.
-func (r *Runner) SetCurrentForTest(job *Job) { r.setCurrent(job) }
+func (r *Runner) SetCurrentForTest(job *Job) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if job.State == store.StateRunning {
+		r.active = append(r.active, job)
+		r.pending = nil
+		return
+	}
+	r.pending = job
+}
 
 // retirePreviousScan closes off a Plan nobody acted on.
 func (r *Runner) retirePreviousScan() {
-	previous := r.Current()
+	r.mu.Lock()
+	previous := r.pending
+	r.mu.Unlock()
+
 	if previous == nil || previous.State != store.StateWaiting {
 		return
 	}
@@ -694,9 +799,9 @@ func (r *Runner) retirePreviousScan() {
 	_ = r.Store.SaveJob(previous.Job)
 }
 
-func (r *Runner) setCurrent(job *Job) {
+func (r *Runner) setPending(job *Job) {
 	r.mu.Lock()
-	r.current = job
+	r.pending = job
 	r.mu.Unlock()
 }
 

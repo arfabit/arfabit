@@ -458,3 +458,64 @@ func TestEmptyDriveIsCheckedMoreOften(t *testing.T) {
 		t.Errorf("empty = %v, loaded = %v; an empty drive should be checked more often", empty, loaded)
 	}
 }
+
+// A film being converted does not need the drive, so the page must offer to
+// read the next disc rather than reporting everything as busy.
+func TestStateSeparatesTheDriveFromTheWork(t *testing.T) {
+	s := newTestServer(t)
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "converting", Title: "Crime 101", State: store.StateRunning, Stage: store.StagePackage},
+	})
+
+	rec := get(t, s, "/api/state")
+
+	var got state
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got.Active) != 1 {
+		t.Fatalf("got %d active jobs, want 1", len(got.Active))
+	}
+	if got.DriveBusy != "" {
+		t.Errorf("the drive is reported busy with %q while only converting", got.DriveBusy)
+	}
+	// Nothing is asking for a decision, so the Plan slot is empty.
+	if got.Job != nil {
+		t.Errorf("a converting job appeared in the decision slot: %+v", got.Job)
+	}
+}
+
+// While a disc is being copied the drive is named, so the page can say what it
+// is waiting for rather than simply refusing.
+func TestStateNamesWhatHoldsTheDrive(t *testing.T) {
+	s := newTestServer(t)
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "ripping", Title: "In the Grey", State: store.StateRunning, Stage: store.StageRip},
+	})
+
+	rec := get(t, s, "/api/state")
+
+	var got state
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.DriveBusy != "In the Grey" {
+		t.Errorf("DriveBusy = %q, want the disc being copied", got.DriveBusy)
+	}
+}
+
+// Ejecting is refused only by a disc actually in use.
+func TestEjectAllowedWhileConverting(t *testing.T) {
+	s := newTestServer(t)
+	s.Runner.SetCurrentForTest(&pipeline.Job{
+		Job: &store.Job{ID: "converting", Title: "Crime 101", State: store.StateRunning, Stage: store.StagePackage},
+	})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/eject", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("ejecting was refused while a film was merely being converted: %s", rec.Body.String())
+	}
+}

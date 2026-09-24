@@ -136,31 +136,84 @@ func TestScanLeavesRunningJobsAlone(t *testing.T) {
 	}
 }
 
-// Replacing a running job would leave it running with its progress invisible
-// and Stop pointing at the wrong thing.
-func TestScanRefusesWhileAJobIsRunning(t *testing.T) {
+// Only reading and copying need the drive. A disc being converted finished
+// with the drive when it was ejected, so the next disc can go straight in —
+// which is the whole point of ejecting early.
+func TestDriveIsFreeWhileAFilmConverts(t *testing.T) {
 	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
 	r.SetCurrentForTest(&Job{Job: &store.Job{
-		ID:    "encoding",
+		ID:    "converting",
 		Title: "Crime 101",
 		State: store.StateRunning,
 		Stage: store.StagePackage,
 	}})
 
+	if busy := r.DriveIsBusy(); busy != nil {
+		t.Errorf("the drive is reported busy with %s, which is only being converted", busy.Title)
+	}
+}
+
+// While a disc is actually being copied, the drive is not available.
+func TestDriveIsBusyWhileCopying(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
+	r.SetCurrentForTest(&Job{Job: &store.Job{
+		ID:    "ripping",
+		Title: "In the Grey",
+		State: store.StateRunning,
+		Stage: store.StageRip,
+	}})
+
+	busy := r.DriveIsBusy()
+	if busy == nil {
+		t.Fatal("the drive is reported free while a disc is being copied")
+	}
+	if busy.Title != "In the Grey" {
+		t.Errorf("the wrong job was named: %q", busy.Title)
+	}
+}
+
+// Scanning a second disc while the first is copying must be refused, and the
+// message should say what the drive is doing and that it will free up.
+func TestScanRefusesWhileTheDriveIsBusy(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
+	r.SetCurrentForTest(&Job{Job: &store.Job{
+		ID:    "ripping",
+		Title: "Crime 101",
+		State: store.StateRunning,
+		Stage: store.StageRip,
+	}})
+
 	_, err := r.Scan(context.Background(), disc.Drive{Index: 0})
 	if err == nil {
-		t.Fatal("a second disc was accepted while one was still being worked on")
+		t.Fatal("a second disc was accepted while one was being copied")
 	}
 	if !strings.Contains(err.Error(), "Crime 101") {
-		t.Errorf("the message does not say what is busy: %q", err)
+		t.Errorf("the message does not say what the drive is doing: %q", err)
 	}
-	if !strings.Contains(err.Error(), "making the movie file") {
-		t.Errorf("the message does not say what it is busy with: %q", err)
+	if !strings.Contains(err.Error(), "free") {
+		t.Errorf("the message does not say the wait is temporary: %q", err)
+	}
+}
+
+// Several films can be converting at once while the drive works through more
+// discs.
+func TestSeveralJobsCanBeActive(t *testing.T) {
+	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
+
+	for _, title := range []string{"One", "Two", "Three"} {
+		r.begin(&Job{Job: &store.Job{
+			ID:    title,
+			Title: title,
+			State: store.StateRunning,
+			Stage: store.StagePackage,
+		}})
 	}
 
-	// The running job is still the current one.
-	if r.Current().ID != "encoding" {
-		t.Error("the running job was replaced")
+	if got := len(r.Active()); got != 3 {
+		t.Errorf("got %d active jobs, want 3", got)
+	}
+	if r.DriveIsBusy() != nil {
+		t.Error("the drive is busy despite every job being past the disc")
 	}
 }
 

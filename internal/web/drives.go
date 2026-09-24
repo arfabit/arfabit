@@ -7,9 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"fmt"
+
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/eject"
-	"github.com/arfabit/arfabit/internal/store"
 )
 
 // How often the drive is asked what it holds.
@@ -51,9 +52,9 @@ func (s *Server) Drives() []disc.Drive {
 // the drive changes.
 func (s *Server) WatchDrives(ctx context.Context) {
 	check := func() {
-		// A job owns the drive. Asking it anything now would wake it every few
-		// seconds for hours, and could not tell us anything we do not know.
-		if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
+		// A job holding the drive would be disturbed by the question, and it
+		// can tell us nothing we do not already know.
+		if s.Runner.DriveIsBusy() != nil {
 			return
 		}
 
@@ -89,9 +90,9 @@ func (s *Server) WatchDrives(ctx context.Context) {
 
 // nextWatchDelay is how long to leave the drive alone before asking again.
 func (s *Server) nextWatchDelay() time.Duration {
-	if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
-		// Come back soon enough to notice the job finishing, without touching
-		// the drive in the meantime.
+	if s.Runner.DriveIsBusy() != nil {
+		// Come back soon enough to notice the disc coming out, without
+		// touching the drive in the meantime.
 		return driveWatchLoaded
 	}
 
@@ -112,8 +113,10 @@ func (s *Server) handleDrives(w http.ResponseWriter, r *http.Request) {
 // Many slot and tray drives ignore their own button while a program holds
 // them, so this is not a convenience: without it the disc can be stuck.
 func (s *Server) handleEject(w http.ResponseWriter, r *http.Request) {
-	if job := s.Runner.Current(); job != nil && job.State == store.StateRunning {
-		writeError(w, "A disc is being worked on. Stop it first, or wait for it to finish.", nil)
+	// Only a job holding the drive prevents ejecting. A film being converted
+	// has long since finished with the disc.
+	if busy := s.Runner.DriveIsBusy(); busy != nil {
+		writeError(w, fmt.Sprintf("The drive is busy with %s. Wait for that disc to come out.", busy.Title), nil)
 		return
 	}
 

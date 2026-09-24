@@ -17,7 +17,8 @@ const seenLogIds = new Set();
 let followLog = true;
 let events = null;
 let drives = [];
-let currentJob = null;
+let driveBusy = "";
+let activeJobs = [];
 let clockTimer = null;
 
 // --- problems the page cannot hide --------------------------------------
@@ -203,6 +204,15 @@ function renderDrives(list) {
 
   const scan = $("scan");
   const loaded = drives.find((d) => d.Loaded);
+
+  // The drive may be busy with a disc even while other films convert.
+  if (driveBusy) {
+    $("idle-title").textContent = `The drive is busy with ${driveBusy}`;
+    $("idle-detail").textContent = "It will be free once that disc comes out.";
+    scan.disabled = true;
+    $("eject").disabled = true;
+    return;
+  }
 
   if (drives.length === 0) {
     $("idle-title").textContent = "No disc drive found";
@@ -395,7 +405,6 @@ function renderPlan(job) {
 function startClock() {
   if (clockTimer) return;
   clockTimer = setInterval(tickClock, 1000);
-  tickClock();
 }
 
 function stopClock() {
@@ -405,32 +414,123 @@ function stopClock() {
 }
 
 function tickClock() {
-  const job = currentJob;
-  if (!job || job.state !== "running") {
+  if (activeJobs.length === 0) {
     stopClock();
     return;
   }
+  for (const job of activeJobs) {
+    updateJobCard(job);
+  }
+}
+
+// elapsedSince renders how long ago something started, counting in seconds
+// early on so the number visibly moves.
+function elapsedSince(when) {
+  if (!when) return "";
+
+  const started = new Date(when);
+  if (Number.isNaN(started.getTime()) || started.getTime() === 0) return "";
+
+  const seconds = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+// renderActive draws one card per disc being worked on.
+//
+// More than one is ordinary: a film being converted has finished with the
+// drive, so the next disc can be going in while it runs.
+function renderActive(jobs) {
+  activeJobs = jobs || [];
+
+  const box = $("working-list");
+  const wanted = new Set(activeJobs.map((j) => j.id));
+
+  // Remove cards for jobs that have finished.
+  for (const card of [...box.children]) {
+    if (!wanted.has(card.dataset.job)) card.remove();
+  }
+
+  for (const job of activeJobs) {
+    let card = box.querySelector(`[data-job="${CSS.escape(job.id)}"]`);
+    if (!card) {
+      card = jobCard(job);
+      box.append(card);
+    }
+    updateJobCard(job);
+  }
+
+  if (activeJobs.length > 0) startClock();
+  else stopClock();
+}
+
+function jobCard(job) {
+  const card = document.createElement("section");
+  card.className = "card job-card";
+  card.dataset.job = job.id;
+
+  const title = document.createElement("h2");
+  title.className = "job-title";
+  card.append(title);
+
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  card.append(stage);
+
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  const fill = document.createElement("div");
+  fill.className = "bar-fill";
+  bar.append(fill);
+  card.append(bar);
+
+  const line = document.createElement("div");
+  line.className = "progress-line";
+  const detail = document.createElement("span");
+  detail.className = "muted job-detail";
+  const estimate = document.createElement("span");
+  estimate.className = "muted estimate-right job-estimate";
+  line.append(detail, estimate);
+  card.append(line);
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+  const stop = document.createElement("button");
+  stop.textContent = "Stop";
+  stop.addEventListener("click", (e) =>
+    busy(e.target, "Stopping\u2026", null, () => post("/api/stop", { id: job.id })));
+  actions.append(stop);
+  card.append(actions);
+
+  return card;
+}
+
+function updateJobCard(job) {
+  const card = $("working-list").querySelector(`[data-job="${CSS.escape(job.id)}"]`);
+  if (!card) return;
+
+  card.querySelector(".job-title").textContent = job.title || job.disc_name || "A disc";
+  card.querySelector(".stage").textContent = stageWords(job.stage);
 
   const progress = job.progress || {};
   const pct = Math.round(progress.percent || 0);
+  card.querySelector(".bar-fill").style.width = `${pct}%`;
 
-  // Left: where it is now.
   const now = [];
   const elapsed = elapsedSince(progress.since);
   if (elapsed) now.push(elapsed);
   if (pct > 0) now.push(`${pct}%`);
   if (progress.operation) now.push(progress.operation);
-  $("working-detail").textContent = now.join(" · ");
+  card.querySelector(".job-detail").textContent = now.join(" · ");
 
-  // Right: where it is going.
-  $("working-estimate").textContent = estimateText(progress, pct);
+  card.querySelector(".job-estimate").textContent = estimateText(progress, pct);
 }
 
 // estimateText says how much longer, as honestly as it can.
-//
-// ffmpeg reports its own remaining time and that is trusted. MakeMKV does not,
-// so until there is a percentage to work from the answer is what this machine
-// has learned discs usually take — and it says which it is.
 function estimateText(progress, pct) {
   if (progress.remaining && progress.remaining !== "unknown") {
     return `about ${progress.remaining} left`;
@@ -457,97 +557,23 @@ function humanMs(ms) {
   return rest === 0 ? `${hours} hours` : `${hours}h ${rest}m`;
 }
 
-// elapsedSince renders how long ago something started, counting in seconds
-// early on so the number visibly moves.
-function elapsedSince(when) {
-  if (!when) return "";
-
-  const started = new Date(when);
-  if (Number.isNaN(started.getTime()) || started.getTime() === 0) return "";
-
-  const seconds = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
 function renderJob(job) {
-  currentJob = job;
-
   if (!job) {
-    renderDrives(drives);
-    show("idle", true);
     show("plan", false);
-    show("working", false);
     show("done", false);
     return;
   }
 
   const waiting = job.state === "waiting";
-  const running = job.state === "running";
-  const done = job.state === "done";
-  const stopped = job.state === "stopped";
-
-  show("idle", false);
   show("plan", waiting);
-  // Reading the disc is shown too: it takes minutes, and a page that shows
-  // nothing during it looks broken.
-  show("working", running);
-  show("done", done || stopped);
+  show("done", job.state === "done" || job.state === "stopped");
 
   if (waiting) renderPlan(job);
 
-  if (running) {
-    $("working-title").textContent = stageWords(job.stage);
-    $("bar-fill").style.width = `${Math.round((job.progress && job.progress.percent) || 0)}%`;
-    startClock();
-  } else {
-    stopClock();
-  }
-
-  if (done || stopped) {
-    $("done-title").textContent = done ? "Ready" : "Stopped";
+  if (job.state === "done" || job.state === "stopped") {
+    $("done-title").textContent = job.state === "done" ? "Ready" : "Stopped";
     $("done-detail").textContent = job.note || "";
   }
-}
-
-// jobOutcome says what became of a disc, in words rather than state names.
-function jobOutcome(job) {
-  switch (job.state) {
-    case "done":
-      return "Finished";
-    case "running":
-      return stageWords(job.stage);
-    case "waiting":
-      return "Waiting for you to start it";
-    default:
-      // A stopped job carries its own explanation, which is more useful than
-      // the word "stopped".
-      return job.note || "Stopped";
-  }
-}
-
-// whenText says when something happened, in the terms a person would use.
-function whenText(when) {
-  if (!when) return "";
-
-  const then = new Date(when);
-  if (Number.isNaN(then.getTime())) return "";
-
-  const today = new Date();
-  const sameDay = then.toDateString() === today.toDateString();
-  if (sameDay) return then.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  if (then.toDateString() === yesterday.toDateString()) {
-    return `yesterday, ${then.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-  }
-
-  return then.toLocaleDateString();
 }
 
 function renderRecent(jobs) {
@@ -575,9 +601,14 @@ function renderRecent(jobs) {
 
 async function refresh() {
   const state = await fetch("/api/state").then((r) => r.json());
+  driveBusy = state.drive_busy || "";
   renderDrives(state.drives);
+  renderActive(state.active || []);
   renderJob(state.job);
   renderRecent(state.recent || []);
+
+  // The idle card is only for when nothing is asking for a decision.
+  show("idle", !state.job);
 
   const log = await fetch("/api/log").then((r) => r.json());
   appendLog(log);
@@ -767,7 +798,9 @@ async function waitForRestart() {
 function connect() {
   events = new EventSource("/events");
 
-  events.addEventListener("job", (e) => renderJob(JSON.parse(e.data)));
+  // Any job change may add or remove a card, so the whole picture is
+  // refreshed rather than patched.
+  events.addEventListener("job", () => refresh());
   events.addEventListener("log", (e) => appendLog([JSON.parse(e.data)]));
   events.addEventListener("index", (e) => renderIndexStatus(JSON.parse(e.data)));
   events.addEventListener("drives", (e) => {

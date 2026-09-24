@@ -173,3 +173,7 @@ button.done { border-color: var(--ok); }
   flex-wrap: wrap;
 }
 .estimate-right { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+/* One card per disc being worked on. */
+.job-card h2 { margin-bottom: 0.15rem; }
+.job-card .stage { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.6rem; }
