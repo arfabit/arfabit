@@ -24,6 +24,7 @@ import (
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
+	"github.com/arfabit/arfabit/internal/profiles"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -39,6 +40,9 @@ type Server struct {
 	Store   *store.Store
 	Runner  *pipeline.Runner
 	Backend *makemkv.Backend
+
+	// Profiles are the named settings people make and edit here.
+	Profiles *profiles.Store
 
 	// Restart starts ARFABIT again. Set by the program that owns the process,
 	// because only it knows how to shut down tidily first.
@@ -128,6 +132,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/masters", s.handleMasters)
 	mux.HandleFunc("GET /api/lab", s.handleLabClips)
 	mux.HandleFunc("GET /api/profiles", s.handleProfiles)
+	mux.HandleFunc("POST /api/profiles", s.handleSaveProfile)
+	mux.HandleFunc("DELETE /api/profiles/{name}", s.handleDeleteProfile)
 	mux.HandleFunc("POST /api/transcode", s.handleTranscode)
 	mux.HandleFunc("POST /api/convert", s.handleConvert)
 	mux.HandleFunc("POST /api/eject", s.handleEject)

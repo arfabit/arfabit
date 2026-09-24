@@ -29,6 +29,14 @@ type LabRequest struct {
 	// point: comparing means having both to watch.
 	Profiles []string
 
+	// Custom is a one-off, used for this job and not kept. Trying something
+	// once should not mean naming it and remembering it forever.
+	Custom *config.Profile
+
+	// Lookup finds a profile by name. Set by whatever owns the profiles,
+	// since they can be made and changed while ARFABIT runs.
+	Lookup func(string) (config.Profile, bool)
+
 	// LabDir and LibraryDir are where clips and films go respectively.
 	LabDir     string
 	LibraryDir string
@@ -47,8 +55,29 @@ func (r *Runner) StartTranscode(parent context.Context, req LabRequest) (*Job, e
 	if req.Master == "" {
 		return nil, fmt.Errorf("there is no copy to work from")
 	}
-	if len(req.Profiles) == 0 {
+	if len(req.Profiles) == 0 && req.Custom == nil {
 		return nil, fmt.Errorf("nothing was chosen to try")
+	}
+
+	// A one-off is simply another profile, named so it can be told apart in a
+	// folder listing weeks later.
+	if req.Custom != nil {
+		custom := *req.Custom
+		if custom.Name == "" {
+			custom.Name = "Custom"
+		}
+
+		named := req.Lookup
+		req.Lookup = func(name string) (config.Profile, bool) {
+			if name == custom.Name {
+				return custom, true
+			}
+			if named != nil {
+				return named(name)
+			}
+			return config.Profile{}, false
+		}
+		req.Profiles = append(req.Profiles, custom.Name)
 	}
 
 	film := req.Film
@@ -128,6 +157,9 @@ func (r *Runner) runTranscode(ctx context.Context, job *Job, req LabRequest) {
 		}
 
 		profile, known := r.Config.ProfileNamed(name)
+		if req.Lookup != nil {
+			profile, known = req.Lookup(name)
+		}
 		if !known {
 			job.Log.Printf(job.Stage, "There is no profile called %s, so it has been skipped.", name)
 			continue

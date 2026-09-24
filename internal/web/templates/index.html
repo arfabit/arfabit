@@ -152,6 +152,14 @@
 
     <h3>Profiles</h3>
     <div id="profile-list"></div>
+
+    <label class="track">
+      <input id="use-custom" type="checkbox">
+      <span>Also try one-off settings, just for this job</span>
+    </label>
+
+    <div id="custom-form" class="profile-form" hidden></div>
+
     <p id="lab-destination" class="muted small"></p>
 
     <button id="lab-run" class="primary">Start</button>
@@ -161,6 +169,19 @@
     <h3 id="lab-clips-heading" hidden>Clips you have made</h3>
     <p id="lab-folder" class="muted small"></p>
     <div id="lab-clips"></div>
+  </section>
+
+  <section class="card">
+    <h2>Profiles</h2>
+    <p class="muted small">Named settings you can pick when transcoding. Profiles written in your settings file are shown here but changed there.</p>
+
+    <div id="profile-manager"></div>
+
+    <div class="button-row">
+      <button id="profile-new">Make a profile</button>
+    </div>
+
+    <div id="profile-editor" class="profile-form" hidden></div>
   </section>
 
   <section class="card">

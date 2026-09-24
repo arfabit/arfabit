@@ -312,6 +312,16 @@ but the Plan offers it with the savings shown.
 profile differing in quality alone says only that. The default is itself one of
 the profiles, so anything choosing between them sees the whole list.
 
+Profiles can also be made and changed on the page, and those live in
+`profiles.json` in the data directory rather than being written back into the
+settings file. A settings file is somebody's, with their comments and their
+arrangement; rewriting it to change a number would be presumptuous. So profiles
+written by hand are listed but marked "change it there", with an offer to copy
+one rather than edit it.
+
+A one-off profile can be filled in for a single job and is not kept. Trying
+something once should not mean naming it and remembering it forever.
+
 They are chosen in the Transcode section, several at a time: comparing means
 having both to watch. The same mechanism produces clips and films — a stretch
 of a film becomes clips in the lab folder, the whole of it becomes films in the

@@ -26,6 +26,7 @@ import (
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
+	"github.com/arfabit/arfabit/internal/profiles"
 	"github.com/arfabit/arfabit/internal/restart"
 	"github.com/arfabit/arfabit/internal/store"
 	"github.com/arfabit/arfabit/internal/web"
@@ -95,10 +96,17 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		Slots:       pipeline.NewSlots(cfg.Profile.MaxConversions),
 	}
 
+	// Profiles made here, as opposed to written in the settings file.
+	profileStore, err := profiles.Open(cfg.Paths.Data)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "The saved profiles could not be read, so only the ones in your settings file are available: %v\n", err)
+	}
+
 	server, err := web.New(cfg, st, runner, backend)
 	if err != nil {
 		return err
 	}
+	server.Profiles = profileStore
 
 	// Stopping from the page matters for anyone whose computer starts ARFABIT
 	// on its own: they have no terminal to press Ctrl+C in.

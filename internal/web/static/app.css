@@ -208,3 +208,24 @@ table.results tr.best td { font-weight: 600; }
 .convert-choice { margin: 0.75rem 0 0.25rem; }
 #master-list .row { align-items: center; }
 #master-list button { font-size: 0.85rem; padding: 0.3rem 0.7rem; }
+
+/* A form for filling in a profile, whether saved or one-off. */
+.profile-form {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: 0.75rem 0;
+  background: var(--bg);
+}
+.profile-form .fields { display: flex; flex-wrap: wrap; gap: 1rem; }
+.profile-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+.profile-form label.inline { flex-direction: row; align-items: center; gap: 0.5rem; color: var(--ink); }
+.profile-form input[type=text], .profile-form input[type=number], .profile-form select {
+  font: inherit; padding: 0.4rem 0.55rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+}
+.profile-form input[type=number] { width: 5rem; }
+.profile-form .actions { margin-top: 0.75rem; }
+
+#profile-manager .row { align-items: baseline; }
+#profile-manager .from-file { font-size: 0.8rem; color: var(--muted); }

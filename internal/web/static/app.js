@@ -1016,7 +1016,112 @@ async function loadProfiles() {
     return row;
   }));
 
+  renderProfileManager(profiles);
   describeDestination();
+}
+
+// profileForm builds the form for filling in a profile.
+//
+// The same form serves a saved profile and a one-off, because they are the
+// same thing: one is remembered and one is not.
+function profileForm(values, options) {
+  const box = document.createElement("div");
+
+  const fields = document.createElement("div");
+  fields.className = "fields";
+
+  const field = (label, input) => {
+    const wrap = document.createElement("label");
+    const text = document.createElement("span");
+    text.textContent = label;
+    wrap.append(text, input);
+    fields.append(wrap);
+    return input;
+  };
+
+  const number = (label, key, value) => {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "51";
+    input.value = value;
+    input.dataset.key = key;
+    return field(label, input);
+  };
+
+  if (options.named) {
+    const name = document.createElement("input");
+    name.type = "text";
+    name.value = values.name || "";
+    name.dataset.key = "name";
+    name.placeholder = "A name";
+    field("Name", name);
+  }
+
+  const preset = document.createElement("select");
+  preset.dataset.key = "preset";
+  for (const speed of ["superfast", "medium", "slow", "slower", "veryslow"]) {
+    const option = new Option(speed, speed);
+    option.selected = speed === (values.preset || "slow");
+    preset.append(option);
+  }
+  field("Speed", preset);
+
+  number("4K quality", "crf_uhd", values.crf_uhd ?? 20);
+  number("Blu-ray quality", "crf_bluray", values.crf_bluray ?? 20);
+  number("DVD quality", "crf_dvd", values.crf_dvd ?? 18);
+
+  const bitrate = document.createElement("input");
+  bitrate.type = "text";
+  bitrate.value = values.audio_bitrate || "256k";
+  bitrate.dataset.key = "audio_bitrate";
+  field("Stereo sound", bitrate);
+
+  box.append(fields);
+
+  const tick = (label, key, checked) => {
+    const wrap = document.createElement("label");
+    wrap.className = "inline";
+
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    input.dataset.key = key;
+
+    const text = document.createElement("span");
+    text.textContent = label;
+
+    wrap.append(input, text);
+    box.append(wrap);
+  };
+
+  tick("Keep 4K pictures exactly as they are", "allow_uhd_copy", values.allow_uhd_copy !== false);
+  tick("Keep Dolby sound exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
+
+  const note = document.createElement("p");
+  note.className = "muted small";
+  note.textContent = "Lower numbers mean better pictures and bigger files. 20 is close to indistinguishable from the disc.";
+  box.append(note);
+
+  return box;
+}
+
+// readProfileForm gathers what was filled in.
+function readProfileForm(box) {
+  const values = {};
+
+  for (const input of box.querySelectorAll("[data-key]")) {
+    const key = input.dataset.key;
+    if (input.type === "checkbox") {
+      values[key] = input.checked;
+    } else if (input.type === "number") {
+      values[key] = Number(input.value);
+    } else {
+      values[key] = input.value;
+    }
+  }
+
+  return values;
 }
 
 // chosenProfiles is what is ticked, in the order shown.
@@ -1026,24 +1131,121 @@ function chosenProfiles() {
     .map((box) => box.value);
 }
 
+// customProfile is the one-off form's contents, or nothing if it is not in use.
+function customProfile() {
+  if (!$("use-custom").checked) return null;
+
+  const values = readProfileForm($("custom-form"));
+  if (!values.name) values.name = "Custom";
+  return values;
+}
+
+// renderProfileManager lists the profiles with a way to change them.
+function renderProfileManager(profiles) {
+  const box = $("profile-manager");
+
+  box.replaceChildren(...profiles.map((profile) => {
+    const row = document.createElement("div");
+    row.className = "row";
+
+    const left = document.createElement("div");
+    const name = document.createElement("div");
+    name.textContent = profile.default ? `${profile.name} (used by default)` : profile.name;
+
+    const detail = document.createElement("div");
+    detail.className = "muted small";
+    detail.textContent = profile.description;
+
+    left.append(name, detail);
+
+    if (!profile.editable) {
+      const where = document.createElement("div");
+      where.className = "from-file";
+      where.textContent = `From ${profile.source} — change it there`;
+      left.append(where);
+    }
+
+    const buttons = document.createElement("div");
+    buttons.className = "button-row";
+
+    if (profile.editable) {
+      const edit = document.createElement("button");
+      edit.textContent = "Change";
+      edit.addEventListener("click", () => openProfileEditor(profile));
+
+      const remove = document.createElement("button");
+      remove.textContent = "Remove";
+      remove.addEventListener("click", async (e) => {
+        const result = await busy(e.target, "Removing\u2026", null, () =>
+          fetch(`/api/profiles/${encodeURIComponent(profile.name)}`, { method: "DELETE" })
+            .then((res) => (res.ok ? res.json() : null)));
+        if (result) loadProfiles();
+      });
+
+      buttons.append(edit, remove);
+    } else {
+      const copy = document.createElement("button");
+      copy.textContent = "Make a copy";
+      copy.addEventListener("click", () =>
+        openProfileEditor({ ...profile, name: `${profile.name} copy`, editable: true }));
+      buttons.append(copy);
+    }
+
+    row.append(left, buttons);
+    return row;
+  }));
+}
+
+// openProfileEditor shows the form for making or changing a profile.
+function openProfileEditor(values) {
+  const editor = $("profile-editor");
+  editor.hidden = false;
+
+  const form = profileForm(values || {}, { named: true });
+
+  const actions = document.createElement("div");
+  actions.className = "actions";
+
+  const save = document.createElement("button");
+  save.className = "primary";
+  save.textContent = "Save";
+  save.addEventListener("click", async (e) => {
+    const result = await busy(e.target, "Saving\u2026", "Saved", () =>
+      post("/api/profiles", readProfileForm(form)));
+    if (result) {
+      editor.hidden = true;
+      loadProfiles();
+    }
+  });
+
+  const cancel = document.createElement("button");
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => { editor.hidden = true; });
+
+  actions.append(save, cancel);
+  editor.replaceChildren(form, actions);
+}
+
 // describeDestination says what pressing Start will produce and where it goes.
 //
 // A whole film is a film and belongs in the library; a stretch of one is a
 // clip to watch and compare. Saying which avoids the surprise.
 function describeDestination() {
   const chosen = chosenProfiles();
+  const custom = customProfile() ? 1 : 0;
   const whole = Number($("lab-length").value) === 0;
 
-  if (chosen.length === 0) {
+  if (chosen.length + custom === 0) {
     $("lab-destination").textContent = "Tick at least one profile.";
     $("lab-run").disabled = true;
     return;
   }
 
+  const count = chosen.length + custom;
   $("lab-run").disabled = false;
   $("lab-destination").textContent = whole
-    ? `${chosen.length} full film${chosen.length === 1 ? "" : "s"}, saved to your library as separate editions. This takes hours.`
-    : `${chosen.length} test clip${chosen.length === 1 ? "" : "s"}, saved to the lab folder to watch and compare.`;
+    ? `${count} full film${count === 1 ? "" : "s"}, saved to your library as separate editions. This takes hours.`
+    : `${count} test clip${count === 1 ? "" : "s"}, saved to the lab folder to watch and compare.`;
 }
 
 // parseTimestamp reads "1:15:20", "15:20" or plain seconds.
@@ -1430,6 +1632,19 @@ function wireButtons() {
 
   on("lab-length", "change", describeDestination);
 
+  on("use-custom", "change", (e) => {
+    const box = $("custom-form");
+    box.hidden = !e.target.checked;
+
+    if (e.target.checked && box.children.length === 0) {
+      // Named, so it can be told apart in a folder listing weeks later.
+      box.replaceChildren(profileForm({ name: "Custom" }, { named: true }));
+    }
+    describeDestination();
+  });
+
+  on("profile-new", "click", () => openProfileEditor({ name: "" }));
+
   on("lab-run", "click", async (e) => {
     const chosen = $("lab-master").selectedOptions[0];
 
@@ -1440,6 +1655,7 @@ function wireButtons() {
         at: parseTimestamp($("lab-at").value),
         length: Number($("lab-length").value),
         profiles: chosenProfiles(),
+        custom: customProfile(),
       }));
 
     if (result) {

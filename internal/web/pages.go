@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/drive"
 	"github.com/arfabit/arfabit/internal/pipeline"
 )
@@ -241,10 +242,30 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 		At       float64  `json:"at"`
 		Length   float64  `json:"length"`
 		Profiles []string `json:"profiles"`
+
+		// Custom is a one-off used for this job and not kept.
+		Custom *struct {
+			Name            string  `json:"name"`
+			Preset          *string `json:"preset"`
+			CRFUHD          *int    `json:"crf_uhd"`
+			CRFBluray       *int    `json:"crf_bluray"`
+			CRFDVD          *int    `json:"crf_dvd"`
+			AudioBitrate    *string `json:"audio_bitrate"`
+			AllowUHDCopy    *bool   `json:"allow_uhd_copy"`
+			CopyNativeAudio *bool   `json:"copy_native_audio"`
+		} `json:"custom"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
+	}
+
+	var custom *config.Profile
+	if req.Custom != nil {
+		p := applyProfileForm(s.Config.Profile, req.Custom.Name, req.Custom.Preset,
+			req.Custom.CRFUHD, req.Custom.CRFBluray, req.Custom.CRFDVD,
+			req.Custom.AudioBitrate, req.Custom.AllowUHDCopy, req.Custom.CopyNativeAudio)
+		custom = &p
 	}
 
 	job, err := s.Runner.StartTranscode(context.Background(), pipeline.LabRequest{
@@ -253,6 +274,8 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 		At:         time.Duration(req.At * float64(time.Second)),
 		Length:     time.Duration(req.Length * float64(time.Second)),
 		Profiles:   req.Profiles,
+		Custom:     custom,
+		Lookup:     func(name string) (config.Profile, bool) { return s.Profiles.Named(s.Config, name) },
 		LabDir:     s.Config.Paths.Lab,
 		LibraryDir: s.Config.Paths.Library,
 	})
@@ -266,25 +289,137 @@ func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
 
 // handleProfiles lists the named settings available to choose between.
 func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
-	type profile struct {
+	type reply struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Default     bool   `json:"default"`
+		Editable    bool   `json:"editable"`
+		Source      string `json:"source"`
+
+		// The settings themselves, so the form can be filled in from one.
+		Preset          string `json:"preset"`
+		CRFUHD          int    `json:"crf_uhd"`
+		CRFBluray       int    `json:"crf_bluray"`
+		CRFDVD          int    `json:"crf_dvd"`
+		AudioBitrate    string `json:"audio_bitrate"`
+		AllowUHDCopy    bool   `json:"allow_uhd_copy"`
+		CopyNativeAudio bool   `json:"copy_native_audio"`
 	}
 
-	names := s.Config.ProfileNames()
-	profiles := make([]profile, 0, len(names))
+	all := s.Profiles.All(s.Config)
+	out := make([]reply, 0, len(all))
 
-	for _, name := range names {
-		p, _ := s.Config.ProfileNamed(name)
-		profiles = append(profiles, profile{
-			Name:        name,
-			Description: p.Describe(),
-			Default:     name == s.Config.Profile.Name,
+	for _, p := range all {
+		out = append(out, reply{
+			Name:            p.Name,
+			Description:     p.Describe(),
+			Default:         p.Name == s.Config.Profile.Name,
+			Editable:        p.Editable,
+			Source:          p.Source,
+			Preset:          p.Preset,
+			CRFUHD:          p.CRFUHD,
+			CRFBluray:       p.CRFBluray,
+			CRFDVD:          p.CRFDVD,
+			AudioBitrate:    p.AudioBitrate,
+			AllowUHDCopy:    p.AllowUHDCopy,
+			CopyNativeAudio: p.CopyNativeAudio,
 		})
 	}
 
-	writeJSON(w, map[string]any{"profiles": profiles})
+	writeJSON(w, map[string]any{"profiles": out})
+}
+
+// handleSaveProfile makes or changes a profile.
+func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
+	profile, err := readProfileForm(r, s.Config.Profile)
+	if err != nil {
+		writeError(w, "ARFABIT could not read that.", err)
+		return
+	}
+
+	saved, err := s.Profiles.Save(profile)
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
+
+	writeJSON(w, map[string]any{"name": saved.Name})
+}
+
+// handleDeleteProfile removes a profile.
+//
+// Only profiles made here can be removed: one written in the settings file
+// belongs to whoever wrote it, and the place to remove it is there.
+func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+
+	if err := s.Profiles.Delete(name); err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
+
+	writeJSON(w, map[string]bool{"removed": true})
+}
+
+// readProfileForm reads a profile from a request, filling in anything not
+// given from the default.
+//
+// Starting from the default rather than from nothing means a form that asks
+// about quality does not silently turn off subtitles.
+func readProfileForm(r *http.Request, base config.Profile) (config.Profile, error) {
+	var form struct {
+		Name            string  `json:"name"`
+		Preset          *string `json:"preset"`
+		CRFUHD          *int    `json:"crf_uhd"`
+		CRFBluray       *int    `json:"crf_bluray"`
+		CRFDVD          *int    `json:"crf_dvd"`
+		AudioBitrate    *string `json:"audio_bitrate"`
+		AllowUHDCopy    *bool   `json:"allow_uhd_copy"`
+		CopyNativeAudio *bool   `json:"copy_native_audio"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&form); err != nil {
+		return base, err
+	}
+
+	return applyProfileForm(base, form.Name, form.Preset, form.CRFUHD, form.CRFBluray,
+		form.CRFDVD, form.AudioBitrate, form.AllowUHDCopy, form.CopyNativeAudio), nil
+}
+
+// applyProfileForm lays whatever was given over a starting point.
+func applyProfileForm(
+	base config.Profile,
+	name string,
+	preset *string,
+	crfUHD, crfBluray, crfDVD *int,
+	bitrate *string,
+	allowUHDCopy, copyNativeAudio *bool,
+) config.Profile {
+	p := base
+	if name != "" {
+		p.Name = name
+	}
+	if preset != nil {
+		p.Preset = *preset
+	}
+	if crfUHD != nil {
+		p.CRFUHD = *crfUHD
+	}
+	if crfBluray != nil {
+		p.CRFBluray = *crfBluray
+	}
+	if crfDVD != nil {
+		p.CRFDVD = *crfDVD
+	}
+	if bitrate != nil {
+		p.AudioBitrate = *bitrate
+	}
+	if allowUHDCopy != nil {
+		p.AllowUHDCopy = *allowUHDCopy
+	}
+	if copyNativeAudio != nil {
+		p.CopyNativeAudio = *copyNativeAudio
+	}
+	return p
 }
 
 // handleConvert turns a copy that already exists into a film.

@@ -15,6 +15,7 @@ import (
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/pipeline"
+	"github.com/arfabit/arfabit/internal/profiles"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -48,6 +49,13 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	store, err := profiles.Open(cfg.Paths.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Profiles = store
+
 	return s
 }
 
@@ -584,5 +592,105 @@ func TestMastersWithNothingRipped(t *testing.T) {
 	rec := get(t, s, "/api/masters")
 	if !strings.Contains(rec.Body.String(), "masters") {
 		t.Errorf("body = %q", rec.Body.String())
+	}
+}
+
+// Profiles can be made, changed and removed without touching the settings file.
+func TestProfilesCanBeMadeAndRemoved(t *testing.T) {
+	s := newTestServer(t)
+
+	body := strings.NewReader(`{"name":"Small","preset":"medium","crf_bluray":24}`)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/profiles", body))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("saving a profile returned %d: %s", rec.Code, rec.Body)
+	}
+
+	// It appears in the list, marked as one ARFABIT may change.
+	listed := get(t, s, "/api/profiles")
+	var reply struct {
+		Profiles []struct {
+			Name      string `json:"name"`
+			Editable  bool   `json:"editable"`
+			CRFBluray int    `json:"crf_bluray"`
+			CRFDVD    int    `json:"crf_dvd"`
+		} `json:"profiles"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+
+	var small *struct {
+		Name      string `json:"name"`
+		Editable  bool   `json:"editable"`
+		CRFBluray int    `json:"crf_bluray"`
+		CRFDVD    int    `json:"crf_dvd"`
+	}
+	for i := range reply.Profiles {
+		if reply.Profiles[i].Name == "Small" {
+			small = &reply.Profiles[i]
+		}
+	}
+	if small == nil {
+		t.Fatal("the saved profile is not in the list")
+	}
+	if !small.Editable {
+		t.Error("a profile made here is not offered as changeable")
+	}
+	if small.CRFBluray != 24 {
+		t.Errorf("crf_bluray = %d, want 24", small.CRFBluray)
+	}
+	// Anything not named keeps the default, so a form about quality does not
+	// quietly change something else.
+	if small.CRFDVD != s.Config.Profile.CRFDVD {
+		t.Errorf("crf_dvd = %d; a setting nobody mentioned was changed", small.CRFDVD)
+	}
+
+	// And it can be removed again.
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/profiles/Small", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("removing returned %d: %s", rec.Code, rec.Body)
+	}
+}
+
+// Settings that would fail halfway through a film are refused when saved.
+func TestSavingNonsenseIsRefused(t *testing.T) {
+	s := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/profiles",
+		strings.NewReader(`{"name":"Broken","preset":"ultrafast"}`)))
+
+	if rec.Code == http.StatusOK {
+		t.Error("an unsupported speed was saved")
+	}
+
+	var problem map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(problem["message"], "ultrafast") {
+		t.Errorf("the message does not say what was wrong: %q", problem["message"])
+	}
+}
+
+// Trying something once should not mean naming it and remembering it forever.
+func TestTranscodeAcceptsAOneOff(t *testing.T) {
+	s := newTestServer(t)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/transcode",
+		strings.NewReader(`{"master":"/nowhere/m.mkv","film":"x","length":30,
+			"custom":{"name":"Just this once","crf_bluray":26}}`)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a one-off was refused: %s", rec.Body)
+	}
+
+	// And it is not remembered.
+	if _, kept := s.Profiles.Saved["Just this once"]; kept {
+		t.Error("a one-off was saved as a profile")
 	}
 }
