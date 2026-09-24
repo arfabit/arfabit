@@ -19,8 +19,23 @@ const DefaultMinLength = 120 * time.Second
 
 // listDrivesIndex is a pseudo-index that makes makemkvcon enumerate drives.
 //
-// It then tries to open disc 9999, which does not exist, so a trailing
-// "failed to open disc" message is expected and must be ignored.
+// Nothing else in this package should mention it, and nothing outside this
+// file should see what it produces beyond the drive list itself. It has caused
+// the same class of mistake three times:
+//
+//   - It tries to open disc 9999, which does not exist, so it always ends with
+//     "failed to open disc". Reading that as a real error meant reporting a
+//     broken disc when nothing was wrong.
+//   - It therefore always exits non-zero — 255 in practice. Treating that as
+//     failure meant reporting no drive on a machine that had one.
+//   - It prints "opened in OS access mode" while enumerating, which is about
+//     the enumeration and not about reading a disc. Reading it as the read
+//     mode meant telling people their drive was slow when it was not.
+//
+// The pattern is the same every time: its output looks like information about
+// a disc and is nothing of the sort. So listDrives below returns drives and
+// only drives, and the messages are dropped where they cannot be mistaken for
+// anything.
 const listDrivesIndex = 9999
 
 // Backend runs makemkvcon.
@@ -108,21 +123,23 @@ func (b *Backend) DrivesIfFree() ([]disc.Drive, bool) {
 	return drives, true
 }
 
+// drivesLocked lists the drives and discards everything else.
+//
+// Dropping the messages is the point, not an oversight: see listDrivesIndex.
+// The only thing this command can honestly tell anybody is which drives exist
+// and what is in them.
 func (b *Backend) drivesLocked() ([]disc.Drive, error) {
-	// Listing drives is a background poll, so its chatter is not logged.
 	res, err := b.run(context.Background(), nil, "info", fmt.Sprintf("disc:%d", listDrivesIndex))
 
-	// The pseudo-index lists the drives and then tries to open disc 9999,
-	// which does not exist, so makemkvcon always exits non-zero here — 255 in
-	// practice. The drives it printed first are still good, and treating that
-	// exit as a failure reports "no drive" on a machine that has one.
+	// A non-zero exit here is expected, and the drives printed before it are
+	// good. Only an empty list is worth reporting as a failure.
 	if res != nil && len(res.Drives) > 0 {
 		return res.Drives, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return res.Drives, nil
+	return nil, nil
 }
 
 // Scan enumerates the titles on the disc in the given drive.

@@ -90,28 +90,22 @@ func (b *Backend) CheckHealth(ctx context.Context) ([]Health, error) {
 	b.busy.Lock()
 	defer b.busy.Unlock()
 
-	res, err := b.run(ctx, nil, "info", fmt.Sprintf("disc:%d", listDrivesIndex))
-	if res == nil {
+	// Only the drive list, deliberately: listing drives cannot say how fast
+	// one reads, and its messages have been misread as saying so.
+	drives, err := b.drivesLocked()
+	if err != nil && len(drives) == 0 {
 		return nil, err
 	}
 
-	// Listing drives does not open a disc, and MakeMKV only says which mode it
-	// is using once it has. The "opened in OS access mode" line it prints
-	// while enumerating is about the enumeration, not about reading, and
-	// reporting it as the read mode said "slow" even when reading was fast.
-	access, version := AccessUnknown, ""
+	// The mode is whatever the last real scan used, or unknown.
+	access, version, _ := b.lastAccessLocked()
 
-	if seen, seenVersion, ok := b.lastAccessLocked(); ok {
-		access, version = seen, seenVersion
-	}
-
-	health := make([]Health, 0, len(res.Drives))
-	for _, d := range res.Drives {
+	health := make([]Health, 0, len(drives))
+	for _, d := range drives {
 		health = append(health, Health{
 			Drive:      d,
 			Access:     access,
 			LibreDrive: version,
-			Messages:   res.Messages,
 		})
 	}
 

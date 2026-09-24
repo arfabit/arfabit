@@ -1,6 +1,7 @@
 package makemkv
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -105,5 +106,28 @@ func TestAccessComesFromARealScan(t *testing.T) {
 
 	if access, _ := AccessFrom(nil); access != AccessUnknown {
 		t.Errorf("nothing at all read as %q, want unknown", access)
+	}
+}
+
+// Nothing but this file should know the enumeration index exists, and nothing
+// should be able to read what it says.
+//
+// The same class of mistake has been made three times — its trailing error
+// read as a real one, its exit code read as failure, its access-mode line read
+// as the read mode — so the guard is structural rather than another comment.
+func TestEnumerationSaysNothingAboutReading(t *testing.T) {
+	b := &Backend{}
+
+	health, _ := b.CheckHealth(context.Background())
+	for _, h := range health {
+		if len(h.Messages) != 0 {
+			t.Errorf("the drive report carries %d messages from enumeration, which say nothing about reading",
+				len(h.Messages))
+		}
+	}
+
+	// With no scan yet, the mode is unknown rather than guessed either way.
+	if access, _, seen := b.LastAccess(); seen || access != AccessUnknown {
+		t.Errorf("a mode was reported before any disc was read: %q", access)
 	}
 }

@@ -60,6 +60,14 @@ dependency, and nothing here credits or references them.
 
 ## Things that are easy to get wrong
 
+**`makemkvcon info disc:9999` tells you nothing about a disc.** It enumerates
+drives, then tries to open disc 9999, which does not exist. So it always ends
+with "failed to open disc", always exits non-zero, and always prints "opened in
+OS access mode". None of that is about any real disc, and all three have been
+mistaken for it — reporting a broken disc, then no drive at all, then a slow
+drive, each on a machine where nothing was wrong. `drivesLocked` therefore
+returns drives and nothing else. Do not reach past it for the messages.
+
 **HDR metadata (§9).** An HDR source encoded without `--master-display` / `--max-cll`
 produces a valid file that plays back grey. It does not error. Any change near the
 encoder needs this verified, not assumed.
