@@ -35,8 +35,7 @@ func (p Preset) Valid() bool {
 // VideoPlan says what to do with the picture.
 type VideoPlan struct {
 	// Copy passes the video through untouched. Only available when the source
-	// codec is one Apple TV decodes natively, which in practice means HEVC on
-	// a UHD disc.
+	// codec plays directly (§4), which in practice means HEVC on a UHD disc.
 	Copy bool
 
 	CRF    int
@@ -49,10 +48,10 @@ type AudioTrack struct {
 	SourceIndex int
 
 	// Copy passes the track through untouched, which is possible when the
-	// source is already AC-3, E-AC-3 or AAC (§9).
+	// source already plays directly (§4, §9).
 	Copy bool
 
-	Codec    string // "aac", "eac3" — ignored when Copy
+	Codec    string // "flac", "aac", "eac3" — ignored when Copy
 	Bitrate  string // "256k"
 	Channels int    // 2 for a stereo downmix, 0 to keep the source layout
 	Title    string
@@ -60,10 +59,11 @@ type AudioTrack struct {
 	Default  bool
 }
 
-// SubtitleTrack is one output subtitle track, converted to mov_text.
+// SubtitleTrack is one output subtitle track, carried as SRT.
 type SubtitleTrack struct {
-	// Path to an SRT file on disk. MP4 cannot carry the bitmap subtitles a
-	// disc ships, so subtitles reach here only after OCR.
+	// Path to an SRT file on disk. The bitmap subtitles a disc ships would
+	// force Plex to convert the picture to show them (§10), so subtitles reach
+	// here only after OCR.
 	Path    string
 	Lang    string
 	Title   string
@@ -71,13 +71,25 @@ type SubtitleTrack struct {
 	Default bool
 }
 
+// SubtitleCopy is a subtitle track taken from the input as it is.
+type SubtitleCopy struct {
+	SourceIndex int
+	Lang        string
+	Title       string
+	Default     bool
+}
+
 // EncodeRequest is one packaging job: an input file plus what to make of it.
 type EncodeRequest struct {
-	Input     string
-	Output    string
-	Video     VideoPlan
-	Audio     []AudioTrack
-	Subtitles []SubtitleTrack
+	Input  string
+	Output string
+	Video  VideoPlan
+	Audio  []AudioTrack
+
+	// SubtitleCopies come first among the subtitles, then Subtitles, which
+	// are SRT files made by OCR.
+	SubtitleCopies []SubtitleCopy
+	Subtitles      []SubtitleTrack
 
 	// VideoSourceIndex is the input stream index of the picture.
 	VideoSourceIndex int
@@ -93,17 +105,31 @@ type EncodeRequest struct {
 	Chapters bool
 }
 
-// nativeAudioCodecs are the codecs Apple TV decodes, and so the ones worth
-// copying rather than re-encoding.
-var nativeAudioCodecs = map[string]bool{
-	"ac3":  true,
-	"eac3": true,
-	"aac":  true,
+// carriedAudioCodecs are the sound formats Matroska carries as they are,
+// which is every one a disc has. Whether a device then plays one directly is
+// a separate question, answered by what was tested (§4, package playback),
+// and changing a track because of it is the user's choice, never this one's.
+// "dts" covers DTS-HD Master Audio, which shares its codec name with DTS.
+var carriedAudioCodecs = map[string]bool{
+	"ac3":    true,
+	"eac3":   true,
+	"aac":    true,
+	"dts":    true,
+	"truehd": true,
+	"flac":   true,
+	"alac":   true,
+	"pcm":    true,
+	"mp2":    true,
+	"mp3":    true,
+	"opus":   true,
 }
 
-// CanCopyAudio reports whether a source audio codec can be passed through.
+// CanCopyAudio reports whether a source audio codec can be passed through
+// into the output. Uncompressed sound comes in one "pcm_" codec per sample
+// format.
 func CanCopyAudio(codec string) bool {
-	return nativeAudioCodecs[strings.ToLower(codec)]
+	codec = strings.ToLower(codec)
+	return carriedAudioCodecs[codec] || strings.HasPrefix(codec, "pcm_")
 }
 
 // nativeVideoCodecs are the codecs Apple TV decodes. MPEG-2 and VC-1 are
@@ -142,6 +168,9 @@ func (r EncodeRequest) Args() ([]string, error) {
 	for _, a := range r.Audio {
 		args = append(args, "-map", fmt.Sprintf("0:%d", a.SourceIndex))
 	}
+	for _, s := range r.SubtitleCopies {
+		args = append(args, "-map", fmt.Sprintf("0:%d", s.SourceIndex))
+	}
 	for i := range r.Subtitles {
 		args = append(args, "-map", fmt.Sprintf("%d:0", i+1))
 	}
@@ -156,9 +185,15 @@ func (r EncodeRequest) Args() ([]string, error) {
 		args = append(args, "-map_chapters", "-1")
 	}
 
-	// faststart moves the index to the front so playback can begin before the
-	// whole file is available.
-	args = append(args, "-movflags", "+faststart", r.Output)
+	// MakeMKV writes each track's size, duration and bitrate into the master.
+	// Carried across, they describe the source rather than what was made — a
+	// converted track claiming the bitrate of the one it came from — so they
+	// are left behind. Language and title are set on each track explicitly.
+	args = append(args, "-map_metadata", "-1")
+
+	// Matroska (§0.2). Unlike MP4 it needs no codec tag and no index moved to
+	// the front, and it carries every sound format that plays directly.
+	args = append(args, r.Output)
 
 	return args, nil
 }
@@ -177,27 +212,40 @@ func (r EncodeRequest) videoArgs() []string {
 		// HEVC Main10 natively.
 		"-profile:v", "main10",
 		"-pix_fmt", "yuv420p10le",
-		// hvc1 rather than hev1: Apple's players require this tag in MP4.
-		"-tag:v", "hvc1",
 	}
 
 	if x265 := r.x265Params(); x265 != "" {
 		args = append(args, "-x265-params", x265)
 	}
 
-	// Colour description is carried on the output stream as well as inside the
-	// bitstream, so players that read the container get it too.
-	if r.Color.Primaries != "" {
-		args = append(args, "-color_primaries", r.Color.Primaries)
-	}
-	if r.Color.Transfer != "" {
-		args = append(args, "-color_trc", r.Color.Transfer)
-	}
-	if r.Color.Space != "" {
-		args = append(args, "-colorspace", r.Color.Space)
-	}
+	return append(args, r.Color.Args()...)
+}
 
-	return args
+// Args carries the colour description into the output's container label as
+// well as into the picture, so a player that reads either finds it.
+//
+// The frames themselves are stamped with it, not only the encoder. Given the
+// encoder options alone, ffmpeg's Matroska muxer labelled the file with the
+// matrix and nothing else, and a reader that trusts the label then takes an
+// HDR film's primaries and transfer to be unknown (§9). Measured with ffmpeg
+// 9.0.2; HDRSurvivesIntoMatroska checks it still holds.
+func (c ColorInfo) Args() []string {
+	var params, opts []string
+	add := func(filter, option, value string) {
+		if value == "" || value == "unknown" {
+			return
+		}
+		params = append(params, filter+"="+value)
+		opts = append(opts, option, value)
+	}
+	add("color_primaries", "-color_primaries", c.Primaries)
+	add("color_trc", "-color_trc", c.Transfer)
+	add("colorspace", "-colorspace", c.Space)
+
+	if len(params) == 0 {
+		return nil
+	}
+	return append([]string{"-vf", "setparams=" + strings.Join(params, ":")}, opts...)
 }
 
 // x265Params builds the -x265-params value.
@@ -242,6 +290,9 @@ func (r EncodeRequest) audioArgs() []string {
 			args = append(args, "-c:a:"+out, "copy")
 		} else {
 			args = append(args, "-c:a:"+out, a.Codec)
+			if f := LosslessFrames(a.Codec); f != "" {
+				args = append(args, "-filter:a:"+out, f)
+			}
 			if a.Bitrate != "" {
 				args = append(args, "-b:a:"+out, a.Bitrate)
 			}
@@ -265,16 +316,42 @@ func (r EncodeRequest) audioArgs() []string {
 	return args
 }
 
+// LosslessFrames returns a filter that hands a lossless encoder frames of an
+// even size, or "" for codecs that need none.
+//
+// TrueHD decodes into frames of uneven sizes, and a cut can start on a tiny
+// one. FLAC and ALAC refuse to start on a frame of a few samples, and whether
+// a cut lands on one depends on where it starts: a clip from 20:05.000 worked
+// and one from 20:05.121 did not. Evening the frames out changes no sample.
+func LosslessFrames(codec string) string {
+	switch codec {
+	case "flac", "alac":
+		return "asetnsamples=n=4096:p=0"
+	}
+	return ""
+}
+
 func (r EncodeRequest) subtitleArgs() []string {
-	if len(r.Subtitles) == 0 {
-		return nil
+	var args []string
+
+	// Copied tracks stay as they are, whatever they are; Matroska carries
+	// picture subtitles too, though showing them costs a player more (§4).
+	for i, s := range r.SubtitleCopies {
+		out := strconv.Itoa(i)
+		args = append(args, "-c:s:"+out, "copy")
+		if s.Lang != "" {
+			args = append(args, "-metadata:s:s:"+out, "language="+s.Lang)
+		}
+		if s.Title != "" {
+			args = append(args, "-metadata:s:s:"+out, "title="+s.Title)
+		}
+		args = append(args, "-disposition:s:"+out, dispositionOf(s.Default, false))
 	}
 
-	// mov_text is the only subtitle format MP4 carries.
-	args := []string{"-c:s", "mov_text"}
-
-	for i, s := range r.Subtitles {
-		out := strconv.Itoa(i)
+	for n, s := range r.Subtitles {
+		out := strconv.Itoa(len(r.SubtitleCopies) + n)
+		// SRT, as text, which plays directly; Matroska carries it as it is.
+		args = append(args, "-c:s:"+out, "srt")
 		if s.Lang != "" {
 			args = append(args, "-metadata:s:s:"+out, "language="+s.Lang)
 		}

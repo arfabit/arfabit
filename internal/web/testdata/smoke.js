@@ -26,6 +26,10 @@ function element(id) {
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     tagName: "DIV",
     addEventListener() {},
+    setAttribute() {},
+    removeAttribute() {},
+    closest: () => null,
+    get options() { return this.children; },
     append(...kids) { this.children.push(...kids); },
     prepend() {},
     replaceChildren(...kids) { this.children = kids; },
@@ -46,17 +50,24 @@ for (const match of fs.readFileSync(process.argv[3], "utf8").matchAll(/id="([a-z
   byId.set(match[1], element(match[1]));
 }
 
+// A master is chosen, so the package editor is drawn rather than skipped.
+byId.get("lab-master").value = "/masters/Crime 101 (2025)/x.mkv";
+
 global.document = {
   getElementById: (id) => byId.get(id) || null,
   createElement: (tag) => element(tag),
+  createElementNS: (ns, tag) => element(tag),
+  createTextNode: (text) => ({ textContent: text }),
   querySelectorAll: () => [],
   body: element("body"),
 };
 
 global.window = {
   addEventListener() {},
+  scrollTo() {},
   location: { reload() {} },
 };
+global.location = { hash: "#tasks", reload() {} };
 
 global.CSS = { escape: (s) => s };
 global.Option = function (text, value) { return element("option"); };
@@ -72,7 +83,7 @@ global.EventSource.CLOSED = 2;
 // nothing leaves most of the page unexercised, which is how a missing function
 // slipped through the first version of this test.
 const plan = {
-  profile: "Archive",
+  blueprint: "Archive",
   duration: "2h 12m",
   source_size: 40700000000,
   resolution: "1920x1080",
@@ -84,9 +95,28 @@ const plan = {
   obfuscated: true,
   reason: "This disc lists 3 titles of exactly the same length.",
   audio: [
-    { source_index: 1, lang: "eng", channels: 8, label: "English · 7.1", selected: false },
+    { source_index: 1, lang: "eng", channels: 8, label: "English · 7.1", source: "English · 7.1 · DTS-HD Master Audio · lossless", lossless: true, selected: false },
     { source_index: 3, lang: "eng", channels: 2, label: "English · Stereo", selected: true },
     { source_index: 4, lang: "fra", channels: 6, label: "French · 5.1", selected: false },
+  ],
+  convert: true,
+  tracks: [
+    { index: 0, kind: "video", codec: "h264", height: 1080, label: "H.264 · 1080p" },
+    { index: 1, kind: "audio", codec: "dts", lang: "eng", channels: 8, lossless: true, label: "English · 7.1 · DTS-HD Master Audio · lossless" },
+    { index: 3, kind: "audio", codec: "ac3", lang: "eng", channels: 2, label: "English · Stereo · Dolby Digital · lossy" },
+    { index: 7, kind: "subtitle", codec: "hdmv_pgs_subtitle", lang: "eng", label: "English · pictures", note: "Plex has to convert the whole picture to show these on Apple TV." },
+  ],
+  package: {
+    containers: ["mkv"], edition: "Archive", blueprint: "Archive",
+    items: [
+      { kind: "video", action: "convert", source: 0, codec: "h264", to: "hevc", crf: 20, preset: "slow", label: "H.264 · 1080p" },
+      { kind: "audio", action: "copy", source: 1, codec: "dts", lang: "eng", channels: 8, lossless: true, label: "English · 7.1 · DTS-HD Master Audio · lossless" },
+      { kind: "subtitle", action: "copy", source: 7, codec: "hdmv_pgs_subtitle", lang: "eng", label: "English · pictures" },
+    ],
+  },
+  sound: [
+    { language: "English", choice: "pick one of 7.1 or 5.1, lossless", matched: ["7.1 · DTS-HD Master Audio · lossless"] },
+    { language: "English", choice: "pick one of stereo" },
   ],
   subtitles: [
     { source_index: 7, lang: "eng", forced: false, label: "PGS English", selected: true },
@@ -97,6 +127,8 @@ const plan = {
 const answers = {
   "/api/state": {
     node_name: "test",
+    now: new Date().toISOString(),
+    line: ["queued-job", "queued-disc"],
     drive_busy: "",
     job: {
       id: "waiting-job",
@@ -114,10 +146,31 @@ const answers = {
       state: "running",
       stage: "RIP",
       title: "In the Grey",
-      progress: { percent: 12, operation: "Saving to MKV file", since: new Date().toISOString(), expected: "40 minutes" },
+      file: "In the Grey_t00.mkv",
+      progress: { percent: 12, operation: "Saving to MKV file", since: new Date().toISOString(), expected: "40 minutes", rate: "6.4 MB/s" },
+    }, {
+      id: "queued-job",
+      kind: "lab",
+      state: "running",
+      stage: "QUEUED",
+      title: "Crime 101",
+      year: 2025,
+      progress: { operation: "Getting things ready", since: new Date().toISOString() },
+    }, {
+      id: "queued-disc",
+      from: "running-job",
+      kind: "convert",
+      state: "running",
+      stage: "QUEUED",
+      title: "Alien",
+      file: "Alien {edition-Archive}.mp4",
+      progress: { operation: "Waiting for a turn", since: new Date().toISOString() },
     }],
     recent: [
-      { id: "a", state: "done", stage: "DELIVER", title: "Blade Runner", started: new Date().toISOString() },
+      { id: "p", kind: "convert", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982,
+        made: ["/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Archive}.mkv"], started: new Date().toISOString() },
+      { id: "a", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982, master: "/m/Blade Runner (1982)/t00.mkv", started: new Date().toISOString(),
+        read_speed: [{ seconds: 30, mb_per_second: 6.1 }, { seconds: 60, mb_per_second: 22.4 }, { seconds: 90, mb_per_second: 18 }] },
       { id: "b", state: "stopped", stage: "RIP", title: "Alien", note: "Not started.", started: "2026-09-20T10:00:00Z" },
       { id: "c", state: "waiting", stage: "PLAN", disc_label: "SOME_DISC", started: "2026-09-23T10:00:00Z" },
     ],
@@ -136,22 +189,37 @@ const answers = {
   "/api/autostart": { enabled: true, mechanism: "launchd user agent", path: "/tmp/x.plist" },
   "/api/index": { state: "ready", count: 272565, path: "/tmp/titles.json", built: new Date().toISOString() },
   "/api/masters": { masters: [{ title: "Crime 101 (2025)", path: "/masters/Crime 101 (2025)/x.mkv", size: 40700000000 }] },
-  "/api/lab": {
-    folder: "/tmp/lab",
-    clips: [{ film: "Crime 101 (2025)", name: "Lab 001 - crf20-slow - 0h10m00s", path: "/tmp/lab/x.mp4", size: 60000000, made: new Date().toISOString() }],
-  },
-  "/api/master-tracks": {
+  "/api/master": {
+    duration: 5825,
     tracks: [
-      { index: 1, kind: "audio", label: "English · 7.1 · DTS-HD MA (lossless)", lang: "eng", channels: 8, selected: true, carriable: true },
-      { index: 3, kind: "audio", label: "English · Stereo · Dolby Digital", lang: "eng", channels: 2, selected: true, carriable: true },
-      { index: 7, kind: "subtitle", label: "English", lang: "eng", carriable: false, note: "cannot be carried yet" },
+      { index: 0, kind: "video", codec: "h264", height: 1080, label: "H.264 · 1080p" },
+      { index: 1, kind: "audio", codec: "truehd", lang: "eng", channels: 8, lossless: true, label: "English · 7.1 · Dolby TrueHD · lossless",
+        note: "Plex has to convert this every time it plays on Apple TV. Consider adding/substituting a converted FLAC 7.1 that remains lossless and plays directly." },
+      { index: 2, kind: "audio", codec: "ac3", lang: "eng", channels: 2, label: "English · Stereo · Dolby Digital · lossy" },
+      { index: 3, kind: "audio", codec: "ac3", lang: "fra", channels: 6, label: "French · 5.1 · Dolby Digital · lossy" },
+      { index: 4, kind: "subtitle", codec: "hdmv_pgs_subtitle", lang: "eng", label: "English · pictures",
+        note: "Plex has to convert the whole picture to show these on Apple TV." },
     ],
   },
-  "/api/profiles": {
-    profiles: [
+  "/api/package/fill": {
+    package: {
+      containers: ["mkv"], edition: "Archive", blueprint: "Archive",
+      items: [
+        { kind: "video", action: "convert", source: 0, codec: "h264", to: "hevc", crf: 20, preset: "slow", label: "H.264 · 1080p" },
+        { kind: "audio", action: "copy", source: 1, codec: "truehd", lang: "eng", channels: 8, lossless: true, label: "English · 7.1 · Dolby TrueHD · lossless" },
+        { kind: "audio", action: "convert", source: 1, codec: "truehd", lang: "eng", channels: 8, lossless: true, to: "flac", label: "English · 7.1 · Dolby TrueHD · lossless" },
+        { kind: "audio", action: "convert", source: 2, codec: "ac3", lang: "eng", channels: 2, to: "aac", bitrate: "256k", label: "English · Stereo · Dolby Digital · lossy" },
+        { kind: "subtitle", action: "copy", source: 4, codec: "hdmv_pgs_subtitle", lang: "eng", label: "English · pictures" },
+      ],
+    },
+  },
+  "/api/blueprints": {
+    blueprints: [
       { name: "Archive", description: "HEVC quality 20, slow", default: true, editable: true, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, copy_native_audio: true },
-      { name: "Small", description: "HEVC quality 24, medium", default: false, editable: true, source: "made here", preset: "medium", crf_uhd: 24, crf_bluray: 24, crf_dvd: 22, audio_bitrate: "192k", allow_uhd_copy: false, copy_native_audio: true },
+      { name: "Small", description: "HEVC quality 24, medium", default: false, editable: true, source: "made here", preset: "medium", crf_uhd: 24, crf_bluray: 24, crf_dvd: 22, audio_bitrate: "192k", allow_uhd_copy: false, copy_native_audio: true,
+        sound: { languages: ["eng", "fra"], language_mode: "all", choices: [{ mode: "one", layouts: ["7.1", "5.1"], quality: "lossless" }, { mode: "one", layouts: ["stereo"], quality: "" }] } },
     ],
+    defaults: { name: "", description: "HEVC quality 20, slow", default: false, editable: false, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, copy_native_audio: true },
   },
   "/api/drive-health": {
     drives: [{
@@ -164,7 +232,7 @@ const answers = {
 
 global.fetch = async (path) => ({
   ok: true,
-  json: async () => answers[path] ?? {},
+  json: async () => answers[path.split("?")[0]] ?? {},
 });
 
 global.setInterval = () => 0;

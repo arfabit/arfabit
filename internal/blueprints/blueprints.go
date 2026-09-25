@@ -1,10 +1,14 @@
-// Package profiles keeps the named settings a person makes and edits.
+// Package blueprints keeps the starter templates for planning a job.
 //
-// Profiles written by hand in the settings file are read there and left alone:
+// A blueprint overrides some of the defaults. There may be none at all, in
+// which case every Plan starts from the defaults; one may be chosen to be used
+// by default, in which case every new Plan starts from it instead.
+//
+// Blueprints written by hand in the settings file are read there and left alone:
 // they are somebody's file, with their comments and their arrangement, and
-// rewriting it to change a number would be presumptuous. Profiles made here
+// rewriting it to change a number would be presumptuous. Blueprints made here
 // live in a file of their own that ARFABIT owns outright.
-package profiles
+package blueprints
 
 import (
 	"encoding/json"
@@ -18,15 +22,16 @@ import (
 	"github.com/arfabit/arfabit/internal/config"
 )
 
-// Profile is a named set of settings, with where it came from.
-type Profile struct {
-	config.Profile
+// Blueprint is a named set of settings, with where it came from.
+type Blueprint struct {
+	config.Blueprint
 
-	// Editable says whether ARFABIT may change this one. Profiles from the
-	// settings file are not: that file belongs to the person who wrote it.
+	// Editable says whether this one can be changed on the page. Today every
+	// blueprint can: changing one from the settings file keeps a version in
+	// blueprints.json, and the file itself is left as it was written.
 	Editable bool `json:"editable"`
 
-	// Source says where it came from, so the page can explain why a profile
+	// Source says where it came from, so the page can explain why a blueprint
 	// cannot be edited here rather than merely refusing.
 	Source string `json:"source"`
 
@@ -34,18 +39,18 @@ type Profile struct {
 	Updated time.Time `json:"updated,omitempty"`
 }
 
-// Store holds the profiles ARFABIT owns.
+// Store holds the blueprints ARFABIT owns.
 type Store struct {
 	path string
 
 	// Saved are the ones made here, by name.
-	Saved map[string]Profile `json:"profiles"`
+	Saved map[string]Blueprint `json:"blueprints"`
 
-	// Default is the profile a disc gets unless something says otherwise.
-	// Empty means the one named in the settings file.
+	// Default is the blueprint a new Plan starts from. Empty means none: a
+	// Plan then starts from the defaults alone.
 	Default string `json:"default,omitempty"`
 
-	// Hidden are profiles from the settings file that somebody has removed
+	// Hidden are blueprints from the settings file that somebody has removed
 	// here.
 	//
 	// ARFABIT does not rewrite the settings file — that file is somebody's,
@@ -58,8 +63,8 @@ type Store struct {
 // Open reads the store, creating nothing until something is saved.
 func Open(dataDir string) (*Store, error) {
 	s := &Store{
-		path:  filepath.Join(dataDir, "profiles.json"),
-		Saved: map[string]Profile{},
+		path:  filepath.Join(dataDir, "blueprints.json"),
+		Saved: map[string]Blueprint{},
 	}
 
 	data, err := os.ReadFile(s.path)
@@ -71,30 +76,30 @@ func Open(dataDir string) (*Store, error) {
 	}
 
 	if err := json.Unmarshal(data, s); err != nil {
-		// A damaged file starts empty rather than stopping ARFABIT: profiles
+		// A damaged file starts empty rather than stopping ARFABIT: blueprints
 		// are a convenience, and the settings file still has its own.
-		s.Saved = map[string]Profile{}
-		return s, fmt.Errorf("the saved profiles could not be read: %w", err)
+		s.Saved = map[string]Blueprint{}
+		return s, fmt.Errorf("the saved blueprints could not be read: %w", err)
 	}
 	if s.Saved == nil {
-		s.Saved = map[string]Profile{}
+		s.Saved = map[string]Blueprint{}
 	}
 
 	return s, nil
 }
 
-// Save writes or replaces a profile.
-func (s *Store) Save(p config.Profile) (Profile, error) {
+// Save writes or replaces a blueprint.
+func (s *Store) Save(p config.Blueprint) (Blueprint, error) {
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
-		return Profile{}, fmt.Errorf("a profile needs a name")
+		return Blueprint{}, fmt.Errorf("a blueprint needs a name")
 	}
 	if err := validate(p); err != nil {
-		return Profile{}, err
+		return Blueprint{}, err
 	}
 
 	p.Name = name
-	saved := Profile{Profile: p, Editable: true, Source: "made here", Updated: time.Now()}
+	saved := Blueprint{Blueprint: p, Editable: true, Source: "made here", Updated: time.Now()}
 
 	if existing, ok := s.Saved[name]; ok {
 		saved.Created = existing.Created
@@ -106,78 +111,69 @@ func (s *Store) Save(p config.Profile) (Profile, error) {
 	return saved, s.write()
 }
 
-// SetDefault chooses which profile a disc gets unless something says
-// otherwise.
+// SetDefault chooses the blueprint a new Plan starts from. An empty name
+// chooses none, so Plans start from the defaults alone.
 func (s *Store) SetDefault(cfg config.Config, name string) error {
-	if !s.exists(cfg, name) {
-		return fmt.Errorf("there is no profile called %s", name)
+	if name != "" && !s.exists(cfg, name) {
+		return fmt.Errorf("there is no blueprint called %s", name)
 	}
 
 	s.Default = name
 	return s.write()
 }
 
-// DefaultName is the profile currently chosen as the default.
+// DefaultName is the blueprint a new Plan starts from, or empty for none.
 func (s *Store) DefaultName(cfg config.Config) string {
 	// Checked directly rather than through All, which needs to know the
 	// default in order to sort by it.
-	if s.Default != "" && s.knows(cfg, s.Default) {
+	if s.Default != "" && s.exists(cfg, s.Default) {
 		return s.Default
 	}
-	return cfg.Profile.Name
+	return ""
 }
 
-// knows reports whether a profile exists and has not been removed here.
-func (s *Store) knows(cfg config.Config, name string) bool {
-	if s.hidden(name) {
-		return false
+// ForPlan is what a new Plan starts from: the default blueprint when one is
+// chosen, and otherwise the defaults, which name no blueprint.
+func (s *Store) ForPlan(cfg config.Config) config.Blueprint {
+	if name := s.DefaultName(cfg); name != "" {
+		if p, ok := s.Named(cfg, name); ok {
+			return p
+		}
 	}
-	if _, made := s.Saved[name]; made {
-		return true
-	}
-	if name == cfg.Profile.Name {
-		return true
-	}
-	_, fromFile := cfg.Profiles[name]
-	return fromFile
+	return cfg.Plain()
 }
 
-// DefaultProfile is the settings a disc gets unless something says otherwise.
-func (s *Store) DefaultProfile(cfg config.Config) config.Profile {
-	p, _ := s.Named(cfg, s.DefaultName(cfg))
-	return p
-}
-
-// Delete removes a profile.
+// Delete removes a blueprint.
 //
 // One written in the settings file is hidden rather than deleted, since
 // ARFABIT does not rewrite that file. Either way it stops being offered,
-// which is what removing it means to the person doing it.
+// which is what removing it means to the person doing it. Removing the one
+// used by default leaves none used by default.
 func (s *Store) Delete(cfg config.Config, name string) error {
 	if !s.exists(cfg, name) {
-		return fmt.Errorf("there is no profile called %s", name)
-	}
-
-	if name == s.DefaultName(cfg) {
-		return fmt.Errorf("%s is the one used by default; make another the default first", name)
-	}
-	if len(s.All(cfg)) <= 1 {
-		return fmt.Errorf("%s is the only profile there is", name)
+		return fmt.Errorf("there is no blueprint called %s", name)
 	}
 
 	if _, made := s.Saved[name]; made {
 		delete(s.Saved, name)
-	} else {
-		// From the settings file, so it is hidden instead.
+	}
+	if _, fromFile := cfg.Blueprints[name]; fromFile {
 		s.Hidden = append(s.Hidden, name)
+	}
+	if s.Default == name {
+		s.Default = ""
 	}
 
 	return s.write()
 }
 
-// exists reports whether a profile is known and not hidden.
+// exists reports whether a blueprint is known and has not been removed here.
 func (s *Store) exists(cfg config.Config, name string) bool {
-	return s.knows(cfg, name)
+	if _, made := s.Saved[name]; made {
+		return true
+	}
+	_, fromFile := cfg.Blueprints[name]
+	return fromFile && !s.hidden(name)
 }
 
 // hidden reports whether a name has been removed here.
@@ -190,29 +186,22 @@ func (s *Store) hidden(name string) bool {
 	return false
 }
 
-// All returns every profile ARFABIT knows about: the default, any written in
-// the settings file, and any made here.
+// All returns every blueprint ARFABIT knows about: any written in the settings
+// file, and any made here. There may be none.
 //
 // Ordered with the default first and the rest by name, so the list does not
 // rearrange itself between visits.
-func (s *Store) All(cfg config.Config) []Profile {
+func (s *Store) All(cfg config.Config) []Blueprint {
 	// Everything is editable. Changing one here keeps a version in ARFABIT's
 	// own file, which takes precedence; the settings file is left as it was
 	// written, for anybody who prefers to work that way.
-	byName := map[string]Profile{}
+	byName := map[string]Blueprint{}
 
-	if !s.hidden(cfg.Profile.Name) {
-		byName[cfg.Profile.Name] = Profile{
-			Profile:  cfg.Profile,
-			Editable: true,
-			Source:   "your settings file",
-		}
-	}
-	for name, p := range cfg.Profiles {
+	for name, p := range cfg.Blueprints {
 		if s.hidden(name) {
 			continue
 		}
-		byName[name] = Profile{Profile: p, Editable: true, Source: "your settings file"}
+		byName[name] = Blueprint{Blueprint: p, Editable: true, Source: "your settings file"}
 	}
 
 	// A version kept here wins over one in the settings file.
@@ -220,7 +209,7 @@ func (s *Store) All(cfg config.Config) []Profile {
 		byName[name] = p
 	}
 
-	out := make([]Profile, 0, len(byName))
+	out := make([]Blueprint, 0, len(byName))
 	for _, p := range byName {
 		out = append(out, p)
 	}
@@ -238,17 +227,20 @@ func (s *Store) All(cfg config.Config) []Profile {
 	return out
 }
 
-// Named finds a profile by name, preferring one made here.
-func (s *Store) Named(cfg config.Config, name string) (config.Profile, bool) {
-	if p, ok := s.Saved[name]; ok {
-		return p.Profile, true
+// Named finds a blueprint by name, preferring one made here.
+func (s *Store) Named(cfg config.Config, name string) (config.Blueprint, bool) {
+	if !s.exists(cfg, name) {
+		return config.Blueprint{}, false
 	}
-	return cfg.ProfileNamed(name)
+	if p, ok := s.Saved[name]; ok {
+		return p.Blueprint, true
+	}
+	return cfg.BlueprintNamed(name)
 }
 
 // validate refuses settings that would fail much later, when a film is already
 // half converted.
-func validate(p config.Profile) error {
+func validate(p config.Blueprint) error {
 	valid := map[string]bool{
 		"superfast": true, "medium": true, "slow": true, "slower": true, "veryslow": true,
 	}

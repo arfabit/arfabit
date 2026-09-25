@@ -87,6 +87,11 @@ type Job struct {
 	DiscKind  string `json:"disc_kind"`
 	Drive     string `json:"drive"`
 
+	// DriveName is the drive's own name, which stays the same from disc to
+	// disc. The device path in Drive does not: the system numbers a disc as
+	// it appears, and an empty drive has no path at all.
+	DriveName string `json:"drive_name,omitempty"`
+
 	// Title is the confirmed name, once chosen.
 	Title string `json:"title"`
 	Year  int    `json:"year"`
@@ -99,10 +104,31 @@ type Job struct {
 	// long after it ran.
 	Plan *Plan `json:"plan,omitempty"`
 
+	// Transcode records what a Transcode job was asked to make. Disc jobs
+	// have none.
+	Transcode *Transcode `json:"transcode,omitempty"`
+
+	// Package is what a package job makes from its Master: the line items,
+	// and the files to make them into.
+	Package *Package `json:"package,omitempty"`
+
+	// From names the rip whose master this job transcodes, when the two were
+	// planned together. The transcode waits for it, and does not start if the
+	// rip does not finish.
+	From string `json:"from,omitempty"`
+
 	// Files produced, in the order they were made.
+	//
+	// Made lists every file a package made: its film in the library, or
+	// its clip.
+	Made     []string `json:"made,omitempty"`
 	Master   string   `json:"master,omitempty"`
 	Delivery string   `json:"delivery,omitempty"`
 	Sidecars []string `json:"sidecars,omitempty"`
+
+	// ReadSpeed is how fast the disc was read through the copy, averaged over
+	// each half minute, so the page can draw how it went once it is over.
+	ReadSpeed []SpeedSample `json:"read_speed,omitempty"`
 
 	// Note explains the current state in plain language. It is shown to the
 	// user, so it never contains jargon or a guessed cause.
@@ -113,11 +139,55 @@ type Job struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// Plan is what will happen to this disc.
-type Plan struct {
-	Profile string `json:"profile"`
+// Name is what to call the job in a sentence: its confirmed title, or while
+// there is none yet, whatever the disc calls itself.
+func (j *Job) Name() string {
+	for _, name := range []string{j.Title, j.DiscName, j.DiscLabel} {
+		if name != "" {
+			return name
+		}
+	}
+	return "a disc"
+}
 
-	TitleIndex int    `json:"title_index"`
+// SoundOutcome is what one of a blueprint's sound choices found in one
+// language.
+type SoundOutcome struct {
+	Language string `json:"language"`
+	Choice   string `json:"choice"`
+
+	// Matched describes the tracks chosen. Empty means nothing fitted.
+	Matched []string `json:"matched,omitempty"`
+}
+
+// SpeedSample is how fast something went over one stretch of a stage: all
+// that was done in the stretch, divided by how long it took.
+type SpeedSample struct {
+	// Seconds is how far into the stage the stretch ended, counted from the
+	// stage's start.
+	Seconds int `json:"seconds"`
+
+	MBPerSecond float64 `json:"mb_per_second"`
+}
+
+// Plan is what will happen in one job.
+type Plan struct {
+	// Blueprint names the blueprint the Plan was filled in from, or is empty
+	// when it came from the defaults. It is a record of where the settings
+	// started, and nothing reads it to decide anything.
+	Blueprint string `json:"blueprint"`
+
+	// Edition names the Delivery's version, as {edition-...} in its filename.
+	// Blank means none. A blueprint fills it in with its own edition, and the
+	// user can change it or clear it.
+	Edition string `json:"edition"`
+
+	TitleIndex int `json:"title_index"`
+
+	// MasterName is what MakeMKV said it would call the master, so the page
+	// can name the file while it is still being written.
+	MasterName string `json:"master_name,omitempty"`
+
 	Duration   string `json:"duration"`
 	SourceSize int64  `json:"source_size"`
 
@@ -131,6 +201,30 @@ type Plan struct {
 
 	Audio     []PlannedAudio    `json:"audio"`
 	Subtitles []PlannedSubtitle `json:"subtitles"`
+
+	// Tracks are what the disc's title holds, as the Master will hold them:
+	// what the master part of the Plan shows, and what its package is
+	// planned from.
+	Tracks []Track `json:"tracks,omitempty"`
+
+	// Package is the file to make from the Master once the disc is copied,
+	// when Convert is on. It is a job of its own, planned here because this
+	// is where the disc's contents are known.
+	Package *Package `json:"package,omitempty"`
+
+	// Seconds is how long the title runs, and RipTime how long reading it is
+	// expected to take, kept so the estimate can follow the package.
+	Seconds int           `json:"seconds,omitempty"`
+	RipTime time.Duration `json:"rip_time,omitempty"`
+
+	// Sound is what the blueprint's sound rules found, one line per choice
+	// and language, so the Plan can say what each one matched. Empty when the
+	// blueprint has no rules.
+	Sound []SoundOutcome `json:"sound,omitempty"`
+
+	// SoundNotFound says the blueprint asked for sound and none of it is
+	// here, so the tracks are left for the user to choose.
+	SoundNotFound bool `json:"sound_not_found,omitempty"`
 
 	// EstimatedSize and EstimatedTime are the numbers shown before starting.
 	EstimatedSize int64         `json:"estimated_size"`
@@ -148,6 +242,22 @@ type Plan struct {
 	Reason     string `json:"reason"`
 }
 
+// Transcode is what a Transcode job makes from a Master.
+//
+// Each Plan is a copy of one blueprint's settings, taken when the job was made.
+// A blueprint only helps fill in a Plan: changing or removing it afterwards does
+// not reach a job that already has one, and running the job again means
+// running these Plans as they are (§8).
+type Transcode struct {
+	// At and Length say which stretch of the Master. A Length of zero means
+	// the whole of it, which makes Deliveries rather than lab clips.
+	At     time.Duration `json:"at"`
+	Length time.Duration `json:"length"`
+
+	// Plans holds one Plan per blueprint chosen, in the order chosen.
+	Plans []*Plan `json:"plans"`
+}
+
 // PlannedAudio is one audio track the Plan will produce.
 type PlannedAudio struct {
 	SourceIndex int    `json:"source_index"`
@@ -159,6 +269,10 @@ type PlannedAudio struct {
 	Bitrate     string `json:"bitrate,omitempty"`
 	Label       string `json:"label"`
 	Selected    bool   `json:"selected"`
+
+	// Source says what the track is on the disc, and nothing about what
+	// becomes of it: that is the master's business, not the transcode's.
+	Source string `json:"source,omitempty"`
 
 	// SourceCodec and SourceLabel record what was on the disc, so the Plan can
 	// say what a track was as well as what it becomes.

@@ -15,9 +15,9 @@ stop and say so rather than working around it.
 |---|---|
 | Language | Go. One static binary. No Python, Node, Docker, or runtime deps. |
 | External tools | `makemkvcon` and `ffmpeg`, driven with `os/exec`. No wrapper libs. |
-| Output | MP4 · HEVC main10 · AAC 256k stereo · SRT sidecars + `mov_text` |
+| Output | MKV · picture and sound copied or converted as the user chooses · SRT sidecars + embedded SRT |
 | State | Plain JSON/JSONL files. No database. |
-| UI | Server-rendered HTML + HTMX + SSE. No npm, no build step. |
+| UI | One HTML page, plain JavaScript over a JSON API, SSE for live updates. No npm, no framework, no build step. |
 | Platforms | macOS and Windows are the real targets. Linux is supported. |
 
 ---
@@ -29,9 +29,9 @@ design, arrived at through a long technical discussion. Where `docs/ARCHITECTURE
 specifies something, follow it exactly — the schemas, the stage names, the terminology,
 the folder layout. Where it is silent, use judgment and say what you assumed.
 
-**Use the terminology in §2 verbatim.** Node, Drive, Disc, Title, Profile, Plan,
-Master, Delivery, Job, Library. Stage names are `SCAN PLAN RIP OCR PACKAGE DELIVER
-EJECT`, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
+**Use the terminology in §2 verbatim.** Node, Drive, Disc, Title, Defaults, Blueprint, Plan,
+Master, Package, Line item, Delivery, Edition, Job, Library. Stage names are `SCAN PLAN RIP EJECT OCR QUEUED
+PACKAGE DELIVER`, plus `LAB` for test clips, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
 not "source" for Master.
 
 **Known shortcut.** `internal/config/toml.go` is a hand-written subset parser,
@@ -72,9 +72,14 @@ returns drives and nothing else. Do not reach past it for the messages.
 produces a valid file that plays back grey. It does not error. Any change near the
 encoder needs this verified, not assumed.
 
-**Apple TV codec limits (§4).** It cannot decode MPEG-2, VC-1, TrueHD, or DTS in any
-form, and it cannot open MKV or read PGS subtitles. Every constraint in this project
-descends from that list.
+**What plays where (§4).** The target is the Plex app on an Apple TV 4K, and §4
+holds what was tested to play there directly, without the server converting
+anything. MKV, HEVC, H.264, and every sound format tried play directly except
+Dolby TrueHD, which Plex converts on every play. PGS subtitles force the picture
+to be converted. Every constraint in this project descends from that table. A
+format not in it is untested, not assumed to work — the same rule as §15. The
+table informs; it never decides. Changing a track because of a device is the
+user's choice, and the page only says what each choice costs.
 
 **Never remove user files.** No cleanup, no retention timers, no temp-file reaping
 that could catch a Master. If disk space is short, say so and stop.
@@ -108,8 +113,11 @@ knowledge, it is a bug.
 
 ## Scope discipline
 
-Phase 1 is **one node, one profile, movies only**. The architecture accommodates more
-(multiple profiles, multichannel audio, music CDs, Dolby Vision, a NAS controller), and
+Phase 1 is **one node, movies only**. A master is always a copy of the disc as it is.
+A Package — what to make from it — starts from the defaults or from a blueprint, a
+recipe that makes line items the user can then change; the job never looks it up
+again (§8). The architecture accommodates more (blueprint matchers, multichannel
+audio, music CDs, Dolby Vision, a NAS controller), and
 structures exist so those are data rather than rewrites — but do not build them yet.
 See §16 for what belongs in which phase.
 

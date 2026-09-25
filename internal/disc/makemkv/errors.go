@@ -46,13 +46,3 @@ func (e *Error) Explain() (string, bool) {
 	}
 	return "", false
 }
-
-// hasCode reports whether the scan produced a given message code.
-func hasCode(msgs []Message, code int) bool {
-	for _, m := range msgs {
-		if m.Code == code {
-			return true
-		}
-	}
-	return false
-}

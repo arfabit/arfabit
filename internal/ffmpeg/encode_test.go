@@ -14,16 +14,16 @@ func argString(t *testing.T, r EncodeRequest) string {
 	return strings.Join(args, " ")
 }
 
+// Matroska carries every sound format a disc has, TrueHD included. Whether it
+// then plays directly is a note for the user, not a reason to change it.
 func TestCanCopyAudio(t *testing.T) {
-	for _, codec := range []string{"ac3", "eac3", "aac", "AC3"} {
+	for _, codec := range []string{"ac3", "eac3", "aac", "AC3", "dts", "truehd", "flac", "alac", "pcm_s24le"} {
 		if !CanCopyAudio(codec) {
-			t.Errorf("CanCopyAudio(%q) = false; Apple TV decodes it natively", codec)
+			t.Errorf("CanCopyAudio(%q) = false; Matroska carries it", codec)
 		}
 	}
-	for _, codec := range []string{"truehd", "dts", "flac", "pcm_bluray"} {
-		if CanCopyAudio(codec) {
-			t.Errorf("CanCopyAudio(%q) = true; Apple TV cannot decode it", codec)
-		}
+	if CanCopyAudio("") {
+		t.Error("a track of no known format was taken to be copyable")
 	}
 }
 
@@ -43,7 +43,7 @@ func TestCanCopyVideo(t *testing.T) {
 func TestEncodeArgsBasics(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:            "master.mkv",
-		Output:           "out.mp4",
+		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
 	})
@@ -51,11 +51,17 @@ func TestEncodeArgsBasics(t *testing.T) {
 	for _, want := range []string{
 		"-c:v libx265", "-crf 20", "-preset slow",
 		"-profile:v main10", "-pix_fmt yuv420p10le",
-		"-tag:v hvc1", // Apple's players reject hev1 in MP4
-		"-movflags +faststart",
+		// The master's statistics describe its tracks, not the new ones.
+		"-map_metadata -1",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("args missing %q\ngot: %s", want, got)
+		}
+	}
+	// Both are MP4's needs, and have no place in Matroska.
+	for _, unwanted := range []string{"-tag:v", "-movflags"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("args carry %q, which is for MP4\ngot: %s", unwanted, got)
 		}
 	}
 }
@@ -63,7 +69,7 @@ func TestEncodeArgsBasics(t *testing.T) {
 func TestEncodeArgsRejectsUnknownPreset(t *testing.T) {
 	_, err := EncodeRequest{
 		Input:  "in.mkv",
-		Output: "out.mp4",
+		Output: "out.mkv",
 		Video:  VideoPlan{CRF: 20, Preset: "ultrafast"},
 	}.Args()
 	if err == nil {
@@ -74,7 +80,7 @@ func TestEncodeArgsRejectsUnknownPreset(t *testing.T) {
 func TestEncodeArgsVideoCopy(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:  "master.mkv",
-		Output: "out.mp4",
+		Output: "out.mkv",
 		Video:  VideoPlan{Copy: true},
 	})
 
@@ -92,7 +98,7 @@ func TestEncodeArgsVideoCopy(t *testing.T) {
 func TestEncodeArgsPropagatesHDR(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:            "master.mkv",
-		Output:           "out.mp4",
+		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
 		Color: ColorInfo{
@@ -128,7 +134,7 @@ func TestEncodeArgsPropagatesHDR(t *testing.T) {
 func TestEncodeArgsSDRHasNoHDRParams(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:  "master.mkv",
-		Output: "out.mp4",
+		Output: "out.mkv",
 		Video:  VideoPlan{CRF: 18, Preset: PresetSlow},
 		Color:  ColorInfo{Primaries: "bt709", Transfer: "bt709", Space: "bt709"},
 	})
@@ -143,7 +149,7 @@ func TestEncodeArgsSDRHasNoHDRParams(t *testing.T) {
 func TestEncodeArgsAudioCopyAndFallback(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:            "master.mkv",
-		Output:           "out.mp4",
+		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
 		Audio: []AudioTrack{
@@ -170,7 +176,7 @@ func TestEncodeArgsAudioCopyAndFallback(t *testing.T) {
 func TestEncodeArgsSubtitles(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:            "master.mkv",
-		Output:           "out.mp4",
+		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
 		Subtitles: []SubtitleTrack{
@@ -186,9 +192,9 @@ func TestEncodeArgsSubtitles(t *testing.T) {
 	if !strings.Contains(got, "-map 1:0") || !strings.Contains(got, "-map 2:0") {
 		t.Errorf("subtitle maps missing\ngot: %s", got)
 	}
-	// mov_text is the only subtitle format MP4 carries.
-	if !strings.Contains(got, "-c:s mov_text") {
-		t.Errorf("subtitles not converted to mov_text\ngot: %s", got)
+	// SRT plays directly, and Matroska carries it as it is.
+	if !strings.Contains(got, "-c:s:0 srt") || !strings.Contains(got, "-c:s:1 srt") {
+		t.Errorf("subtitles not carried as SRT\ngot: %s", got)
 	}
 	if !strings.Contains(got, "-disposition:s:1 default+forced") {
 		t.Errorf("forced disposition missing\ngot: %s", got)
@@ -208,7 +214,7 @@ func TestDispositionClearsInheritedFlags(t *testing.T) {
 func TestChannelCountUsesAnAudioStreamSpecifier(t *testing.T) {
 	got := argString(t, EncodeRequest{
 		Input:            "master.mkv",
-		Output:           "out.mp4",
+		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
 		Audio: []AudioTrack{
@@ -222,5 +228,44 @@ func TestChannelCountUsesAnAudioStreamSpecifier(t *testing.T) {
 	}
 	if strings.Contains(got, "-ac:1 ") {
 		t.Errorf("the bare form is still being used, which applies to the wrong stream: %s", got)
+	}
+}
+
+// TrueHD made into FLAC gets even frames, since a cut can start on a frame too
+// small for the encoder to begin with. Nothing else does.
+func TestLosslessEncodesGetEvenFrames(t *testing.T) {
+	got := argString(t, EncodeRequest{
+		Input: "master.mkv", Output: "out.mkv",
+		Video: VideoPlan{Copy: true},
+		Audio: []AudioTrack{
+			{SourceIndex: 1, Codec: "aac", Bitrate: "256k"},
+			{SourceIndex: 2, Codec: "flac"},
+		},
+	})
+	if !strings.Contains(got, "-c:a:1 flac -filter:a:1 asetnsamples=n=4096:p=0") {
+		t.Errorf("the FLAC track is not given even frames\ngot: %s", got)
+	}
+	if strings.Contains(got, "-filter:a:0") {
+		t.Errorf("the AAC track was filtered for no reason\ngot: %s", got)
+	}
+}
+
+// Subtitle tracks copied from the master come first and stay as they are; SRT
+// files made from them follow, as text.
+func TestSubtitleCopiesAndFilesTogether(t *testing.T) {
+	got := argString(t, EncodeRequest{
+		Input: "master.mkv", Output: "out.mkv",
+		Video:          VideoPlan{Copy: true},
+		SubtitleCopies: []SubtitleCopy{{SourceIndex: 5, Lang: "eng", Default: true}},
+		Subtitles:      []SubtitleTrack{{Path: "eng.srt", Lang: "eng"}},
+	})
+	for _, want := range []string{
+		"-map 0:5 -map 1:0",
+		"-c:s:0 copy", "-disposition:s:0 default",
+		"-c:s:1 srt",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args missing %q\ngot: %s", want, got)
+		}
 	}
 }

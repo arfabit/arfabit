@@ -56,7 +56,7 @@ func (h Health) Explain() string {
 			"The usual cause is your computer holding the disc open, which the button below releases."
 
 	default:
-		return "How fast this drive reads is only known once a disc has been read: MakeMKV reports it then and not before."
+		return "How fast this drive reads is only known once a disc has been read (MakeMKV)."
 	}
 }
 

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,10 +34,14 @@ type Runner struct {
 	// regardless; it is the processor that has to take turns.
 	Slots *Slots
 
-	// DefaultProfile is the settings a disc gets. Set by whatever owns the
-	// profiles, since which one is the default can be changed while ARFABIT
-	// is running.
-	DefaultProfile func() config.Profile
+	// Hold is how long a Transcode waits in the line before it may start,
+	// while it can still be moved or stopped at no cost. Zero means none.
+	Hold time.Duration
+
+	// ForPlan is what a new Plan starts from: the default blueprint, or the
+	// defaults when none is chosen. Set by whatever owns the blueprints, since
+	// which one is the default can be changed while ARFABIT is running.
+	ForPlan func() config.Blueprint
 
 	// Index is the offline film list, used to confirm a title and find its
 	// year. Nil when it has not been downloaded, in which case the disc's own
@@ -56,6 +62,9 @@ type Runner struct {
 	active  []*Job // being worked on
 }
 
+// TranscodeHold is how long a new Transcode waits before it may start.
+const TranscodeHold = 10 * time.Second
+
 // Job is a job record plus the live state the UI needs.
 type Job struct {
 	*store.Job
@@ -64,10 +73,19 @@ type Job struct {
 	Progress Progress `json:"progress"`
 	Space    Space    `json:"space"`
 
+	// File is the name of the file this job is writing or about to write,
+	// so the page can say exactly what is being made. Empty when there is
+	// none yet, or when it is about to make several.
+	File string `json:"file,omitempty"`
+
 	// Comparison is what a set of test clips came to, for lab jobs.
 	Comparison lab.Comparison `json:"comparison,omitempty"`
 
 	cancel context.CancelFunc
+
+	// ripped is closed when a rip is over, however it ended, so a transcode
+	// waiting on it can go on or give up. Nil for anything but a rip.
+	ripped chan struct{}
 }
 
 // Progress is how far the current stage has got.
@@ -175,7 +193,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	if busy := r.DriveIsBusy(); busy != nil {
 		return nil, fmt.Errorf(
 			"the drive is busy with %s (%s). It will be free once that disc comes out",
-			busy.Title, strings.ToLower(stageWords(busy.Stage)))
+			busy.Name(), strings.ToLower(stageWords(busy.Stage)))
 	}
 
 	// A scan that was never started is finished with rather than left hanging
@@ -186,6 +204,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 	rec := store.NewJob(store.NewJobID(time.Now(), drive.Label))
 	rec.DiscLabel = drive.Label
 	rec.Drive = drive.Device
+	rec.DriveName = drive.Name
 	rec.Stage = store.StageScan
 
 	logPath := r.Store.LogPath(rec.ID)
@@ -252,7 +271,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 		return job, fmt.Errorf("no usable title")
 	}
 
-	plan, err := BuildPlan(d, sel, r.profile())
+	plan, err := BuildPlan(d, sel, r.blueprint())
 	if err != nil {
 		r.stop(job, "ARFABIT could not work out what to do with this disc.", err.Error())
 		return job, err
@@ -280,13 +299,9 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 
 	// Estimates are shown before anything starts, so the user knows what they
 	// are agreeing to.
-	ripEst := r.Calibration.EstimateRip(drive.Device, d.Kind, title.SizeBytes)
-	packEst := r.Calibration.EstimatePackage(plan, title.Duration)
-	plan.EstimatedSize = packEst.Size
-	plan.EstimatedTime = ripEst.Time + packEst.Time
-
-	// The master and the delivery both exist at once, so both must fit.
-	job.Space, _ = CheckSpace(title.SizeBytes+packEst.Size, r.Config.Paths.Masters, r.Config.Paths.Library)
+	ripEst := r.Calibration.EstimateRip(DriveKey(drive.Name, drive.Device), d.Kind, title.SizeBytes)
+	plan.RipTime = ripEst.Time
+	r.Reestimate(job)
 
 	log.Printf(store.StagePlan, "Found %s, %s, %s.", rec.Title, plan.Duration, HumanBytes(title.SizeBytes))
 	log.Printf(store.StagePlan, "%s", sel.Reason)
@@ -314,24 +329,119 @@ func (r *Runner) Start(parent context.Context) error {
 		return errors.New("this disc is already being worked on")
 	}
 	if busy := r.DriveIsBusy(); busy != nil && busy != job {
-		return fmt.Errorf("the drive is busy with %s", busy.Title)
+		return fmt.Errorf("the drive is busy with %s", busy.Name())
 	}
 	if !job.Space.Fits {
 		return errors.New(job.Space.Describe())
+	}
+	if err := wouldReplace(r.Existing(job)); err != nil {
+		return err
+	}
+	if job.Plan != nil && job.Plan.Convert {
+		if job.Plan.Package == nil {
+			return errors.New("there is no package planned; turn off Plan a transcode to copy the disc only")
+		}
+		check := *job.Plan.Package
+		if err := checkPackage(&check); err != nil {
+			return err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(parent)
 	job.cancel = cancel
 	job.State = store.StateRunning
+	job.ripped = make(chan struct{})
 	r.begin(job)
 	r.save(job)
 
 	go func() {
 		defer cancel()
 		defer r.finish(job)
+		defer close(job.ripped)
 		_ = r.run(ctx, job)
 	}()
+
+	// A transcode planned with the disc joins the queue now, so it is seen
+	// waiting behind the rip rather than appearing out of nowhere later.
+	if job.Plan.Convert {
+		r.followRip(parent, job)
+	}
 	return nil
+}
+
+// followRip makes the package planned with a disc into a job of its own,
+// which waits for the rip to finish and then makes its file from the master.
+//
+// It is two jobs because it is two pieces of work, needing different things:
+// the rip needs the drive, the package needs the processor. Planning both at
+// once is only convenient, since the Plan is where the disc's contents are
+// known. The package is copied from the Plan as it stood when started.
+func (r *Runner) followRip(parent context.Context, rip *Job) {
+	pkg := *rip.Plan.Package
+	pkg.Items = slices.Clone(rip.Plan.Package.Items)
+	pkg.Containers = slices.Clone(rip.Plan.Package.Containers)
+
+	rec := store.NewJob(store.NewJobID(time.Now(), rip.Title+" package"))
+	rec.Kind = store.KindConvert
+	rec.From = rip.ID
+	rec.Title, rec.Year = rip.Title, rip.Year
+	rec.DiscName, rec.DiscLabel, rec.DiscKind = rip.DiscName, rip.DiscLabel, rip.DiscKind
+	rec.Package = &pkg
+	rec.Stage = store.StageQueued
+
+	log, err := NewLog(r.Store.LogPath(rec.ID), func(e Entry) {
+		if r.OnLog != nil {
+			r.OnLog(e)
+		}
+	})
+	if err != nil {
+		rip.Log.Printf(store.StagePlan, "The package could not be set up, so only the master will be made: %v", err)
+		return
+	}
+	log.Describe(rec.ID, rec.Title)
+	log.Printf(store.StageQueued, "Waiting for the master of %s. This starts once the disc is copied.", rip.Title)
+
+	ctx, cancel := context.WithCancel(parent)
+	job := &Job{Job: rec, Log: log, cancel: cancel}
+	job.File = meta.Title{Name: rec.Title, Year: rec.Year}.VideoName(pkg.Edition)
+	job.Progress = Progress{Since: time.Now(), Operation: "Waiting for its master"}
+
+	r.begin(job)
+	r.save(job)
+
+	go func() {
+		defer cancel()
+		defer r.finish(job)
+
+		select {
+		case <-rip.ripped:
+		case <-ctx.Done():
+			r.stop(job, "Stopped before it began.", "")
+			return
+		}
+
+		// A rip that was stopped or did not finish leaves nothing to work
+		// from, so this goes too, and says why.
+		if rip.State != store.StateDone || rip.Master == "" {
+			r.stop(job, fmt.Sprintf("Not started, because %s was not copied.", rip.Title), "")
+			return
+		}
+		job.Master = rip.Master
+
+		// The package was planned from the scan; the master numbers its
+		// tracks its own way.
+		info, err := ffmpeg.Probe(ctx, job.Master)
+		if err != nil {
+			r.stop(job, "ARFABIT could not read the master.", err.Error())
+			return
+		}
+		if err := bindToMaster(job.Package, MasterTracks(info)); err != nil {
+			r.stop(job, sentence(err.Error())+". Nothing was made. The master is kept, so a package can be made from it in Packages.", "")
+			return
+		}
+		job.Log.Printf(store.StageQueued, "The master is ready.")
+		r.runPackage(ctx, job, r.configuredDirs(), 0)
+	}()
 }
 
 // StopJob halts one job by its id.
@@ -417,7 +527,11 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 		job.Progress.Expected)
 	r.save(job)
 
+	job.File = job.Plan.MasterName
+
 	var ripRate rateTracker
+	speed := speedSampler{job: job}
+	job.ReadSpeed = nil
 
 	res, err := r.Backend.Rip(ctx, makemkv.RipRequest{
 		DriveIndex: 0,
@@ -437,12 +551,19 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 			// which is the only figure here that can be compared to anything.
 			done := int64(percent / 100 * float64(job.Plan.SourceSize))
 
+			rate := ripRate.Observe(done)
 			job.Progress = Progress{
 				Percent:   percent,
 				Operation: p.Operation,
 				Since:     ripStart,
 				Expected:  job.Progress.Expected,
-				Rate:      HumanRate(ripRate.Observe(done)),
+				Rate:      HumanRate(rate),
+			}
+			// Only the overall figure measures the disc. The current step's
+			// percentage belongs to whatever MakeMKV is doing first, and a
+			// speed worked out from it would be made up.
+			if total := p.TotalPercent(); total > 0 {
+				speed.observe(time.Since(ripStart), int64(total/100*float64(job.Plan.SourceSize)))
 			}
 			r.notify(job)
 		},
@@ -455,7 +576,8 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	}
 
 	job.Master = res.Files[0]
-	r.Calibration.ObserveRip(job.Drive, disc.Kind(job.DiscKind), job.Plan.SourceSize, time.Since(ripStart))
+	job.File = filepath.Base(job.Master)
+	r.Calibration.ObserveRip(DriveKey(job.DriveName, job.Drive), disc.Kind(job.DiscKind), job.Plan.SourceSize, time.Since(ripStart))
 	job.Log.Printf(store.StageRip, "Copied to %s.", filepath.Base(job.Master))
 
 	// The disc has nothing left to give: everything from here happens on the
@@ -466,19 +588,111 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	r.save(job)
 
 	ejected := eject.Eject(ctx, job.Drive)
-	job.Log.Printf(store.StageEject, "%s The rest happens on the copy.", ejected.Describe(true))
+	job.Log.Printf(store.StageEject, "%s", ejected.Describe(true))
 
-	// Stopping at the copy is a perfectly good outcome, and often the right
-	// one: the copy is the only part that needed the disc.
+	// The rip is finished once the master exists and the disc is out. A
+	// transcode planned with it is a job of its own, waiting on this one.
+	job.State = store.StateDone
+	job.Progress = Progress{Percent: 100}
+	job.Note = fmt.Sprintf("%s is copied.", job.Title)
 	if !job.Plan.Convert {
-		job.State = store.StateDone
-		job.Progress = Progress{Percent: 100}
-		job.Note = fmt.Sprintf("%s is copied. Convert it whenever you like.", job.Title)
-		job.Log.Printf(store.StageRip, "%s", job.Note)
-		r.save(job)
-		return nil
+		job.Note += " Transcode it whenever you like, from Labs."
+	}
+	job.Log.Printf(store.StageEject, "%s", job.Note)
+	r.save(job)
+	return nil
+}
+
+// Reestimate works a waiting Plan's estimate out again after it changes: the
+// picture its package makes, and whether there is a package at all.
+func (r *Runner) Reestimate(job *Job) {
+	plan := job.Plan
+	if plan == nil {
+		return
 	}
 
+	if plan.Package != nil {
+		if videos := plan.Package.ItemsOf(store.KindVideo); len(videos) == 1 {
+			plan.VideoCopy = videos[0].Action == store.ActionCopy
+			if !plan.VideoCopy {
+				plan.CRF, plan.Preset = videos[0].CRF, videos[0].Preset
+			}
+		}
+	}
+
+	var packEst Estimate
+	if plan.Convert && plan.Seconds > 0 {
+		packEst = r.Calibration.EstimatePackage(plan, time.Duration(plan.Seconds)*time.Second)
+	}
+	plan.EstimatedSize = packEst.Size
+	plan.EstimatedTime = plan.RipTime + packEst.Time
+
+	// The master and the package's file both exist at once, so both must fit.
+	job.Space, _ = CheckSpace(plan.SourceSize+packEst.Size, r.Config.Paths.Masters, r.Config.Paths.Library)
+}
+
+// UpdatePackage replaces the waiting Plan's package with one the user has
+// changed.
+func (r *Runner) UpdatePackage(pkg store.Package) error {
+	r.mu.Lock()
+	job := r.pending
+	r.mu.Unlock()
+	if job == nil || job.Plan == nil || job.State != store.StateWaiting {
+		return errors.New("there is no disc waiting")
+	}
+
+	job.Plan.Package = &pkg
+	job.Plan.Edition = pkg.Edition
+	r.Reestimate(job)
+	r.save(job)
+	return nil
+}
+
+// speedEvery is how long each point on the read-speed graph drawn after a
+// copy covers. Half a minute is about three hundred points for a long disc:
+// more than enough to see its shape, and small enough to keep in the job
+// record.
+const speedEvery = 30 * time.Second
+
+// speedSampler records a job's read speed as averages over half a minute: all
+// that was read in each stretch, divided by how long the stretch took. A speed
+// caught at one moment every half minute would only say what the drive was
+// doing at those moments, and a drive's speed swings from one second to the
+// next.
+type speedSampler struct {
+	job *Job
+
+	started bool
+	since   time.Duration // how far into the stage this stretch began
+	read    int64         // bytes read when it began
+}
+
+// observe notes how much had been read by a moment into the stage, and keeps
+// a point each time a stretch is complete.
+func (s *speedSampler) observe(into time.Duration, read int64) {
+	// The first reading only starts the clock: nothing is known about how
+	// fast it got there. A count that goes backwards means MakeMKV has started
+	// counting again, so the stretch starts again with it.
+	if !s.started || read < s.read {
+		s.started, s.since, s.read = true, into, read
+		return
+	}
+
+	took := into - s.since
+	if took < speedEvery {
+		return
+	}
+
+	s.job.ReadSpeed = append(s.job.ReadSpeed, store.SpeedSample{
+		Seconds:     int(into / time.Second),
+		MBPerSecond: math.Round(float64(read-s.read)/took.Seconds()/100_000) / 10,
+	})
+	s.since, s.read = into, read
+}
+
+// convert takes a copied disc from the Master to a Delivery, following the
+// job's Plan. It is also where an interrupted job picks up again.
+func (r *Runner) convert(ctx context.Context, job *Job, title meta.Title) error {
 	// OCR belongs here. Until it exists, the delivery carries no subtitles and
 	// says so plainly rather than quietly omitting them.
 	job.Stage = store.StageOCR
@@ -489,16 +703,17 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 
 	// Wait for a turn at the processor. Ripping is over by now and the drive
 	// is free, so the next disc can be going in while this one waits.
+	job.File = title.VideoName(job.Plan.Edition)
+
 	if r.Slots != nil {
-		if running, _ := r.Slots.Busy(); running > 0 {
+		err := r.Slots.Take(ctx, Ticket{ID: job.ID, Waiting: func() {
 			job.Stage = store.StageQueued
 			job.Progress = Progress{Since: time.Now(), Operation: "Waiting for a turn"}
 			job.Log.Printf(store.StageQueued,
 				"Waiting to convert: something else is using the processor. The disc is already copied, so nothing is holding up the drive.")
 			r.save(job)
-		}
-
-		if err := r.Slots.Take(ctx); err != nil {
+		}})
+		if err != nil {
 			return r.stop(job, "Stopped while waiting to convert.", "")
 		}
 		defer r.Slots.Give()
@@ -512,13 +727,19 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	r.save(job)
 
 	delivery, err := r.packageMaster(ctx, job, title)
+	var replace *ReplaceError
+	if errors.As(err, &replace) {
+		return r.stop(job, fmt.Sprintf(
+			"%s is already in your library, so ARFABIT stopped rather than replace it. Nothing was removed, and the master is kept. Give this one a different edition, or move that file, and start it again.",
+			filepath.Base(replace.Path)), replace.Path)
+	}
 	if err != nil {
 		return r.stop(job, "ARFABIT did not finish making the movie file.", detailOf(err))
 	}
 	job.Delivery = delivery
 
 	job.Stage = store.StageDeliver
-	if err := r.deliver(job, title); err != nil {
+	if err := r.deliver(job, title, job.Plan.Edition); err != nil {
 		return r.stop(job, "ARFABIT made the movie but could not put it in your library.", err.Error())
 	}
 
@@ -546,7 +767,10 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return "", err
 	}
-	out := filepath.Join(outDir, title.VideoName(job.Plan.Profile))
+	out := filepath.Join(outDir, title.VideoName(job.Plan.Edition))
+	if err := refuseToReplace(out); err != nil {
+		return "", err
+	}
 
 	req := ffmpeg.EncodeRequest{
 		Input:            job.Master,
@@ -598,9 +822,9 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 		return "", err
 	}
 
-	if info, err := os.Stat(out); err == nil && !job.Plan.VideoCopy {
-		r.Calibration.ObserveEncode(job.Plan.Preset, video.Height, info.Size(),
-			time.Duration(0), time.Since(start))
+	if written, err := os.Stat(out); err == nil && !job.Plan.VideoCopy {
+		r.Calibration.ObserveEncode(job.Plan, video.Width, video.Height, written.Size(),
+			time.Duration(info.Duration*float64(time.Second)), time.Since(start))
 	}
 
 	return out, nil
@@ -612,7 +836,8 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 // MakeMKV keeps only some streams and renumbers what it keeps. So each planned
 // track is matched back to a real stream in the master by what it is, and the
 // decision about copying is taken from the master rather than from the Plan —
-// the master is what gets muxed, and trusting the Plan here put DTS in an MP4.
+// the master is what gets muxed, and trusting the Plan here once copied a track
+// that could not play as it was.
 func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTrack {
 	sources := info.StreamsOfKind("audio")
 	if len(sources) == 0 {
@@ -646,12 +871,12 @@ func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTra
 			used[source.Index] = true
 		}
 
-		// Copying is decided from what the master actually holds. A track the
-		// Apple TV cannot decode is converted whatever the Plan said.
+		// Copying is decided from what the master actually holds. A track
+		// that does not play directly is converted whatever the Plan said.
 		canCopy := ffmpeg.CanCopyAudio(source.Codec) && !planned.Stereo
 		if planned.Copy && !canCopy {
 			job.Log.Printf(store.StagePackage,
-				"The %s track is %s, which an Apple TV cannot play, so it is being converted.",
+				"The %s track is %s, which does not play directly, so it is being converted.",
 				planned.Label, source.Codec)
 		}
 
@@ -670,9 +895,13 @@ func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTra
 				track.Channels = 2
 			}
 			if track.Codec == "" || track.Codec == source.Codec {
-				// Nothing usable was planned, so fall back to something an
-				// Apple TV certainly plays.
+				// Nothing usable was planned, so fall back to something that
+				// certainly plays: FLAC for lossless sound, so nothing is lost,
+				// and AAC otherwise.
 				track.Codec = "aac"
+				if streamLossless(*source) && track.Channels != 2 {
+					track.Codec = "flac"
+				}
 			}
 		}
 
@@ -728,7 +957,7 @@ func matchStream(sources []ffmpeg.Stream, planned store.PlannedAudio, used map[i
 }
 
 // deliver records the finished file and copies it onward if asked.
-func (r *Runner) deliver(job *Job, title meta.Title) error {
+func (r *Runner) deliver(job *Job, title meta.Title, edition string) error {
 	info, err := os.Stat(job.Delivery)
 	if err != nil {
 		return err
@@ -737,7 +966,7 @@ func (r *Runner) deliver(job *Job, title meta.Title) error {
 	if err := r.Store.AppendLibrary(store.LibraryEntry{
 		Title:     title.Name,
 		Year:      title.Year,
-		Edition:   job.Plan.Profile,
+		Edition:   edition,
 		Path:      job.Delivery,
 		Size:      info.Size(),
 		Node:      r.Config.Node.ID,
@@ -796,7 +1025,7 @@ func (r *Runner) ripEstimate(job *Job) time.Duration {
 	if job.Plan == nil {
 		return 0
 	}
-	return r.Calibration.EstimateRip(job.Drive, disc.Kind(job.DiscKind), job.Plan.SourceSize).Time
+	return r.Calibration.EstimateRip(DriveKey(job.DriveName, job.Drive), disc.Kind(job.DiscKind), job.Plan.SourceSize).Time
 }
 
 // freeTheDisc asks the operating system to let go of the disc.
@@ -900,12 +1129,13 @@ func (r *Runner) SetCurrentForTest(job *Job) {
 }
 
 // retirePreviousScan closes off a Plan nobody acted on.
-// profile is the settings a disc gets unless something says otherwise.
-func (r *Runner) profile() config.Profile {
-	if r.DefaultProfile != nil {
-		return r.DefaultProfile()
+// blueprint is what a new Plan starts from: the blueprint used by default, or
+// the defaults when none is.
+func (r *Runner) blueprint() config.Blueprint {
+	if r.ForPlan != nil {
+		return r.ForPlan()
 	}
-	return r.Config.Profile
+	return r.Config.Plain()
 }
 
 func (r *Runner) retirePreviousScan() {

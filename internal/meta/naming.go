@@ -30,11 +30,14 @@ func (t Title) FolderName() string {
 
 // BaseName is the filename stem, including the edition tag.
 //
-// The edition tag is always written, derived from the profile name. It lets a
-// re-encode at different settings sit beside the original as a selectable
-// edition instead of replacing it, and makes clear which profile produced a
-// file (§6).
+// The edition tag is the name of the blueprint the Plan came from. It lets
+// versions made from different blueprints sit side by side as selectable
+// editions, and says which blueprint produced a file. A Plan from the defaults
+// alone passes no edition and gets no tag (§6).
 func (t Title) BaseName(edition string) string {
+	// Braces would end the tag early, and the user may type anything.
+	edition = strings.TrimSpace(strings.NewReplacer("{", "", "}", "").Replace(edition))
+
 	base := t.String()
 	if edition != "" {
 		base = fmt.Sprintf("%s {edition-%s}", base, edition)
@@ -42,9 +45,17 @@ func (t Title) BaseName(edition string) string {
 	return sanitize(base)
 }
 
+// VideoExt is the finished file's extension: Matroska (§0.2).
+const VideoExt = ".mkv"
+
+// EarlierVideoExts are extensions films were once made with. A film under one
+// of them is the same film to Plex, so it counts when looking for a file that
+// is already there.
+var EarlierVideoExts = []string{".mp4"}
+
 // VideoName is the finished file's name.
 func (t Title) VideoName(edition string) string {
-	return t.BaseName(edition) + ".mp4"
+	return t.BaseName(edition) + VideoExt
 }
 
 // SubtitleName is a sidecar's name.

@@ -10,28 +10,34 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 )
 
 // Config is the whole of ARFABIT's settings.
 type Config struct {
-	Node   Node
-	Paths  Paths
-	Server Server
+	Node    Node
+	Paths   Paths
+	Server  Server
+	Machine Machine
+	Drive   Drive
+	MakeMKV MakeMKV
 
-	// Profile is what a disc gets unless something says otherwise.
-	Profile Profile
+	// Defaults are the settings a Plan starts from, for ripping and
+	// transcoding alike, when no blueprint is used.
+	Defaults Settings
 
-	// Profiles are the named settings available to choose between, including
-	// the default. Every one starts from the default and changes what it
-	// names, so a profile that only differs in quality says only that.
-	Profiles map[string]Profile
+	// Blueprints are the ones written in the settings file. Each starts from
+	// the defaults and changes only what it names, so a blueprint that only
+	// differs in quality says only that. There may be none.
+	Blueprints map[string]Blueprint
 
 	// Sources records where each setting came from, so the UI can show
 	// provenance and the user never has to guess which file to edit.
 	Sources map[string]string
+
+	// written holds each blueprint's lines until every file is read.
+	written map[string]map[string]value
 }
 
 // Node identifies this machine.
@@ -51,9 +57,10 @@ type Paths struct {
 	// Library holds the finished files, laid out the way Plex expects.
 	Library string
 
-	// Lab holds the test clips. A folder of its own, and a visible one:
-	// the clips exist to be carried to a television and watched.
-	Lab string
+	// Clips holds the clips packages make from a stretch of a master. A
+	// folder of its own, and a visible one: the clips exist to be carried to
+	// a television and watched.
+	Clips string
 
 	// Deliver is an optional folder to copy finished files into. Empty by
 	// default, which leaves them in Library.
@@ -65,10 +72,88 @@ type Server struct {
 	Addr string
 }
 
-// Profile is the one ruleset day one ships. More arrive as data, not code.
-type Profile struct {
+// Machine is what belongs to this computer's processor.
+type Machine struct {
+	// MaxConversions is how many films may be converted at once, counting
+	// lab clips. One is right for most machines: x265 already uses every
+	// core, so a second conversion makes both later rather than either
+	// sooner.
+	MaxConversions int
+}
+
+// Drive is what belongs to the disc drives on this computer.
+type Drive struct {
+	// ReadCacheMB is how much MakeMKV buffers while reading a disc. Zero
+	// leaves the choice to MakeMKV, which is almost always right.
+	ReadCacheMB int
+}
+
+// MakeMKV is how discs are read, the same on every computer.
+type MakeMKV struct {
+	// MinTitleLength hides titles shorter than this during a scan.
+	MinTitleLength time.Duration
+}
+
+// Blueprint is a starter template for planning a job: named settings that
+// override the defaults. Applying one copies its values into a Plan; a job
+// never refers back to the blueprint it came from.
+type Blueprint struct {
 	Name string
 
+	// Edition is what a Plan filled in from this blueprint puts in its
+	// edition. It starts as the blueprint's name and may be changed or left
+	// blank.
+	Edition string
+
+	Settings
+}
+
+// Settings are what fills in a Plan.
+// The choices for TrueHD.
+const (
+	TrueHDKeep = "keep"
+	TrueHDFLAC = "flac"
+	TrueHDBoth = "both"
+)
+
+// SoundRules chooses sound tracks by language, layout and quality.
+//
+// Read as a sentence: for the languages (one of them, or all of them), make
+// each choice in turn. A choice either picks one track — the widest of the
+// layouts it names that is on the disc — or keeps every track that fits.
+type SoundRules struct {
+	// Languages are three-letter codes in order of preference. Empty means
+	// every language on the disc.
+	Languages []string `json:"languages"`
+
+	// LanguageMode is SoundOne for the first of Languages the disc has, or
+	// SoundAll for each of them.
+	LanguageMode string `json:"language_mode"`
+
+	// Choices are made for each language, in order.
+	Choices []SoundChoice `json:"choices"`
+}
+
+// SoundChoice is one thing to look for in each language.
+type SoundChoice struct {
+	// Mode is SoundOne to pick one track, or SoundAll to keep every track
+	// that fits.
+	Mode string `json:"mode"`
+
+	// Layouts are "7.1", "5.1" and "stereo", widest first. Empty means any.
+	Layouts []string `json:"layouts"`
+
+	// Quality is "lossless", "lossy", or empty for either.
+	Quality string `json:"quality"`
+}
+
+// The two ways a rule can choose.
+const (
+	SoundOne = "one"
+	SoundAll = "all"
+)
+
+type Settings struct {
 	// CRF per source type. Lower means higher quality and larger files.
 	CRFUHD    int
 	CRFBluray int
@@ -79,23 +164,37 @@ type Profile struct {
 	// AudioBitrate for the stereo fallback track.
 	AudioBitrate string
 
-	// CopyNativeAudio passes AC-3, E-AC-3 and AAC through untouched.
+	// CopyNativeAudio passes sound that plays directly through untouched
+	// (§4). Off, lossy sound is converted as well.
 	CopyNativeAudio bool
 
 	// AllowUHDCopy offers a direct copy for UHD discs, which are already HEVC.
 	AllowUHDCopy bool
+
+	// KeepPicture keeps every picture exactly as it is, whatever the disc.
+	// It plays directly (§4) and takes minutes rather than hours, but a
+	// Blu-ray's picture stays the size it is on the disc.
+	KeepPicture bool
+
+	// TrueHD is what to do with Dolby TrueHD sound, which Plex converts every
+	// time it plays on an Apple TV (§4): TrueHDKeep, TrueHDFLAC, or TrueHDBoth
+	// for one of each. Keeping it is the default; changing it is the user's
+	// choice to make.
+	TrueHD string
 
 	// Subtitles selects which subtitle tracks to carry.
 	IncludeForcedSubs bool
 	IncludeFullSubs   bool
 	SubLanguages      []string
 
-	// MinTitleLength hides titles shorter than this during a scan.
-	MinTitleLength time.Duration
-
-	// ReadCacheMB is how much MakeMKV buffers while reading a disc. Zero
-	// leaves the choice to MakeMKV, which is almost always right.
-	ReadCacheMB int
+	// Sound, when set, chooses which sound tracks a transcode keeps, by what
+	// they are rather than where they sit on one particular disc. When it is
+	// not set, the stereo-first choice described in §9 is made instead.
+	//
+	// Sound rules are made on the page and kept in blueprints.json. The
+	// settings file cannot hold them: its reader is a small stand-in that is
+	// not to be extended (§16).
+	Sound *SoundRules
 
 	// ConvertAfterRip decides whether a disc becomes a film straight away, or
 	// stops at the copy.
@@ -103,12 +202,6 @@ type Profile struct {
 	// Stopping at the copy is the fast way through a stack of discs: only the
 	// copy needs the drive, and converting can be done later from the copy.
 	ConvertAfterRip bool
-
-	// MaxConversions is how many films may be converted at once, counting
-	// lab clips. One is right for most machines: x265 already uses every
-	// core, so a second conversion makes both later rather than either
-	// sooner.
-	MaxConversions int
 }
 
 // Defaults returns the built-in settings, before any file is read.
@@ -125,15 +218,16 @@ func Defaults() Config {
 			Data:    defaultDataDir(),
 			Masters: filepath.Join(root, "masters"),
 			Library: filepath.Join(root, "library"),
-			Lab:     filepath.Join(root, "lab"),
+			Clips:   filepath.Join(root, "clips"),
 		},
 		Server: Server{
 			// All interfaces, so the UI is reachable from any device in the
 			// house, which is the point of having one.
 			Addr: ":7847",
 		},
-		Profile: Profile{
-			Name:              "Archive",
+		Machine: Machine{MaxConversions: 1},
+		MakeMKV: MakeMKV{MinTitleLength: 120 * time.Second},
+		Defaults: Settings{
 			CRFUHD:            20,
 			CRFBluray:         20,
 			CRFDVD:            18,
@@ -141,44 +235,31 @@ func Defaults() Config {
 			AudioBitrate:      "256k",
 			CopyNativeAudio:   true,
 			AllowUHDCopy:      true,
+			TrueHD:            TrueHDKeep,
 			IncludeForcedSubs: true,
 			IncludeFullSubs:   true,
 			SubLanguages:      []string{"eng"},
 			ConvertAfterRip:   true,
-			MinTitleLength:    120 * time.Second,
-			MaxConversions:    1,
 		},
-		Profiles: map[string]Profile{},
-		Sources:  map[string]string{},
+		Blueprints: map[string]Blueprint{},
+		Sources:    map[string]string{},
 	}
 }
 
-// ProfileNames lists the profiles in a settled order, the default first.
-func (c Config) ProfileNames() []string {
-	names := make([]string, 0, len(c.Profiles))
-	for name := range c.Profiles {
-		if name != c.Profile.Name {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-
-	return append([]string{c.Profile.Name}, names...)
+// BlueprintNamed finds a blueprint written in the settings file.
+func (c Config) BlueprintNamed(name string) (Blueprint, bool) {
+	p, ok := c.Blueprints[name]
+	return p, ok
 }
 
-// ProfileNamed finds a profile by name, falling back to the default.
-func (c Config) ProfileNamed(name string) (Profile, bool) {
-	if name == "" || name == c.Profile.Name {
-		return c.Profile, true
-	}
-	if p, ok := c.Profiles[name]; ok {
-		return p, true
-	}
-	return c.Profile, false
+// Plain is the defaults as a Blueprint with no name, for anything that takes
+// a Blueprint. A Plan filled in from it names no blueprint.
+func (c Config) Plain() Blueprint {
+	return Blueprint{Settings: c.Defaults}
 }
 
-// Describe summarises a profile in one line, for choosing between them.
-func (p Profile) Describe() string {
+// Describe summarises settings in one line, for choosing between them.
+func (p Settings) Describe() string {
 	picture := fmt.Sprintf("HEVC quality %d, %s", p.CRFBluray, p.Preset)
 	if p.AllowUHDCopy {
 		picture += "; 4K kept as-is"
@@ -234,12 +315,20 @@ func Load(localPath string) (Config, error) {
 		}
 	}
 
-	// The default profile is one of the profiles, so everything that chooses
-	// between them has the whole list.
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]Profile{}
+	for name, keys := range cfg.written {
+		p := cfg.Plain()
+		p.Name = name
+		p.Edition = name
+		if v, ok := keys["edition"]; ok {
+			p.Edition = v.asString()
+		}
+		section := "blueprint." + name
+		if err := applySettings(document{section: keys}, section, &p.Settings, func(string) {}); err != nil {
+			return cfg, err
+		}
+		cfg.Blueprints[name] = p
 	}
-	cfg.Profiles[cfg.Profile.Name] = cfg.Profile
+	cfg.written = nil
 
 	return cfg, cfg.Validate()
 }
@@ -289,93 +378,56 @@ func (c *Config) apply(doc document, source string) error {
 		c.note(section, key, source)
 		return nil
 	}
-	boolean := func(section, key string, dst *bool) error {
-		v, ok := doc.lookup(section, key)
-		if !ok {
-			return nil
-		}
-		b, err := v.asBool()
-		if err != nil {
-			return fmt.Errorf("line %d: %s.%s should be true or false", v.line, section, key)
-		}
-		*dst = b
-		c.note(section, key, source)
-		return nil
-	}
-
 	str("node", "name", &c.Node.Name)
 	str("server", "addr", &c.Server.Addr)
 	path("paths", "data", &c.Paths.Data)
 	path("paths", "masters", &c.Paths.Masters)
 	path("paths", "library", &c.Paths.Library)
-	path("paths", "lab", &c.Paths.Lab)
+	// "lab" is what the clips folder was called before; a settings file
+	// that still says so is still read.
+	path("paths", "lab", &c.Paths.Clips)
+	path("paths", "clips", &c.Paths.Clips)
 	path("paths", "deliver", &c.Paths.Deliver)
-	str("profile", "name", &c.Profile.Name)
-	str("profile", "preset", &c.Profile.Preset)
-	str("profile", "audio_bitrate", &c.Profile.AudioBitrate)
-
-	for _, n := range []struct {
-		key string
-		dst *int
-	}{
-		{"crf_uhd", &c.Profile.CRFUHD},
-		{"crf_bluray", &c.Profile.CRFBluray},
-		{"crf_dvd", &c.Profile.CRFDVD},
-		{"max_conversions", &c.Profile.MaxConversions},
-		{"read_cache_mb", &c.Profile.ReadCacheMB},
-	} {
-		if err := num("profile", n.key, n.dst); err != nil {
-			return err
-		}
+	if err := num("machine", "max_conversions", &c.Machine.MaxConversions); err != nil {
+		return err
+	}
+	if err := num("drive", "read_cache_mb", &c.Drive.ReadCacheMB); err != nil {
+		return err
+	}
+	seconds := -1
+	if err := num("makemkv", "min_title_seconds", &seconds); err != nil {
+		return err
+	}
+	if seconds >= 0 {
+		c.MakeMKV.MinTitleLength = time.Duration(seconds) * time.Second
 	}
 
-	for _, b := range []struct {
-		key string
-		dst *bool
-	}{
-		{"copy_native_audio", &c.Profile.CopyNativeAudio},
-		{"allow_uhd_copy", &c.Profile.AllowUHDCopy},
-		{"include_forced_subs", &c.Profile.IncludeForcedSubs},
-		{"include_full_subs", &c.Profile.IncludeFullSubs},
-		{"convert_after_rip", &c.Profile.ConvertAfterRip},
-	} {
-		if err := boolean("profile", b.key, b.dst); err != nil {
-			return err
-		}
+	if err := applySettings(doc, "defaults", &c.Defaults, func(key string) {
+		c.note("defaults", key, source)
+	}); err != nil {
+		return err
 	}
 
-	if v, ok := doc.lookup("profile", "sub_languages"); ok {
-		c.Profile.SubLanguages = v.list
-		c.note("profile", "sub_languages", source)
-	}
-	// Sections like [profile.Small] are profiles of their own. Each starts
-	// from the default and changes only what it names.
+	// Sections like [blueprint.Small] are blueprints. Each starts from the
+	// defaults, as they stand once every file is read, and changes only what
+	// it names — so they are read last.
 	for section := range doc {
-		name, ok := strings.CutPrefix(section, "profile.")
+		name, ok := strings.CutPrefix(section, "blueprint.")
 		if !ok || name == "" {
 			continue
 		}
-
-		named := c.Profile
-		named.Name = strings.Trim(name, `"`)
-		if err := applyProfile(doc, section, &named); err != nil {
-			return err
+		name = strings.Trim(name, `"`)
+		if c.written == nil {
+			c.written = map[string]map[string]value{}
 		}
-
-		if c.Profiles == nil {
-			c.Profiles = map[string]Profile{}
+		if c.written[name] == nil {
+			c.written[name] = map[string]value{}
 		}
-		c.Profiles[named.Name] = named
-		c.note("profiles", named.Name, source)
-	}
-
-	if v, ok := doc.lookup("profile", "min_title_seconds"); ok {
-		n, err := v.asInt()
-		if err != nil {
-			return fmt.Errorf("line %d: profile.min_title_seconds should be a whole number", v.line)
+		// A later file changes the keys it gives and keeps the rest.
+		for key, v := range doc[section] {
+			c.written[name][key] = v
 		}
-		c.Profile.MinTitleLength = time.Duration(n) * time.Second
-		c.note("profile", "min_title_seconds", source)
+		c.note("blueprints", name, source)
 	}
 
 	return nil
@@ -396,13 +448,21 @@ func (c Config) SourceOf(section, key string) string {
 	return "built-in default"
 }
 
-// applyProfile reads one profile's settings over a copy of the default.
-func applyProfile(doc document, section string, p *Profile) error {
-	if v, ok := doc.lookup(section, "preset"); ok {
-		p.Preset = v.asString()
-	}
-	if v, ok := doc.lookup(section, "audio_bitrate"); ok {
-		p.AudioBitrate = v.asString()
+// applySettings reads the settings in one section over what is already there.
+// noted is told each key that was given.
+func applySettings(doc document, section string, p *Settings, noted func(key string)) error {
+	for _, t := range []struct {
+		key string
+		dst *string
+	}{
+		{"preset", &p.Preset},
+		{"audio_bitrate", &p.AudioBitrate},
+		{"truehd", &p.TrueHD},
+	} {
+		if v, ok := doc.lookup(section, t.key); ok {
+			*t.dst = v.asString()
+			noted(t.key)
+		}
 	}
 
 	for _, n := range []struct {
@@ -422,6 +482,7 @@ func applyProfile(doc document, section string, p *Profile) error {
 			return fmt.Errorf("line %d: %s.%s should be a whole number", v.line, section, n.key)
 		}
 		*n.dst = number
+		noted(n.key)
 	}
 
 	for _, b := range []struct {
@@ -430,8 +491,10 @@ func applyProfile(doc document, section string, p *Profile) error {
 	}{
 		{"copy_native_audio", &p.CopyNativeAudio},
 		{"allow_uhd_copy", &p.AllowUHDCopy},
+		{"keep_picture", &p.KeepPicture},
 		{"include_forced_subs", &p.IncludeForcedSubs},
 		{"include_full_subs", &p.IncludeFullSubs},
+		{"convert_after_rip", &p.ConvertAfterRip},
 	} {
 		v, ok := doc.lookup(section, b.key)
 		if !ok {
@@ -442,10 +505,12 @@ func applyProfile(doc document, section string, p *Profile) error {
 			return fmt.Errorf("line %d: %s.%s should be true or false", v.line, section, b.key)
 		}
 		*b.dst = value
+		noted(b.key)
 	}
 
 	if v, ok := doc.lookup(section, "sub_languages"); ok {
 		p.SubLanguages = v.list
+		noted("sub_languages")
 	}
 
 	return nil
@@ -457,20 +522,25 @@ func (c Config) Validate() error {
 	validPresets := map[string]bool{
 		"superfast": true, "medium": true, "slow": true, "slower": true, "veryslow": true,
 	}
-	if !validPresets[c.Profile.Preset] {
-		return fmt.Errorf("profile.preset is %q; it should be one of superfast, medium, slow, slower, veryslow", c.Profile.Preset)
+	if !validPresets[c.Defaults.Preset] {
+		return fmt.Errorf("defaults.preset is %q; it should be one of superfast, medium, slow, slower, veryslow", c.Defaults.Preset)
+	}
+	switch c.Defaults.TrueHD {
+	case TrueHDKeep, TrueHDFLAC, TrueHDBoth:
+	default:
+		return fmt.Errorf("defaults.truehd is %q; it should be keep, flac or both", c.Defaults.TrueHD)
 	}
 
 	for _, crf := range []struct {
 		name  string
 		value int
 	}{
-		{"crf_uhd", c.Profile.CRFUHD},
-		{"crf_bluray", c.Profile.CRFBluray},
-		{"crf_dvd", c.Profile.CRFDVD},
+		{"crf_uhd", c.Defaults.CRFUHD},
+		{"crf_bluray", c.Defaults.CRFBluray},
+		{"crf_dvd", c.Defaults.CRFDVD},
 	} {
 		if crf.value < 0 || crf.value > 51 {
-			return fmt.Errorf("profile.%s is %d; it should be between 0 and 51", crf.name, crf.value)
+			return fmt.Errorf("defaults.%s is %d; it should be between 0 and 51", crf.name, crf.value)
 		}
 	}
 
@@ -481,7 +551,7 @@ func (c Config) Validate() error {
 }
 
 // CRFFor returns the quality setting for a source type.
-func (p Profile) CRFFor(kind string) int {
+func (p Settings) CRFFor(kind string) int {
 	switch kind {
 	case "uhd":
 		return p.CRFUHD

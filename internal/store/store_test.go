@@ -23,7 +23,7 @@ func TestSaveAndLoadJob(t *testing.T) {
 	job := NewJob("2026-09-23-140000-crime-101")
 	job.DiscName = "Crime 101"
 	job.Stage = StageRip
-	job.Plan = &Plan{Profile: "Archive", CRF: 20, Preset: "slow"}
+	job.Plan = &Plan{Blueprint: "Archive", CRF: 20, Preset: "slow"}
 
 	if err := s.SaveJob(job); err != nil {
 		t.Fatal(err)

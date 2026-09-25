@@ -2,7 +2,7 @@
 
 Convert a disc to natively play on Apple TV.
 
-ARFABIT watches your disc drive. When you insert a DVD or Blu-ray, it reads the movie off the disc, converts it to a file your Apple TV understands, gives it a proper name, and puts it in your movie folder. You run it from your web browser, from any device in your house.
+ARFABIT watches your disc drive. When you put in a DVD or Blu-ray, it copies the movie off the disc, converts it to a file your Apple TV understands, gives it a proper name, and puts it in your movie folder. You run it from your web browser, from any device in your house.
 
 > **Early days.** ARFABIT works, but it is new. One thing is still missing: it cannot yet turn a disc's subtitles into text, so your movie will not have subtitles. Everything else below works. The original copy of the disc is kept, so nothing is lost by starting now.
 
@@ -18,10 +18,12 @@ When you first open ARFABIT, it checks the above and guides you.
 
 1. **Download ARFABIT** for your computer and open it.
 2. **Your browser opens** to the ARFABIT page. Leave it open.
-3. **Follow the checklist.** ARFABIT tells you if anything is missing and offers to fix it for you.
+3. **Follow the checklist.** ARFABIT tells you if anything is missing and how to fix it.
 4. **Put a disc in.**
+5. **Press "Plan".** ARFABIT finds the movie and shows you what it found.
+6. **Press "Start".**
 
-That's it. ARFABIT finds the movie, shows you what it found, and starts working. When it's done, the disc pops out on its own.
+The disc pops out on its own as soon as it has been copied, so the next one can go in while the last one is still being converted.
 
 To have ARFABIT start up whenever your computer does, flip the switch in Settings that says "Start ARFABIT when this computer starts."
 
@@ -49,6 +51,7 @@ Downloads/arfabit/
     Blade Runner (1982)/
   masters/                        the original copies
     Blade Runner (1982)/
+  clips/                          short clips, for choosing a quality
 ```
 
 The **library** folder is the one you want. It's named the way Plex, Infuse, and Jellyfin expect, so those apps pick it up without any setup.
@@ -67,7 +70,7 @@ ARFABIT exists because of a few small frustrations:
 - Blu-ray and 4K discs got treated the same, so you couldn't set them up differently.
 - Changing quality settings for one disc meant editing settings for all discs.
 
-So ARFABIT keeps the logs still, tells 4K apart from Blu-ray, lets you switch quality per disc with one click, and more!
+So ARFABIT keeps the logs still, tells 4K apart from Blu-ray, lets you switch quality per disc with one click.
 
 ## If something goes wrong
 

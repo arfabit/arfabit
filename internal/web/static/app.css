@@ -7,6 +7,7 @@
   --accent: #2d6cdf;
   --ok: #2e7d54;
   --warn: #8a6d1f;
+  --bad: #b3261e;
   --radius: 10px;
 }
 
@@ -20,6 +21,7 @@
     --accent: #6fa0ff;
     --ok: #6cc294;
     --warn: #d9bc6a;
+    --bad: #f2837a;
   }
 }
 
@@ -27,7 +29,8 @@
 
 body {
   margin: 0;
-  padding: 0 1rem 4rem;
+  /* Room at the bottom for the bar of sections, so it never covers the last card. */
+  padding: 0 1rem calc(6rem + env(safe-area-inset-bottom));
   background: var(--bg);
   color: var(--ink);
   font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -83,7 +86,7 @@ label.track input { margin: 0; }
 }
 
 .bar { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 0.75rem 0; }
-#bar-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.4s ease; }
+.bar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width 0.4s ease; }
 
 .log-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
 .log-controls { display: flex; gap: 0.75rem; align-items: center; }
@@ -122,7 +125,7 @@ label.track input { margin: 0; }
   background: var(--bg); border: 1px solid var(--line); border-radius: 5px; font-size: 0.85em;
 }
 
-.row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.4rem 0; border-bottom: 1px solid var(--line); }
+.row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 1rem; padding: 0.4rem 0; border-bottom: 1px solid var(--line); }
 .row:last-child { border-bottom: 0; }
 
 /* Buttons say what they are doing, so a click never disappears into nothing. */
@@ -209,23 +212,201 @@ table.results tr.best td { font-weight: 600; }
 #master-list .row { align-items: center; }
 #master-list button { font-size: 0.85rem; padding: 0.3rem 0.7rem; }
 
-/* A form for filling in a profile, whether saved or one-off. */
-.profile-form {
+/* A form for filling in a blueprint, whether saved or one-off. */
+.blueprint-form {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1rem;
   margin: 0.75rem 0;
   background: var(--bg);
 }
-.profile-form .fields { display: flex; flex-wrap: wrap; gap: 1rem; }
-.profile-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
-.profile-form label.inline { flex-direction: row; align-items: center; gap: 0.5rem; color: var(--ink); }
-.profile-form input[type=text], .profile-form input[type=number], .profile-form select {
+.blueprint-form .fields { display: flex; flex-wrap: wrap; gap: 1rem; }
+.blueprint-form label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: var(--muted); }
+.blueprint-form label.inline { flex-direction: row; align-items: center; gap: 0.5rem; color: var(--ink); }
+.blueprint-form input[type=text], .blueprint-form input[type=number], .blueprint-form select {
   font: inherit; padding: 0.4rem 0.55rem; border-radius: 6px;
   border: 1px solid var(--line); background: var(--card); color: var(--ink);
 }
-.profile-form input[type=number] { width: 5rem; }
-.profile-form .actions { margin-top: 0.75rem; }
+.blueprint-form input[type=number] { width: 5rem; }
+.blueprint-form .actions { margin-top: 0.75rem; }
 
-#profile-manager .row { align-items: baseline; }
-#profile-manager .from-file { font-size: 0.8rem; color: var(--muted); }
+#blueprint-manager .row { align-items: baseline; }
+#blueprint-manager .from-file { font-size: 0.8rem; color: var(--muted); }
+
+/* The figures under a progress bar. Each has a fixed width, wide enough for
+   the longest thing it shows, so the line does not shuffle as numbers change:
+   "59m 59s" and "12h 59m" for the clock, "100%", "123.4 MB/s". */
+.figures { display: inline-flex; gap: 0.9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.figures .t-elapsed { width: 7ch; }
+.figures .t-pct { width: 4ch; text-align: right; }
+.figures .t-rate { width: 10ch; }
+.figures .t-op { white-space: normal; }
+
+/* A word in a sentence that does something when clicked. */
+button.link {
+  font: inherit; padding: 0; border: 0; background: none; color: var(--accent);
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+button.link[aria-pressed="true"] { color: var(--ink); text-decoration: none; font-weight: 600; }
+.queue-summary { margin-bottom: 0.75rem; }
+
+/* The sections of the page, always at the bottom of the window. */
+.tabbar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.35rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.12);
+  z-index: 10;
+}
+.tabbar a {
+  display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
+  min-width: 4.75rem; padding: 0.4rem 0.6rem; border-radius: 11px;
+  color: var(--muted); text-decoration: none; font-size: 0.75rem;
+}
+.tabbar a:hover { color: var(--ink); }
+.tabbar a[aria-current="page"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.tabbar svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+.view { display: grid; gap: 1rem; }
+.view[hidden] { display: none; }
+
+/* Asking before stopping something that has been working for a while. */
+.dialog {
+  max-width: 26rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  padding: 1.25rem;
+}
+.dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+
+/* How fast a disc was read, drawn after the copy. */
+.speed-wrap { position: relative; margin-top: 0.4rem; }
+.speed-graph { display: block; width: 100%; height: auto; overflow: visible; }
+.speed-graph .grid { stroke: var(--line); stroke-width: 1; }
+.speed-graph .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.speed-graph .speed-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.speed-graph .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.speed-graph .speed-dot { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+.speed-tip {
+  position: absolute; top: -0.25rem; pointer-events: none;
+  background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+  padding: 0.15rem 0.45rem; font-size: 0.8rem; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+
+/* The handle a waiting job is dragged by. touch-action stops a finger on it
+   from scrolling the page instead. */
+.job-head { display: flex; align-items: center; gap: 0.5rem; }
+.job-head h2 { margin-bottom: 0.15rem; overflow-wrap: anywhere; }
+.grip {
+  flex: none; display: grid; place-items: center;
+  width: 2rem; height: 2rem; padding: 0; margin-left: -0.35rem;
+  border: 0; background: none; color: var(--muted);
+  cursor: grab; touch-action: none;
+}
+.grip:hover { color: var(--ink); }
+.grip:active { cursor: grabbing; }
+.grip[hidden] { display: none; }
+.grip svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.job-card.dragging { border-color: var(--accent); box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); position: relative; z-index: 1; }
+
+/* The two parts of a Plan: the master, then the transcode made from it. */
+.plan-part {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: 1rem 0 0.75rem;
+}
+.plan-part[hidden] { display: none; }
+.plan-part > h3 { margin-bottom: 0.1rem; }
+.plan-part .grid { margin-bottom: 0; }
+.plan-part .grid > div > h4 { margin: 0 0 0.4rem; font-size: 0.9rem; }
+
+/* Sound rules in a blueprint, and what they found on a disc. */
+.sound-editor { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--line); display: grid; gap: 0.5rem; justify-items: start; }
+.sound-editor h4 { margin: 0; font-size: 0.9rem; color: var(--ink); }
+.sound-editor select { font: inherit; padding: 0.3rem 0.45rem; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.sound-reads { margin: 0; font-weight: 500; }
+.rule-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.rule-row button { font-size: 0.85rem; padding: 0.25rem 0.6rem; }
+label.chip {
+  display: inline-flex; flex-direction: row; align-items: center; gap: 0.3rem;
+  padding: 0.2rem 0.55rem; border: 1px solid var(--line); border-radius: 99px;
+  font-size: 0.85rem; color: var(--ink); cursor: pointer;
+}
+label.chip:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.rule-outcome { margin-bottom: 0.25rem; }
+
+/* A package: its sections, each a list of line items, with what else the
+   master holds underneath. */
+.package-start { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+.package-start select, .package-item select, .package-item input[type=number] {
+  font: inherit; padding: 0.3rem 0.45rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+}
+.package-item input[type=number] { width: 4.5rem; }
+.package-section { border-top: 1px solid var(--line); padding: 0.75rem 0; }
+.package-section h3 { margin-bottom: 0.5rem; }
+.package-item { padding: 0.35rem 0; border-radius: 8px; background: var(--card); }
+.package-item.dragging { outline: 1px solid var(--accent); box-shadow: 0 6px 18px rgb(0 0 0 / 0.12); position: relative; z-index: 1; }
+.package-line { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+.package-line .grip { margin-left: 0; }
+.package-line .grip[hidden] { display: none; }
+.package-label { flex: 1 1 14rem; }
+.package-line button { font-size: 0.85rem; padding: 0.25rem 0.6rem; }
+.package-note { margin: 0.2rem 0 0 2rem; color: var(--warn); }
+.tag { font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.package-spare { margin-top: 0.6rem; }
+.package-spare { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; }
+button.spare { font-size: 0.9rem; padding: 0.3rem 0.7rem; border-style: dashed; text-align: left; }
+.convert-pill[hidden] { display: none; }
+.section-hint { margin-left: 0.6rem; font-size: 0.75rem; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
+.package-containers { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.75rem 0; }
+
+/* While something is being dragged, the page's text is not selected by the
+   same movement. */
+body.dragging-something { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+.clip-group { margin-top: 0.75rem; }
+.clip-group h3 { margin-bottom: 0.25rem; text-transform: none; letter-spacing: 0; font-size: 0.95rem; color: var(--ink); }
+
+/* Recent tasks: what each was, and what it made. */
+
+/* How a task ended, on its label. The words beside it say the same. */
+.tag.task-done { color: var(--ok); border-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.tag.task-resumable { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.tag.task-failed { color: var(--bad); border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.spare-count { display: inline-block; min-width: 2.2ch; margin-right: 0.5rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spare-count.used { color: var(--accent); font-weight: 600; }
+
+/* Lossless sound says so in its title. Lossy sound says its bitrate. */
+.badge-lossless {
+  display: inline-block; margin-left: 0.45rem; padding: 0 0.45rem;
+  border-radius: 99px; border: 1px solid var(--ok); color: var(--ok);
+  font-size: 0.72rem; line-height: 1.5; font-weight: 600; letter-spacing: 0.02em;
+  vertical-align: 0.1em;
+}
+
+/* Recent tasks: one line each, opened by clicking it. */
+.recent-item { border-bottom: 1px solid var(--line); }
+.recent-item:last-child { border-bottom: 0; }
+.recent-item > summary {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.55rem 0; cursor: pointer; list-style: none;
+}
+.recent-item > summary::-webkit-details-marker { display: none; }
+.recent-item > summary:hover .recent-name { color: var(--accent); }
+.recent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-when { flex: none; }
+.recent-detail { padding: 0 0 0.9rem 0.25rem; display: grid; gap: 0.5rem; justify-items: start; }
+.recent-detail p { margin: 0; }
+.recent-detail .speed-wrap { width: 100%; }
+.recent-detail pre { white-space: pre-wrap; word-break: break-word; color: var(--muted); font-size: 0.8rem; }
+.recent-files { overflow-wrap: anywhere; }

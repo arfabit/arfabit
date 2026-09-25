@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -70,7 +71,9 @@ func TestWhatCanBePickedUp(t *testing.T) {
 		t.Errorf("the note does not say what to do: %q", interruptedNote(ripping))
 	}
 
-	converting := &store.Job{Kind: store.KindConvert, Stage: store.StagePackage, Master: master}
+	planned := &store.Package{Items: []store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}}}
+
+	converting := &store.Job{Kind: store.KindConvert, Stage: store.StagePackage, Master: master, Package: planned}
 	if !Resumable(converting) {
 		t.Error("a conversion from a copy that is still there was not offered")
 	}
@@ -79,9 +82,75 @@ func TestWhatCanBePickedUp(t *testing.T) {
 	}
 
 	// A copy that has since been removed cannot be worked from.
-	missing := &store.Job{Kind: store.KindConvert, Master: filepath.Join(dir, "gone.mkv")}
+	missing := &store.Job{Kind: store.KindConvert, Master: filepath.Join(dir, "gone.mkv"), Package: planned}
 	if Resumable(missing) {
 		t.Error("a conversion whose copy is gone was offered as resumable")
+	}
+
+	// Without its line items there is nothing to run again.
+	unplanned := &store.Job{Kind: store.KindConvert, Master: master}
+	if Resumable(unplanned) {
+		t.Error("a conversion with nothing planned was offered as resumable")
+	}
+
+	// A disc past its copy has its Plan and its copy, which is all it needs.
+	disc := &store.Job{Kind: store.KindDisc, Stage: store.StagePackage, Master: master,
+		Plan: &store.Plan{Blueprint: "Archive", Convert: true}}
+	if !Resumable(disc) {
+		t.Error("a disc interrupted while converting was not offered")
+	}
+
+	// One planned to stop at the copy has nothing left to do.
+	disc.Plan.Convert = false
+	if Resumable(disc) {
+		t.Error("a disc planned to stop at the copy was offered")
+	}
+}
+
+// Running a job again runs its own Plan. The blueprint it came from may have
+// been changed or removed since, and that does not reach it (§8).
+func TestResumeKeepsThePlan(t *testing.T) {
+	st := testStore(t)
+	cfg := config.Defaults()
+	cfg.Paths.Library = t.TempDir()
+	r := &Runner{Config: cfg, Store: st, Calibration: NewCalibration(), Slots: NewSlots(1)}
+
+	master := filepath.Join(t.TempDir(), "master.mkv")
+	if err := os.WriteFile(master, []byte("not really a film"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := store.NewJob("interrupted-disc")
+	rec.Title = "Crime 101"
+	rec.State = store.StateStopped
+	rec.Stage = store.StagePackage
+	rec.Master = master
+	rec.Plan = &store.Plan{Blueprint: "Removed Since", Convert: true, CRF: 17, Preset: "slower"}
+	if err := st.SaveJob(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.ResumeJob(rec.ID); err != nil {
+		t.Fatalf("a job whose blueprint no longer exists was refused: %v", err)
+	}
+	waitUntilIdle(t, r)
+
+	after, err := st.LoadJob(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Plan.Blueprint != "Removed Since" || after.Plan.CRF != 17 || after.Plan.Preset != "slower" {
+		t.Errorf("the Plan changed on resume: %+v", after.Plan)
+	}
+
+	// It ran, as the same job, rather than being replaced by a new one.
+	jobs, _ := st.Jobs()
+	if len(jobs) != 1 {
+		t.Errorf("%d job records, want the one", len(jobs))
+	}
+	data, _ := os.ReadFile(st.LogPath(rec.ID))
+	if !strings.Contains(string(data), "settings it had before") {
+		t.Errorf("the log does not say it started again:\n%s", data)
 	}
 }
 

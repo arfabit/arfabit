@@ -1,7 +1,7 @@
 // Package subs turns a disc's picture subtitles into text.
 //
 // Blu-ray and DVD subtitles are not text: they are little images, one per
-// line of dialogue, which is why they cannot simply be copied into an MP4.
+// line of dialogue, which is why showing them makes Plex convert the whole picture (§10).
 // Reading them back into words is what this package does.
 package subs
 

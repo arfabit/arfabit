@@ -190,16 +190,20 @@ func (b *Backend) ScanWithMessages(ctx context.Context, driveIndex int, onMessag
 
 	// A real scan is the only thing that reveals how the drive is being
 	// reached, so the answer is kept for the drive report to use later.
-	if access, version := AccessFrom(res.Messages); access != AccessUnknown {
+	access, version := AccessFrom(res.Messages)
+	if access != AccessUnknown {
 		b.lastAccess, b.lastLibreDriveVer = access, version
 	}
 
-	if hasCode(res.Messages, msgOSAccessMode) && onMessage != nil {
-		// Not fatal — the scan worked — but it means raw access was
-		// unavailable, which usually degrades what MakeMKV can read.
+	// MakeMKV says it opened the drive in OS access mode every time, before
+	// it switches to LibreDrive, so the message alone means nothing. Only a
+	// scan that never switched was really read through the system. Not fatal
+	// — the scan worked — but it is slow, and worth saying. The cause is not
+	// known, so none is given.
+	if access == AccessOS && onMessage != nil {
 		onMessage(Message{
 			Code: msgOSAccessMode,
-			Text: "Opened in OS access mode; another program may be using the drive.",
+			Text: "This disc was read through your computer's system rather than directly, which is slower.",
 		})
 	}
 

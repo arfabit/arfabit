@@ -3,10 +3,12 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/arfabit/arfabit/internal/drive"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/pipeline"
+	"github.com/arfabit/arfabit/internal/store"
 )
 
 // handleDriveHealth reports how the drive is being reached and how fast it has
@@ -23,7 +26,7 @@ import (
 // difference between a film taking forty minutes and taking four hours.
 func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
-		writeError(w, "The drive is busy with "+busy.Title+". Ask again once that disc is out.", nil)
+		writeError(w, "The drive is busy with "+busy.Name()+".", nil)
 		return
 	}
 
@@ -67,7 +70,14 @@ func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 
 		// What this drive has actually managed, which beats any claim about
 		// what it ought to manage.
-		if stats := s.Runner.Calibration.Drives[h.Drive.Device]; stats != nil {
+		// Speeds are kept under the drive's name. Ones measured before that
+		// are under whatever device path the disc had, and still count while
+		// that disc is in.
+		stats := s.Runner.Calibration.Drives[pipeline.DriveKey(h.Drive.Name, h.Drive.Device)]
+		if stats == nil && h.Drive.Device != "" {
+			stats = s.Runner.Calibration.Drives[h.Drive.Device]
+		}
+		if stats != nil {
 			for kind, rate := range stats.MBPerSecond {
 				if rate > report.Observed {
 					report.Observed = rate
@@ -84,7 +94,7 @@ func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 // handleFreeDrive asks the operating system to let go of the disc.
 func (s *Server) handleFreeDrive(w http.ResponseWriter, r *http.Request) {
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
-		writeError(w, "The drive is busy with "+busy.Title+".", nil)
+		writeError(w, "The drive is busy with "+busy.Name()+".", nil)
 		return
 	}
 
@@ -159,141 +169,11 @@ func (s *Server) handleMasters(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"masters": masters})
 }
 
-// handleLabClips lists the clips already made.
-//
-// The folder is the record, not a list held in memory: clips outlive the
-// program, and somebody coming back tomorrow should find what they made
-// yesterday rather than an empty table.
-func (s *Server) handleLabClips(w http.ResponseWriter, r *http.Request) {
-	type clip struct {
-		Film string    `json:"film"`
-		Name string    `json:"name"`
-		Path string    `json:"path"`
-		Size int64     `json:"size"`
-		Made time.Time `json:"made"`
-	}
-
-	clips := []clip{}
-
-	// A folder per film, as everywhere else, so the listing groups the way
-	// the folder does.
-	films, err := os.ReadDir(s.Config.Paths.Lab)
-	if err == nil {
-		for _, film := range films {
-			if !film.IsDir() {
-				continue
-			}
-			dir := filepath.Join(s.Config.Paths.Lab, film.Name())
-
-			entries, err := os.ReadDir(dir)
-			if err != nil {
-				continue
-			}
-			for _, e := range entries {
-				if e.IsDir() || filepath.Ext(e.Name()) != ".mp4" {
-					continue
-				}
-				info, err := e.Info()
-				if err != nil {
-					continue
-				}
-				clips = append(clips, clip{
-					Film: film.Name(),
-					Name: editionOf(e.Name()),
-					Path: filepath.Join(dir, e.Name()),
-					Size: info.Size(),
-					Made: info.ModTime(),
-				})
-			}
-		}
-	}
-
-	// Newest first: the ones just made are the ones being judged.
-	sort.Slice(clips, func(a, b int) bool { return clips[a].Made.After(clips[b].Made) })
-
-	writeJSON(w, map[string]any{
-		"folder": s.Config.Paths.Lab,
-		"clips":  clips,
-	})
-}
-
-// editionOf pulls the edition out of a clip's filename, which is the part
-// that says what was tried.
-func editionOf(name string) string {
-	start := strings.Index(name, "{edition-")
-	if start < 0 {
-		return strings.TrimSuffix(name, ".mp4")
-	}
-
-	tag := name[start+len("{edition-"):]
-	if end := strings.Index(tag, "}"); end >= 0 {
-		tag = tag[:end]
-	}
-	return tag
-}
-
-// handleTranscode renders a copy under the chosen profiles.
-//
-// A stretch of the film becomes clips to compare; the whole of it becomes
-// films, one per profile, each an edition in the library.
-func (s *Server) handleTranscode(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Master   string   `json:"master"`
-		Film     string   `json:"film"`
-		At       float64  `json:"at"`
-		Length   float64  `json:"length"`
-		Profiles []string `json:"profiles"`
-		Audio    []int    `json:"audio"`
-
-		// Custom is a one-off used for this job and not kept.
-		Custom *struct {
-			Name            string  `json:"name"`
-			Preset          *string `json:"preset"`
-			CRFUHD          *int    `json:"crf_uhd"`
-			CRFBluray       *int    `json:"crf_bluray"`
-			CRFDVD          *int    `json:"crf_dvd"`
-			AudioBitrate    *string `json:"audio_bitrate"`
-			AllowUHDCopy    *bool   `json:"allow_uhd_copy"`
-			CopyNativeAudio *bool   `json:"copy_native_audio"`
-		} `json:"custom"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, "ARFABIT could not read that request.", err)
-		return
-	}
-
-	var custom *config.Profile
-	if req.Custom != nil {
-		p := applyProfileForm(s.Config.Profile, req.Custom.Name, req.Custom.Preset,
-			req.Custom.CRFUHD, req.Custom.CRFBluray, req.Custom.CRFDVD,
-			req.Custom.AudioBitrate, req.Custom.AllowUHDCopy, req.Custom.CopyNativeAudio)
-		custom = &p
-	}
-
-	job, err := s.Runner.StartTranscode(context.Background(), pipeline.LabRequest{
-		Master:     req.Master,
-		Film:       req.Film,
-		At:         time.Duration(req.At * float64(time.Second)),
-		Length:     time.Duration(req.Length * float64(time.Second)),
-		Profiles:   req.Profiles,
-		Audio:      req.Audio,
-		Custom:     custom,
-		Lookup:     func(name string) (config.Profile, bool) { return s.Profiles.Named(s.Config, name) },
-		LabDir:     s.Config.Paths.Lab,
-		LibraryDir: s.Config.Paths.Library,
-	})
-	if err != nil {
-		writeError(w, capitalise(err.Error())+".", nil)
-		return
-	}
-
-	writeJSON(w, map[string]string{"job": job.ID})
-}
-
-// handleProfiles lists the named settings available to choose between.
-func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+// handleBlueprints lists the named settings available to choose between.
+func (s *Server) handleBlueprints(w http.ResponseWriter, r *http.Request) {
 	type reply struct {
 		Name        string `json:"name"`
+		Edition     string `json:"edition"`
 		Description string `json:"description"`
 		Default     bool   `json:"default"`
 		Editable    bool   `json:"editable"`
@@ -307,16 +187,24 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		AudioBitrate    string `json:"audio_bitrate"`
 		AllowUHDCopy    bool   `json:"allow_uhd_copy"`
 		CopyNativeAudio bool   `json:"copy_native_audio"`
+
+		// Sound is the blueprint's sound rules, or null for the usual
+		// stereo-first choice.
+		Sound *config.SoundRules `json:"sound"`
+
+		KeepPicture bool   `json:"keep_picture"`
+		TrueHD      string `json:"truehd"`
 	}
 
-	all := s.Profiles.All(s.Config)
+	all := s.Blueprints.All(s.Config)
 	out := make([]reply, 0, len(all))
 
 	for _, p := range all {
 		out = append(out, reply{
 			Name:            p.Name,
+			Edition:         p.Edition,
 			Description:     p.Describe(),
-			Default:         p.Name == s.Profiles.DefaultName(s.Config),
+			Default:         p.Name == s.Blueprints.DefaultName(s.Config),
 			Editable:        p.Editable,
 			Source:          p.Source,
 			Preset:          p.Preset,
@@ -326,15 +214,38 @@ func (s *Server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 			AudioBitrate:    p.AudioBitrate,
 			AllowUHDCopy:    p.AllowUHDCopy,
 			CopyNativeAudio: p.CopyNativeAudio,
+			Sound:           p.Sound,
+			KeepPicture:     p.KeepPicture,
+			TrueHD:          orKeep(p.TrueHD),
 		})
 	}
 
-	writeJSON(w, map[string]any{"profiles": out})
+	// The defaults are always there to choose, blueprint or not. They are
+	// used by default when no blueprint is.
+	def := s.Config.Defaults
+	writeJSON(w, map[string]any{
+		"blueprints": out,
+		"defaults": reply{
+			Description:     def.Describe(),
+			Default:         s.Blueprints.DefaultName(s.Config) == "",
+			Source:          "your settings file",
+			Preset:          def.Preset,
+			CRFUHD:          def.CRFUHD,
+			CRFBluray:       def.CRFBluray,
+			CRFDVD:          def.CRFDVD,
+			AudioBitrate:    def.AudioBitrate,
+			AllowUHDCopy:    def.AllowUHDCopy,
+			CopyNativeAudio: def.CopyNativeAudio,
+			Sound:           def.Sound,
+			KeepPicture:     def.KeepPicture,
+			TrueHD:          orKeep(def.TrueHD),
+		},
+	})
 }
 
-// handleDefaultProfile chooses which profile a disc gets unless something says
-// otherwise.
-func (s *Server) handleDefaultProfile(w http.ResponseWriter, r *http.Request) {
+// handleDefaultBlueprint chooses which blueprint new Plans start from. An
+// empty name chooses none, so they start from the defaults.
+func (s *Server) handleDefaultBlueprint(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -343,7 +254,7 @@ func (s *Server) handleDefaultProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.Profiles.SetDefault(s.Config, req.Name); err != nil {
+	if err := s.Blueprints.SetDefault(s.Config, req.Name); err != nil {
 		writeError(w, capitalise(err.Error())+".", nil)
 		return
 	}
@@ -351,15 +262,15 @@ func (s *Server) handleDefaultProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"default": req.Name})
 }
 
-// handleSaveProfile makes or changes a profile.
-func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
-	profile, err := readProfileForm(r, s.Config.Profile)
+// handleSaveBlueprint makes or changes a blueprint.
+func (s *Server) handleSaveBlueprint(w http.ResponseWriter, r *http.Request) {
+	blueprint, err := readBlueprintForm(r, s.Config.Plain())
 	if err != nil {
 		writeError(w, "ARFABIT could not read that.", err)
 		return
 	}
 
-	saved, err := s.Profiles.Save(profile)
+	saved, err := s.Blueprints.Save(blueprint)
 	if err != nil {
 		writeError(w, capitalise(err.Error())+".", nil)
 		return
@@ -368,11 +279,11 @@ func (s *Server) handleSaveProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"name": saved.Name})
 }
 
-// handleDeleteProfile removes a profile.
-func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+// handleDeleteBlueprint removes a blueprint.
+func (s *Server) handleDeleteBlueprint(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 
-	if err := s.Profiles.Delete(s.Config, name); err != nil {
+	if err := s.Blueprints.Delete(s.Config, name); err != nil {
 		writeError(w, capitalise(err.Error())+".", nil)
 		return
 	}
@@ -380,14 +291,15 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"removed": true})
 }
 
-// readProfileForm reads a profile from a request, filling in anything not
+// readBlueprintForm reads a blueprint from a request, filling in anything not
 // given from the default.
 //
 // Starting from the default rather than from nothing means a form that asks
 // about quality does not silently turn off subtitles.
-func readProfileForm(r *http.Request, base config.Profile) (config.Profile, error) {
+func readBlueprintForm(r *http.Request, base config.Blueprint) (config.Blueprint, error) {
 	var form struct {
 		Name            string  `json:"name"`
+		Edition         *string `json:"edition"`
 		Preset          *string `json:"preset"`
 		CRFUHD          *int    `json:"crf_uhd"`
 		CRFBluray       *int    `json:"crf_bluray"`
@@ -395,27 +307,94 @@ func readProfileForm(r *http.Request, base config.Profile) (config.Profile, erro
 		AudioBitrate    *string `json:"audio_bitrate"`
 		AllowUHDCopy    *bool   `json:"allow_uhd_copy"`
 		CopyNativeAudio *bool   `json:"copy_native_audio"`
+
+		// Sound replaces whatever rules there were. Null means none.
+		Sound *config.SoundRules `json:"sound"`
+
+		KeepPicture *bool   `json:"keep_picture"`
+		TrueHD      *string `json:"truehd"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&form); err != nil {
 		return base, err
 	}
+	if err := checkSoundRules(form.Sound); err != nil {
+		return base, err
+	}
 
-	return applyProfileForm(base, form.Name, form.Preset, form.CRFUHD, form.CRFBluray,
-		form.CRFDVD, form.AudioBitrate, form.AllowUHDCopy, form.CopyNativeAudio), nil
+	p := applyBlueprintForm(base, form.Name, form.Edition, form.Preset, form.CRFUHD, form.CRFBluray,
+		form.CRFDVD, form.AudioBitrate, form.AllowUHDCopy, form.CopyNativeAudio)
+	p.Sound = form.Sound
+	if form.KeepPicture != nil {
+		p.KeepPicture = *form.KeepPicture
+	}
+	if form.TrueHD != nil {
+		switch *form.TrueHD {
+		case config.TrueHDKeep, config.TrueHDFLAC, config.TrueHDBoth:
+			p.TrueHD = *form.TrueHD
+		default:
+			return base, fmt.Errorf("%q is not a choice for TrueHD", *form.TrueHD)
+		}
+	}
+	return p, nil
 }
 
-// applyProfileForm lays whatever was given over a starting point.
-func applyProfileForm(
-	base config.Profile,
+// orKeep reads a blueprint saved before the TrueHD choice existed as keeping
+// it, which is what those blueprints did.
+func orKeep(truehd string) string {
+	if truehd == "" {
+		return config.TrueHDKeep
+	}
+	return truehd
+}
+
+// checkSoundRules refuses rules the matching would misread, rather than
+// saving something that quietly does something else.
+func checkSoundRules(rules *config.SoundRules) error {
+	if rules == nil {
+		return nil
+	}
+	if len(rules.Choices) == 0 {
+		return errors.New("sound rules need at least one choice")
+	}
+	if !slices.Contains([]string{"", config.SoundOne, config.SoundAll}, rules.LanguageMode) {
+		return fmt.Errorf("%q is not a way of choosing languages", rules.LanguageMode)
+	}
+	for _, c := range rules.Choices {
+		if !slices.Contains([]string{config.SoundOne, config.SoundAll}, c.Mode) {
+			return fmt.Errorf("%q is not a way of choosing tracks", c.Mode)
+		}
+		if !slices.Contains([]string{"", "lossless", "lossy"}, c.Quality) {
+			return fmt.Errorf("%q is not a quality", c.Quality)
+		}
+		for _, layout := range c.Layouts {
+			if !slices.Contains([]string{"7.1", "5.1", "stereo"}, layout) {
+				return fmt.Errorf("%q is not a layout", layout)
+			}
+		}
+	}
+	return nil
+}
+
+// applyBlueprintForm lays whatever was given over a starting point.
+func applyBlueprintForm(
+	base config.Blueprint,
 	name string,
+	edition *string,
 	preset *string,
 	crfUHD, crfBluray, crfDVD *int,
 	bitrate *string,
 	allowUHDCopy, copyNativeAudio *bool,
-) config.Profile {
+) config.Blueprint {
 	p := base
 	if name != "" {
 		p.Name = name
+	}
+
+	// An edition left out starts as the name. One given, even blank, is kept
+	// as given: a blank edition is a choice.
+	p.Edition = p.Name
+	if edition != nil {
+		p.Edition = strings.TrimSpace(*edition)
 	}
 	if preset != nil {
 		p.Preset = *preset
@@ -460,68 +439,6 @@ func (s *Server) handleResume(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"job": job.ID})
 }
 
-// handleMasterTracks lists what is inside a master, so tracks can be chosen.
-//
-// A master holds everything the disc had, which is the point of keeping it.
-// A file for a television usually wants a few of those and not the rest.
-func (s *Server) handleMasterTracks(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("master")
-	if path == "" {
-		writeError(w, "No master was given.", nil)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	info, err := ffmpeg.Probe(ctx, path)
-	if err != nil {
-		writeError(w, "That master could not be read.", err)
-		return
-	}
-
-	type track struct {
-		Index    int    `json:"index"`
-		Kind     string `json:"kind"`
-		Label    string `json:"label"`
-		Lang     string `json:"lang"`
-		Channels int    `json:"channels"`
-		Selected bool   `json:"selected"`
-
-		// Carriable says whether ARFABIT can put this into the finished file
-		// at all. Picture subtitles cannot be, yet.
-		Carriable bool   `json:"carriable"`
-		Note      string `json:"note,omitempty"`
-	}
-
-	tracks := []track{}
-
-	for _, a := range info.StreamsOfKind("audio") {
-		tracks = append(tracks, track{
-			Index:     a.Index,
-			Kind:      "audio",
-			Label:     pipeline.DescribeStream(a),
-			Lang:      a.Lang,
-			Channels:  a.Channels,
-			Carriable: true,
-			Selected:  wantedLanguage(a.Lang, s.Config.Profile.SubLanguages),
-		})
-	}
-
-	for _, sub := range info.StreamsOfKind("subtitle") {
-		tracks = append(tracks, track{
-			Index:     sub.Index,
-			Kind:      "subtitle",
-			Label:     pipeline.DescribeStream(sub),
-			Lang:      sub.Lang,
-			Carriable: false,
-			Note:      "ARFABIT cannot read picture subtitles into text yet, so these cannot be carried across.",
-		})
-	}
-
-	writeJSON(w, map[string]any{"tracks": tracks})
-}
-
 // wantedLanguage reports whether a language is one the settings ask for.
 func wantedLanguage(lang string, wanted []string) bool {
 	if len(wanted) == 0 {
@@ -541,4 +458,88 @@ func capitalise(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// handleMaster says what a master holds, track by track, and what each would
+// cost on the television (§4), so a package can be planned from it.
+func (s *Server) handleMaster(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		writeError(w, "No master was given.", nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	info, err := ffmpeg.Probe(ctx, path)
+	if err != nil {
+		writeError(w, "That master could not be read.", err)
+		return
+	}
+
+	writeJSON(w, map[string]any{
+		"tracks":   pipeline.MasterTracks(info),
+		"duration": info.Duration,
+	})
+}
+
+// handleFillPackage fills a package in from a blueprint, or from the
+// defaults, against what a master holds. Nothing is started: the line items
+// come back to be looked at and changed.
+func (s *Server) handleFillPackage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Master    string `json:"master"`
+		Blueprint string `json:"blueprint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that request.", err)
+		return
+	}
+
+	blueprint := s.Config.Plain()
+	if req.Blueprint != "" {
+		named, ok := s.Blueprints.Named(s.Config, req.Blueprint)
+		if !ok {
+			writeError(w, fmt.Sprintf("There is no blueprint called %s.", req.Blueprint), nil)
+			return
+		}
+		blueprint = named
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	info, err := ffmpeg.Probe(ctx, req.Master)
+	if err != nil {
+		writeError(w, "That master could not be read.", err)
+		return
+	}
+
+	writeJSON(w, map[string]any{"package": pipeline.Recipe(pipeline.MasterTracks(info), blueprint)})
+}
+
+// handleStartPackage makes a package from a master.
+func (s *Server) handleStartPackage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Master  string        `json:"master"`
+		Film    string        `json:"film"`
+		Package store.Package `json:"package"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that request.", err)
+		return
+	}
+
+	job, err := s.Runner.StartPackage(context.Background(), pipeline.PackageRequest{
+		Master:     req.Master,
+		Film:       req.Film,
+		Package:    req.Package,
+		ClipsDir:   s.Config.Paths.Clips,
+		LibraryDir: s.Config.Paths.Library,
+	})
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
+	writeJSON(w, map[string]string{"job": job.ID})
 }

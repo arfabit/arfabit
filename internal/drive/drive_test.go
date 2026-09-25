@@ -15,16 +15,16 @@ func TestBlockDevice(t *testing.T) {
 	}
 }
 
-// The cost is what makes this worth explaining: it is the difference between
-// tens of minutes and hours.
+// The cost is what makes this worth explaining, and taking ownership is not
+// ejecting, which is worth saying since it sounds as if it might be.
 func TestDescribeExplainsTheCost(t *testing.T) {
 	held := State{Mounted: true, MountPoint: "/Volumes/CRIME_101"}.Describe()
 
-	if !strings.Contains(held, "hours") {
+	if !strings.Contains(held, "full speed") || !strings.Contains(held, "%") {
 		t.Errorf("the explanation does not say what it costs: %q", held)
 	}
-	if !strings.Contains(held, "stays in the drive") {
-		t.Errorf("the explanation does not reassure that the disc stays put: %q", held)
+	if !strings.Contains(held, "not ejected") {
+		t.Errorf("the explanation does not say the disc stays put: %q", held)
 	}
 
 	free := State{}.Describe()

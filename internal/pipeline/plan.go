@@ -15,16 +15,18 @@ import (
 //
 // Everything it decides is shown to the user before anything happens, and
 // every choice can be changed. Nothing here acts on its own (§8).
-func BuildPlan(d *disc.Disc, sel disc.Selection, profile config.Profile) (*store.Plan, error) {
+func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint) (*store.Plan, error) {
 	if sel.Feature < 0 || sel.Feature >= len(d.Titles) {
 		return nil, fmt.Errorf("no title was selected")
 	}
 	title := d.Titles[sel.Feature]
 
 	plan := &store.Plan{
-		Profile:    profile.Name,
-		Convert:    profile.ConvertAfterRip,
+		Blueprint:  blueprint.Name,
+		Edition:    blueprint.Edition,
+		Convert:    blueprint.ConvertAfterRip,
 		TitleIndex: title.Index,
+		MasterName: title.OutputName,
 		Duration:   formatDuration(title.Duration),
 		SourceSize: title.SizeBytes,
 		Obfuscated: sel.Obfuscated,
@@ -38,22 +40,29 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, profile config.Profile) (*store
 
 	plan.SourceCodec = video.CodecLong
 	plan.Resolution = fmt.Sprintf("%dx%d", video.Width, video.Height)
-	planVideo(plan, d.Kind, video, profile)
-	plan.Audio = planAudio(title, profile)
-	plan.Subtitles = planSubtitles(title, profile)
+	planVideo(plan, d.Kind, video, blueprint)
+	plan.Audio = planAudio(title, blueprint)
+	applyBlueprintSound(plan, blueprint)
+
+	// What the Master will hold, and the package the blueprint makes of it.
+	plan.Tracks = DiscTracks(title)
+	pkg := Recipe(plan.Tracks, blueprint)
+	plan.Package = &pkg
+	plan.Seconds = int(title.Duration.Seconds())
+	plan.Subtitles = planSubtitles(title, blueprint)
 
 	return plan, nil
 }
 
 // planVideo decides whether to copy or re-encode the picture.
-func planVideo(plan *store.Plan, kind disc.Kind, video *disc.Stream, profile config.Profile) {
+func planVideo(plan *store.Plan, kind disc.Kind, video *disc.Stream, blueprint config.Blueprint) {
 	plan.VideoCodec = "hevc"
-	plan.CRF = profile.CRFFor(string(kind))
-	plan.Preset = profile.Preset
+	plan.CRF = blueprint.CRFFor(string(kind))
+	plan.Preset = blueprint.Preset
 
 	// A UHD disc is already HEVC, so copying it is free and bit-perfect.
 	// Re-encoding it is lossy-to-lossy, which is offered but not assumed.
-	if kind == disc.KindUHD && profile.AllowUHDCopy && isHEVC(video.CodecID) {
+	if kind == disc.KindUHD && blueprint.AllowUHDCopy && isHEVC(video.CodecID) {
 		plan.VideoCopy = true
 	}
 }
@@ -67,15 +76,15 @@ func isHEVC(codecID string) bool {
 //
 // Forced tracks default to on: on most discs they carry the translations for
 // scenes in another language, which a viewer wants without asking (§10).
-func planSubtitles(title disc.Title, profile config.Profile) []store.PlannedSubtitle {
+func planSubtitles(title disc.Title, blueprint config.Blueprint) []store.PlannedSubtitle {
 	var planned []store.PlannedSubtitle
 
 	for _, s := range title.Streams {
 		if s.Kind != disc.StreamSubtitle {
 			continue
 		}
-		wanted := wantLanguage(s.Lang, profile.SubLanguages)
-		selected := wanted && ((s.Forced && profile.IncludeForcedSubs) || (!s.Forced && profile.IncludeFullSubs))
+		wanted := wantLanguage(s.Lang, blueprint.SubLanguages)
+		selected := wanted && ((s.Forced && blueprint.IncludeForcedSubs) || (!s.Forced && blueprint.IncludeFullSubs))
 
 		planned = append(planned, store.PlannedSubtitle{
 			SourceIndex: s.Index,

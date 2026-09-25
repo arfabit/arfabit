@@ -25,13 +25,19 @@ type DriveStats struct {
 	Samples     map[string]int     `json:"samples"`
 }
 
-// EncodeStats is this machine's observed encoding speed and efficiency.
+// EncodeStats is this machine's observed encoding speed and efficiency at one
+// preset, height and quality.
 type EncodeStats struct {
+	Preset string `json:"preset"`
+	Height int    `json:"height"`
+	CRF    int    `json:"crf"`
+
 	// FPS is frames encoded per second.
 	FPS float64 `json:"fps"`
 
-	// BitsPerPixel is how many bits the encoder spent per pixel at this
-	// setting, which is what predicts the finished size.
+	// BitsPerPixel is how many bits the encoder spent on the picture per
+	// pixel at this setting, which is what predicts the finished size. Sound
+	// is left out: it is counted separately, from the Plan.
 	BitsPerPixel float64 `json:"bits_per_pixel"`
 
 	Samples int `json:"samples"`
@@ -44,6 +50,7 @@ const (
 	seedRipMBPerSecond = 15.0
 	seedEncodeFPS      = 4.0
 	seedBitsPerPixel   = 0.075
+	seedCRF            = 20 // the quality seedBitsPerPixel stands for
 	seedFrameRate      = 24.0
 	recentWeight       = 0.3 // how much a new sample moves the average
 	confidentAfter     = 5   // samples before an estimate stops being a range
@@ -82,6 +89,17 @@ func (e Estimate) Describe() string {
 	return fmt.Sprintf("roughly %s to %s", humanDuration(low), humanDuration(high))
 }
 
+// DriveKey is what a drive's read speed is kept under: its name, which stays
+// the same from disc to disc. A device path does not — the system numbers a
+// disc as it appears, and an empty drive has none — so it is used only when
+// there is no name, as for jobs from before names were kept.
+func DriveKey(name, device string) string {
+	if name != "" {
+		return name
+	}
+	return device
+}
+
 // EstimateRip predicts how long reading a title off the disc will take.
 func (c *Calibration) EstimateRip(device string, kind disc.Kind, sizeBytes int64) Estimate {
 	speed, samples := seedRipMBPerSecond, 0
@@ -113,12 +131,7 @@ func (c *Calibration) EstimatePackage(plan *store.Plan, duration time.Duration) 
 	}
 
 	width, height := parseResolution(plan.Resolution)
-	key := encodeKey(plan.Preset, height)
-
-	fps, bpp, samples := seedEncodeFPS, seedBitsPerPixel, 0
-	if e := c.Encode[key]; e != nil && e.Samples > 0 {
-		fps, bpp, samples = e.FPS, e.BitsPerPixel, e.Samples
-	}
+	fps, bpp, samples := c.encodeStats(plan.Preset, height, plan.CRF)
 
 	// Size is bits per pixel across every frame, plus the audio.
 	frames := duration.Seconds() * seedFrameRate
@@ -169,24 +182,72 @@ func (c *Calibration) ObserveRip(device string, kind disc.Kind, sizeBytes int64,
 	d.Samples[string(kind)]++
 }
 
+// encodeStats is the speed and efficiency to expect at a setting.
+//
+// An exact match is used when there is one. Otherwise the nearest quality
+// observed at the same preset and height stands in, adjusted for the
+// difference; failing that, the seed does, adjusted the same way. Either way
+// the sample count is zero, so the estimate reads as a range.
+//
+// Without the adjustment, two blueprints differing only in quality would be
+// estimated at the same size, which makes choosing between them pointless.
+func (c *Calibration) encodeStats(preset string, height, crf int) (fps, bpp float64, samples int) {
+	if e := c.Encode[encodeKey(preset, height, crf)]; e != nil && e.Samples > 0 {
+		return e.FPS, e.BitsPerPixel, e.Samples
+	}
+
+	var nearest *EncodeStats
+	for _, e := range c.Encode {
+		if e.Preset != preset || e.Height != height || e.Samples == 0 {
+			continue
+		}
+		if nearest == nil || abs(e.CRF-crf) < abs(nearest.CRF-crf) {
+			nearest = e
+		}
+	}
+	if nearest != nil {
+		return nearest.FPS, nearest.BitsPerPixel * crfScale(nearest.CRF, crf), 0
+	}
+
+	return seedEncodeFPS, seedBitsPerPixel * crfScale(seedCRF, crf), 0
+}
+
+// crfStepsPerHalving is how many steps of CRF halve the bitrate, which is how
+// x265's quality scale is built: each six steps roughly halves it. Only used to
+// carry an observation across to a quality not yet seen, so it need only be
+// near.
+const crfStepsPerHalving = 6.0
+
+// crfScale is how much the bitrate changes going from one CRF to another.
+func crfScale(from, to int) float64 {
+	return math.Pow(2, float64(from-to)/crfStepsPerHalving)
+}
+
 // ObserveEncode folds a completed encode into the calibration.
-func (c *Calibration) ObserveEncode(preset string, height int, sizeBytes int64, duration, elapsed time.Duration) {
-	if elapsed <= 0 || duration <= 0 || sizeBytes <= 0 {
+//
+// The size is the whole file. The Plan's sound is taken off it first, because
+// sound is estimated separately and would otherwise be counted twice.
+func (c *Calibration) ObserveEncode(plan *store.Plan, width, height int, sizeBytes int64, duration, elapsed time.Duration) {
+	if elapsed <= 0 || duration <= 0 || sizeBytes <= 0 || width <= 0 || height <= 0 {
 		return
 	}
 
-	key := encodeKey(preset, height)
+	videoBytes := sizeBytes - audioBytes(plan, duration)
+	if videoBytes <= 0 {
+		return
+	}
+
+	key := encodeKey(plan.Preset, height, plan.CRF)
 	e := c.Encode[key]
 	if e == nil {
-		e = &EncodeStats{}
+		e = &EncodeStats{Preset: plan.Preset, Height: height, CRF: plan.CRF}
 		c.Encode[key] = e
 	}
 
 	frames := duration.Seconds() * seedFrameRate
-	width := widthFor(height)
 
 	e.FPS = blend(e.FPS, frames/elapsed.Seconds())
-	e.BitsPerPixel = blend(e.BitsPerPixel, float64(sizeBytes)*8/(float64(width*height)*frames))
+	e.BitsPerPixel = blend(e.BitsPerPixel, float64(videoBytes)*8/(float64(width*height)*frames))
 	e.Samples++
 }
 
@@ -199,23 +260,8 @@ func blend(current, observed float64) float64 {
 	return current*(1-recentWeight) + observed*recentWeight
 }
 
-func encodeKey(preset string, height int) string {
-	return fmt.Sprintf("x265/%s/%dp", preset, height)
-}
-
-// widthFor guesses a width from a height for the common shapes, used only to
-// turn bits-per-pixel into a size.
-func widthFor(height int) int {
-	switch {
-	case height >= 2000:
-		return 3840
-	case height >= 1000:
-		return 1920
-	case height >= 700:
-		return 1280
-	default:
-		return 720
-	}
+func encodeKey(preset string, height, crf int) string {
+	return fmt.Sprintf("x265/%s/%dp/crf%d", preset, height, crf)
 }
 
 func parseResolution(s string) (w, h int) {
@@ -240,4 +286,11 @@ func humanDuration(d time.Duration) string {
 		}
 		return fmt.Sprintf("%dh %dm", h, m)
 	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

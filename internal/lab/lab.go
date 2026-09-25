@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/arfabit/arfabit/internal/ffmpeg"
+	"github.com/arfabit/arfabit/internal/meta"
 )
 
 // Clip is one setting rendered from the master.
@@ -234,24 +235,20 @@ func clipArgs(req Request, setting Clip, video *ffmpeg.Stream) []string {
 			"-preset", setting.Video.Preset,
 			"-profile:v", "main10",
 			"-pix_fmt", "yuv420p10le",
-			"-tag:v", "hvc1",
 		)
 		if params := hdrParams(video); params != "" {
 			args = append(args, "-x265-params", params)
 		}
-		if video.ColorInfo.Primaries != "" {
-			args = append(args,
-				"-color_primaries", video.ColorInfo.Primaries,
-				"-color_trc", video.ColorInfo.Transfer,
-				"-colorspace", video.ColorInfo.Space,
-			)
-		}
+		args = append(args, video.ColorInfo.Args()...)
 	}
 
 	if setting.Audio.Copy {
 		args = append(args, "-c:a", "copy")
 	} else {
 		args = append(args, "-c:a", setting.Audio.Codec)
+		if f := ffmpeg.LosslessFrames(setting.Audio.Codec); f != "" {
+			args = append(args, "-af", f)
+		}
 		if setting.Audio.Bitrate != "" {
 			args = append(args, "-b:a", setting.Audio.Bitrate)
 		}
@@ -260,7 +257,7 @@ func clipArgs(req Request, setting Clip, video *ffmpeg.Stream) []string {
 		}
 	}
 
-	return append(args, "-movflags", "+faststart", setting.Path)
+	return append(args, setting.Path)
 }
 
 // hdrParams carries the source's HDR metadata into a clip.
@@ -364,7 +361,7 @@ func Compare(clips []Clip, clipLength, filmLength time.Duration) Comparison {
 func outputPath(req Request, setting string) string {
 	if req.WholeFilm && req.FilmTitle != nil {
 		// A film, named the way the library names every film, with the
-		// profile as the edition so several versions sit side by side.
+		// blueprint as the edition so several versions sit side by side.
 		return filepath.Join(req.OutputDir, req.FilmTitle.VideoName(setting))
 	}
 	return filepath.Join(req.OutputDir, req.Film, ClipName(req.Film, req.Run, setting, req.At))
@@ -378,13 +375,13 @@ func outputPath(req Request, setting string) string {
 // exactly what comparing them means. The run number keeps one afternoon's
 // comparison together and separate from the next.
 //
-//	Crime 101 (2025) {edition-Lab 001 - crf20-medium - 1h15m20s}.mp4
+//	Crime 101 (2025) {edition-Lab 001 - crf20-medium - 1h15m20s}.mkv
 func ClipName(film string, run int, setting string, at time.Duration) string {
 	if film == "" {
 		film = "Clip"
 	}
 
-	return fmt.Sprintf("%s {edition-%s}.mp4",
+	return fmt.Sprintf("%s {edition-%s}"+meta.VideoExt,
 		trimName(film, 60),
 		editionTag(run, setting, at),
 	)
@@ -422,7 +419,7 @@ func NextRun(filmDir string) int {
 	return highest + 1
 }
 
-// runNumberIn pulls "001" out of "... {edition-Lab 001 - ...}.mp4".
+// runNumberIn pulls "001" out of "... {edition-Lab 001 - ...}.mkv".
 func runNumberIn(name string) string {
 	const marker = "{edition-Lab "
 	start := strings.Index(name, marker)

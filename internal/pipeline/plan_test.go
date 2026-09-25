@@ -34,7 +34,7 @@ func blurayDisc() (*disc.Disc, disc.Selection) {
 
 func TestBuildPlanVideo(t *testing.T) {
 	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Profile)
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBuildPlanUHDCopies(t *testing.T) {
 	d.Titles[0].Streams[0].CodecID = "V_MPEGH/ISO/HEVC"
 	d.Titles[0].Streams[0].Width, d.Titles[0].Streams[0].Height = 3840, 2160
 
-	plan, err := BuildPlan(d, sel, config.Defaults().Profile)
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,10 +73,10 @@ func TestBuildPlanUHDCopyCanBeTurnedOff(t *testing.T) {
 	d.Kind = disc.KindUHD
 	d.Titles[0].Streams[0].CodecID = "V_MPEGH/ISO/HEVC"
 
-	profile := config.Defaults().Profile
-	profile.AllowUHDCopy = false
+	blueprint := config.Defaults().Plain()
+	blueprint.AllowUHDCopy = false
 
-	plan, err := BuildPlan(d, sel, profile)
+	plan, err := BuildPlan(d, sel, blueprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestBuildPlanUHDCopyCanBeTurnedOff(t *testing.T) {
 // must be encoded because Apple TV cannot decode them.
 func TestBuildPlanAudioCopyRule(t *testing.T) {
 	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Profile)
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,22 +113,13 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 		t.Errorf("stereo fallback = %+v, want a selected AAC downmix", *stereo)
 	}
 
-	// TrueHD cannot be copied, so it is converted to Dolby Digital Plus
-	// rather than flattened to stereo.
-	if byIndex[1].Copy {
-		t.Error("TrueHD marked as copyable; Apple TV cannot decode it")
-	}
-	// A 7.1 source goes to AAC, which is the only one of the three encoders
-	// that writes eight channels.
-	if byIndex[1].Codec != wideCodec {
-		t.Errorf("7.1 TrueHD converted to %q, want %q", byIndex[1].Codec, wideCodec)
-	}
-
-	if !byIndex[2].Copy {
-		t.Error("AC-3 not marked as copyable; Apple TV decodes it natively")
-	}
-	if byIndex[3].Copy {
-		t.Error("DTS marked as copyable")
+	// Everything is kept as it is unless someone chooses otherwise. TrueHD
+	// included: changing it is the user's choice, with a note saying why
+	// they might (§4, §9).
+	for index, name := range map[int]string{1: "TrueHD", 2: "AC-3", 3: "DTS"} {
+		if !byIndex[index].Copy {
+			t.Errorf("%s was not kept as it is", name)
+		}
 	}
 
 	// Nothing surround is ticked by default: stereo is what arrives without
@@ -146,7 +137,7 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 // Forced subtitles default to on; other languages are left unselected.
 func TestBuildPlanSubtitles(t *testing.T) {
 	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Profile)
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +165,7 @@ func TestBuildPlanCarriesObfuscation(t *testing.T) {
 	sel.Obfuscated = true
 	sel.Reason = "This disc lists 3 titles of exactly the same length..."
 
-	plan, err := BuildPlan(d, sel, config.Defaults().Profile)
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,14 +176,14 @@ func TestBuildPlanCarriesObfuscation(t *testing.T) {
 
 func TestBuildPlanRejectsTitleWithNoPicture(t *testing.T) {
 	d := &disc.Disc{Kind: disc.KindBluray, Titles: []disc.Title{{Index: 0, Duration: time.Hour}}}
-	if _, err := BuildPlan(d, disc.Selection{Feature: 0}, config.Defaults().Profile); err == nil {
+	if _, err := BuildPlan(d, disc.Selection{Feature: 0}, config.Defaults().Plain()); err == nil {
 		t.Error("a title with no video stream was accepted")
 	}
 }
 
 func TestEstimateImprovesWithSamples(t *testing.T) {
 	c := NewCalibration()
-	plan := &store.Plan{Resolution: "1920x1080", Preset: "slow", Audio: []store.PlannedAudio{{Selected: true, Copy: true}}}
+	plan := &store.Plan{Resolution: "1920x1080", Preset: "slow", CRF: 20, Audio: []store.PlannedAudio{{Selected: true, Copy: true}}}
 
 	first := c.EstimatePackage(plan, 109*time.Minute)
 	if first.Confident {
@@ -203,7 +194,7 @@ func TestEstimateImprovesWithSamples(t *testing.T) {
 	}
 
 	for i := 0; i < confidentAfter; i++ {
-		c.ObserveEncode("slow", 1080, 9_000_000_000, 109*time.Minute, 4*time.Hour)
+		c.ObserveEncode(plan, 1920, 1080, 9_000_000_000, 109*time.Minute, 4*time.Hour)
 	}
 
 	later := c.EstimatePackage(plan, 109*time.Minute)
@@ -212,6 +203,49 @@ func TestEstimateImprovesWithSamples(t *testing.T) {
 	}
 	if !strings.Contains(later.Describe(), "about") {
 		t.Errorf("a confident estimate should read as a single figure: %q", later.Describe())
+	}
+}
+
+// A lower CRF is a larger file. Two blueprints differing only in quality must
+// not be estimated at the same size, observed or not.
+func TestEstimateFollowsQuality(t *testing.T) {
+	c := NewCalibration()
+	at := func(crf int) *store.Plan {
+		return &store.Plan{Resolution: "1920x1080", Preset: "slow", CRF: crf}
+	}
+
+	if !(c.EstimatePackage(at(18), 2*time.Hour).Size > c.EstimatePackage(at(24), 2*time.Hour).Size) {
+		t.Error("before any observation, CRF 18 was not estimated larger than CRF 24")
+	}
+
+	// One quality observed carries across to the others, adjusted.
+	c.ObserveEncode(at(20), 1920, 1080, 8_000_000_000, 2*time.Hour, 3*time.Hour)
+
+	observed := c.EstimatePackage(at(20), 2*time.Hour)
+	if observed.Size < 7_500_000_000 || observed.Size > 8_500_000_000 {
+		t.Errorf("the observed quality came back as %d bytes, want near 8 GB", observed.Size)
+	}
+
+	lower := c.EstimatePackage(at(26), 2*time.Hour)
+	if !(lower.Size*3 < observed.Size*2) {
+		t.Errorf("six steps of CRF higher should be about half the size: %d vs %d", lower.Size, observed.Size)
+	}
+	if lower.Confident {
+		t.Error("a quality never observed claimed confidence")
+	}
+}
+
+// The sound is estimated separately, so an observation must not count it as
+// picture: doing so made every estimate after the first too large.
+func TestObservationLeavesOutTheSound(t *testing.T) {
+	c := NewCalibration()
+	plan := &store.Plan{Resolution: "1920x1080", Preset: "slow", CRF: 20,
+		Audio: []store.PlannedAudio{{Selected: true, Copy: true}}}
+
+	c.ObserveEncode(plan, 1920, 1080, 8_000_000_000, 2*time.Hour, 3*time.Hour)
+
+	if got := c.EstimatePackage(plan, 2*time.Hour).Size; got < 7_500_000_000 || got > 8_500_000_000 {
+		t.Errorf("the same job estimated at %d bytes, want near the 8 GB it came to", got)
 	}
 }
 
@@ -341,7 +375,7 @@ func TestAudioOrdering(t *testing.T) {
 		{Index: 5, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 6, Lang: "eng"},
 	}}
 
-	tracks := planAudio(title, config.Defaults().Profile)
+	tracks := planAudio(title, config.Defaults().Plain())
 
 	var order []string
 	for _, tr := range tracks {
@@ -374,7 +408,7 @@ func TestAmbiguousStereoTracksAreBothKept(t *testing.T) {
 	}}
 
 	var stereoSelected int
-	for _, tr := range planAudio(title, config.Defaults().Profile) {
+	for _, tr := range planAudio(title, config.Defaults().Plain()) {
 		if tr.Channels <= 2 && tr.Selected && !tr.Stereo {
 			stereoSelected++
 		}
@@ -393,12 +427,12 @@ func TestTrackLabelsAreReadable(t *testing.T) {
 		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
 	}}
 
-	tracks := planAudio(title, config.Defaults().Profile)
+	tracks := planAudio(title, config.Defaults().Plain())
 
 	if got := tracks[0].Label; !strings.Contains(got, "English") ||
 		!strings.Contains(got, "7.1") ||
 		!strings.Contains(got, "Dolby TrueHD") ||
-		!strings.Contains(got, "AAC") {
+		!strings.Contains(got, "kept exactly as it is") {
 		t.Errorf("label does not explain the conversion: %q", got)
 	}
 	if got := tracks[0].Label; strings.Contains(got, "truehd") || strings.Contains(got, "eac3") {
@@ -425,8 +459,9 @@ func TestLayoutNames(t *testing.T) {
 	}{
 		{8, "7.1", "7.1"},
 		{6, "5.1(side)", "5.1"},
-		{2, "stereo", "Stereo"},
-		{1, "mono", "Mono"},
+		// Numbered like 5.1 and 7.1: two channels and no bass channel.
+		{2, "stereo", "2.0"},
+		{1, "mono", "1.0"},
 	}
 	for _, tc := range tests {
 		if got := layoutName(tc.channels, tc.raw); got != tc.want {
@@ -439,7 +474,12 @@ func TestLayoutNames(t *testing.T) {
 // measured rather than assumed: AAC writes eight, E-AC-3's ffmpeg encoder
 // stops at six and downmixes anything wider without saying so. The codec is
 // therefore chosen by how wide the source is.
+// Lossy sound is converted only when the blueprint asks for it not to be kept
+// as it is. Then the target follows the width, because the encoders differ.
 func TestSurroundCodecMatchesSourceWidth(t *testing.T) {
+	convert := config.Defaults().Plain()
+	convert.CopyNativeAudio = false
+
 	tests := []struct {
 		channels  int
 		wantCodec string
@@ -455,7 +495,7 @@ func TestSurroundCodecMatchesSourceWidth(t *testing.T) {
 			{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: tc.channels, Lang: "eng"},
 		}}
 
-		tracks := planAudio(title, config.Defaults().Profile)
+		tracks := planAudio(title, convert)
 		if tracks[0].Codec != tc.wantCodec {
 			t.Errorf("%d channels converted to %q, want %q", tc.channels, tracks[0].Codec, tc.wantCodec)
 		}
@@ -472,7 +512,7 @@ func TestDefaultIsStereoWithSurroundOffered(t *testing.T) {
 		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
 	}}
 
-	tracks := planAudio(title, config.Defaults().Profile)
+	tracks := planAudio(title, config.Defaults().Plain())
 
 	var selected, surroundOffered int
 	for _, tr := range tracks {
@@ -503,7 +543,7 @@ func TestStereoIsMadeWhenTheDiscHasNone(t *testing.T) {
 		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
 	}}
 
-	tracks := planAudio(title, config.Defaults().Profile)
+	tracks := planAudio(title, config.Defaults().Plain())
 
 	var made *store.PlannedAudio
 	for i := range tracks {
@@ -533,7 +573,7 @@ func TestLosslessStereoOptionIsOffered(t *testing.T) {
 		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
 	}}
 
-	tracks := planAudio(title, config.Defaults().Profile)
+	tracks := planAudio(title, config.Defaults().Plain())
 
 	var discStereo, madeStereo *store.PlannedAudio
 	for i := range tracks {
@@ -570,7 +610,7 @@ func TestNoExtraStereoWhenNothingIsLossless(t *testing.T) {
 		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
 	}}
 
-	for _, tr := range planAudio(title, config.Defaults().Profile) {
+	for _, tr := range planAudio(title, config.Defaults().Plain()) {
 		if tr.Stereo {
 			t.Errorf("a made stereo track was offered with no lossless source: %q", tr.Label)
 		}
@@ -594,5 +634,28 @@ func TestLosslessDetection(t *testing.T) {
 		if got := isLossless(tc.codecID, tc.codecLong); got != tc.want {
 			t.Errorf("isLossless(%q, %q) = %v, want %v", tc.codecID, tc.codecLong, got, tc.want)
 		}
+	}
+}
+
+// The Plan's edition comes from its blueprint, and is blank from the defaults.
+func TestPlanEditionComesFromTheBlueprint(t *testing.T) {
+	d, sel := blurayDisc()
+
+	plain, err := BuildPlan(d, sel, config.Defaults().Plain())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain.Edition != "" || plain.Blueprint != "" {
+		t.Errorf("a Plan from the defaults has blueprint %q, edition %q", plain.Blueprint, plain.Edition)
+	}
+
+	bp := config.Defaults().Plain()
+	bp.Name, bp.Edition = "Small", "Travel"
+	small, err := BuildPlan(d, sel, bp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if small.Blueprint != "Small" || small.Edition != "Travel" {
+		t.Errorf("a Plan from Small has blueprint %q, edition %q", small.Blueprint, small.Edition)
 	}
 }

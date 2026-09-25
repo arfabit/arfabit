@@ -10,8 +10,9 @@ import (
 
 const taskName = "ARFABIT"
 
-// A Task Scheduler entry rather than a Run-key value: it survives better, can
-// restart after a failure, and is visible somewhere a person can find it.
+// A Task Scheduler entry rather than a Run-key value: it survives better, and is
+// visible somewhere a person can find it. It does not restart ARFABIT when it
+// exits, so that Stop stays stopped.
 func enable(exe string) (Status, error) {
 	cmd := exec.Command("schtasks", "/Create", "/F",
 		"/TN", taskName,

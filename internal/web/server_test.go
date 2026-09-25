@@ -7,15 +7,16 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/blueprints"
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/pipeline"
-	"github.com/arfabit/arfabit/internal/profiles"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -29,7 +30,7 @@ func newTestServer(t *testing.T) *Server {
 	cfg.Paths.Data = filepath.Join(root, "data")
 	cfg.Paths.Masters = filepath.Join(root, "masters")
 	cfg.Paths.Library = filepath.Join(root, "library")
-	cfg.Paths.Lab = filepath.Join(root, "lab")
+	cfg.Paths.Clips = filepath.Join(root, "clips")
 	cfg.Node.Name = "test-node"
 
 	st, err := store.New(cfg.Paths.Data, "test-node")
@@ -50,11 +51,11 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 
-	store, err := profiles.Open(cfg.Paths.Data)
+	store, err := blueprints.Open(cfg.Paths.Data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.Profiles = store
+	s.Blueprints = store
 
 	return s
 }
@@ -595,27 +596,27 @@ func TestMastersWithNothingRipped(t *testing.T) {
 	}
 }
 
-// Profiles can be made, changed and removed without touching the settings file.
-func TestProfilesCanBeMadeAndRemoved(t *testing.T) {
+// Blueprints can be made, changed and removed without touching the settings file.
+func TestBlueprintsCanBeMadeAndRemoved(t *testing.T) {
 	s := newTestServer(t)
 
 	body := strings.NewReader(`{"name":"Small","preset":"medium","crf_bluray":24}`)
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/profiles", body))
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/blueprints", body))
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("saving a profile returned %d: %s", rec.Code, rec.Body)
+		t.Fatalf("saving a blueprint returned %d: %s", rec.Code, rec.Body)
 	}
 
 	// It appears in the list, marked as one ARFABIT may change.
-	listed := get(t, s, "/api/profiles")
+	listed := get(t, s, "/api/blueprints")
 	var reply struct {
-		Profiles []struct {
+		Blueprints []struct {
 			Name      string `json:"name"`
 			Editable  bool   `json:"editable"`
 			CRFBluray int    `json:"crf_bluray"`
 			CRFDVD    int    `json:"crf_dvd"`
-		} `json:"profiles"`
+		} `json:"blueprints"`
 	}
 	if err := json.Unmarshal(listed.Body.Bytes(), &reply); err != nil {
 		t.Fatal(err)
@@ -627,29 +628,29 @@ func TestProfilesCanBeMadeAndRemoved(t *testing.T) {
 		CRFBluray int    `json:"crf_bluray"`
 		CRFDVD    int    `json:"crf_dvd"`
 	}
-	for i := range reply.Profiles {
-		if reply.Profiles[i].Name == "Small" {
-			small = &reply.Profiles[i]
+	for i := range reply.Blueprints {
+		if reply.Blueprints[i].Name == "Small" {
+			small = &reply.Blueprints[i]
 		}
 	}
 	if small == nil {
-		t.Fatal("the saved profile is not in the list")
+		t.Fatal("the saved blueprint is not in the list")
 	}
 	if !small.Editable {
-		t.Error("a profile made here is not offered as changeable")
+		t.Error("a blueprint made here is not offered as changeable")
 	}
 	if small.CRFBluray != 24 {
 		t.Errorf("crf_bluray = %d, want 24", small.CRFBluray)
 	}
 	// Anything not named keeps the default, so a form about quality does not
 	// quietly change something else.
-	if small.CRFDVD != s.Config.Profile.CRFDVD {
+	if small.CRFDVD != s.Config.Defaults.CRFDVD {
 		t.Errorf("crf_dvd = %d; a setting nobody mentioned was changed", small.CRFDVD)
 	}
 
 	// And it can be removed again.
 	rec = httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/profiles/Small", nil))
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodDelete, "/api/blueprints/Small", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("removing returned %d: %s", rec.Code, rec.Body)
 	}
@@ -660,7 +661,7 @@ func TestSavingNonsenseIsRefused(t *testing.T) {
 	s := newTestServer(t)
 
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/profiles",
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/blueprints",
 		strings.NewReader(`{"name":"Broken","preset":"ultrafast"}`)))
 
 	if rec.Code == http.StatusOK {
@@ -676,48 +677,257 @@ func TestSavingNonsenseIsRefused(t *testing.T) {
 	}
 }
 
-// Trying something once should not mean naming it and remembering it forever.
-func TestTranscodeAcceptsAOneOff(t *testing.T) {
+// A package can be started from line items alone, with no blueprint: trying
+// something once should not mean naming it and remembering it forever.
+func TestPackageNeedsNoBlueprint(t *testing.T) {
 	s := newTestServer(t)
 
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/transcode",
-		strings.NewReader(`{"master":"/nowhere/m.mkv","film":"x","length":30,
-			"custom":{"name":"Just this once","crf_bluray":26}}`)))
-
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/package",
+		strings.NewReader(`{"master":"/nowhere/m.mkv","film":"x","package":{"length":30000000000,
+			"items":[{"kind":"video","action":"convert","to":"hevc","crf":26,"preset":"medium","source":0}]}}`)))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("a one-off was refused: %s", rec.Body)
+		t.Fatalf("a package of line items alone was refused: %s", rec.Body)
 	}
-
-	// And it is not remembered.
-	if _, kept := s.Profiles.Saved["Just this once"]; kept {
-		t.Error("a one-off was saved as a profile")
+	// It stops on its own, the master not being there; wait for that, so it
+	// is not still writing when the test's folder goes.
+	for deadline := time.Now().Add(5 * time.Second); len(s.Runner.Active()) > 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(s.Blueprints.Saved) != 0 {
+		t.Error("a package was saved as a blueprint")
 	}
 }
 
-// A master holds everything the disc had; a file for a television usually
-// wants a few of those and not the rest.
-func TestMasterTracksNeedsAMaster(t *testing.T) {
+// A package that could not be made is refused with a sentence saying why.
+func TestPackageIsRefusedPlainly(t *testing.T) {
 	s := newTestServer(t)
 
-	rec := get(t, s, "/api/master-tracks")
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/package",
+		strings.NewReader(`{"master":"/nowhere/m.mkv","package":{"items":[]}}`)))
 	if rec.Code == http.StatusOK {
+		t.Fatal("a package with no picture was accepted")
+	}
+	if !strings.Contains(rec.Body.String(), "needs a picture") {
+		t.Errorf("the message does not say what was wrong: %s", rec.Body)
+	}
+}
+
+// Reading a master needs one, and one that is not there says so.
+func TestMasterMustBeReadable(t *testing.T) {
+	s := newTestServer(t)
+
+	if rec := get(t, s, "/api/master"); rec.Code == http.StatusOK {
 		t.Error("tracks were listed for no master at all")
 	}
+	rec := get(t, s, "/api/master?path=/nowhere/at/all.mkv")
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be read") {
+		t.Errorf("a master that does not exist: %d %s", rec.Code, rec.Body)
+	}
 }
 
-// Picture subtitles cannot be carried across yet, and saying so is better than
-// offering them and quietly leaving them out.
-func TestSubtitlesAreOfferedHonestly(t *testing.T) {
-	// The shape of the reply is what matters here; the probe itself needs a
-	// real file, which the smoke test covers.
+// The edition can be changed on the Plan, or cleared.
+func TestPlanEditionCanBeChanged(t *testing.T) {
+	s := newTestServer(t)
+	job := &pipeline.Job{Job: &store.Job{
+		ID: "waiting", State: store.StateWaiting, Stage: store.StagePlan,
+		Plan: &store.Plan{Blueprint: "Small", Edition: "Small"},
+	}}
+	s.Runner.SetCurrentForTest(job)
+
+	for _, edition := range []string{" Director's Cut ", ""} {
+		body := strings.NewReader(`{"edition":` + strconv.Quote(edition) + `}`)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plan", body))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+		if want := strings.TrimSpace(edition); job.Plan.Edition != want {
+			t.Errorf("Edition = %q, want %q", job.Plan.Edition, want)
+		}
+	}
+
+	// Leaving it out of a change leaves it alone.
+	job.Plan.Edition = "Kept"
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plan", strings.NewReader(`{"convert":true}`)))
+	if job.Plan.Edition != "Kept" {
+		t.Errorf("an unrelated change cleared the edition: %q", job.Plan.Edition)
+	}
+}
+
+// A blueprint saved without an edition takes its name; one saved with a blank
+// edition keeps it blank.
+func TestSavedBlueprintEdition(t *testing.T) {
 	s := newTestServer(t)
 
-	rec := get(t, s, "/api/master-tracks?master=/nowhere/at/all.mkv")
-	if rec.Code == http.StatusOK {
-		t.Error("a master that does not exist was read")
+	for _, body := range []string{
+		`{"name":"Small","preset":"medium"}`,
+		`{"name":"Plain","preset":"medium","edition":""}`,
+		`{"name":"Cut","preset":"medium","edition":"Director's Cut"}`,
+	} {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/blueprints", strings.NewReader(body)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("saving %s returned %d: %s", body, rec.Code, rec.Body)
+		}
 	}
-	if !strings.Contains(rec.Body.String(), "could not be read") {
-		t.Errorf("the message does not say what went wrong: %s", rec.Body)
+
+	for name, want := range map[string]string{"Small": "Small", "Plain": "", "Cut": "Director's Cut"} {
+		p, ok := s.Blueprints.Named(s.Config, name)
+		if !ok {
+			t.Fatalf("%s was not saved", name)
+		}
+		if p.Edition != want {
+			t.Errorf("%s has edition %q, want %q", name, p.Edition, want)
+		}
+	}
+}
+
+// A job waiting for the processor can be moved in the line, and the page is
+// told the new order; something that has already started cannot.
+func TestMovingInTheLine(t *testing.T) {
+	s := newTestServer(t)
+	s.Runner.Slots = pipeline.NewSlots(1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Runner.Slots.Take(ctx, pipeline.Ticket{ID: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"a", "b"} {
+		go func() { _ = s.Runner.Slots.Take(ctx, pipeline.Ticket{ID: id}) }()
+		for deadline := time.Now().Add(time.Second); len(s.Runner.Slots.Line()) == 0 || s.Runner.Slots.Line()[len(s.Runner.Slots.Line())-1] != id; {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s never joined the line", id)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	move := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/line", strings.NewReader(body)))
+		return rec
+	}
+
+	if rec := move(`{"id":"b","to":0}`); rec.Code != http.StatusOK {
+		t.Fatalf("moving b: status %d, %s", rec.Code, rec.Body)
+	}
+
+	var reply struct {
+		Line []string `json:"line"`
+	}
+	if err := json.Unmarshal(get(t, s, "/api/state").Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(reply.Line, ",") != "b,a" {
+		t.Errorf("line = %v, want [b a]", reply.Line)
+	}
+
+	if rec := move(`{"id":"running","to":0}`); rec.Code == http.StatusOK {
+		t.Error("a job that had already started was moved")
+	}
+}
+
+// Sound rules made on the page are kept with the blueprint, and rules the
+// matching would misread are refused rather than saved.
+func TestBlueprintKeepsItsSoundRules(t *testing.T) {
+	s := newTestServer(t)
+
+	save := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/blueprints", strings.NewReader(body)))
+		return rec
+	}
+
+	if rec := save(`{"name":"Surround","sound":{"languages":["eng"],"language_mode":"one","choices":[{"mode":"one","layouts":["7.1","5.1"],"quality":"lossless"}]}}`); rec.Code != http.StatusOK {
+		t.Fatalf("saving: status %d, %s", rec.Code, rec.Body)
+	}
+	if rec := save(`{"name":"Odd","sound":{"choices":[{"mode":"one","layouts":["9.2"]}]}}`); rec.Code == http.StatusOK {
+		t.Error("a layout that does not exist was saved")
+	}
+
+	var reply struct {
+		Blueprints []struct {
+			Name  string             `json:"name"`
+			Sound *config.SoundRules `json:"sound"`
+		} `json:"blueprints"`
+	}
+	if err := json.Unmarshal(get(t, s, "/api/blueprints").Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range reply.Blueprints {
+		if b.Name == "Surround" {
+			if b.Sound == nil || len(b.Sound.Choices) != 1 || b.Sound.Choices[0].Quality != "lossless" {
+				t.Errorf("rules came back as %+v", b.Sound)
+			}
+			return
+		}
+	}
+	t.Error("the blueprint was not listed")
+}
+
+// The package on a Plan is replaced whole by the one edited on the page, and
+// its edition becomes the Plan's, which names the file.
+func TestPlanPackageCanBeChanged(t *testing.T) {
+	s := newTestServer(t)
+	job := &pipeline.Job{Job: &store.Job{
+		ID: "waiting", State: store.StateWaiting, Stage: store.StagePlan,
+		Plan: &store.Plan{Convert: true, Package: &store.Package{Items: []store.Item{
+			{Kind: store.KindVideo, Action: store.ActionCopy},
+		}}},
+	}}
+	s.Runner.SetCurrentForTest(job)
+
+	body := `{"package":{"edition":"Lossless","items":[
+		{"kind":"video","action":"convert","to":"hevc","crf":22,"preset":"medium"},
+		{"kind":"audio","action":"convert","source":1,"codec":"truehd","to":"flac"}]}}`
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plan", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+
+	pkg := job.Plan.Package
+	if len(pkg.Items) != 2 || pkg.Items[1].To != "flac" {
+		t.Errorf("the package is now %+v", pkg.Items)
+	}
+	if job.Plan.Edition != "Lossless" {
+		t.Errorf("the Plan's edition is %q, want the package's", job.Plan.Edition)
+	}
+	// The estimate follows the picture the package makes.
+	if job.Plan.VideoCopy || job.Plan.CRF != 22 || job.Plan.Preset != "medium" {
+		t.Errorf("the estimate still describes the old picture: copy=%v crf=%d preset=%s",
+			job.Plan.VideoCopy, job.Plan.CRF, job.Plan.Preset)
+	}
+}
+
+// Recent tasks are the ones that are over: anything working or waiting is in
+// the queue, or on the Plan, already.
+func TestRecentTasksAreOnlyFinishedOnes(t *testing.T) {
+	s := newTestServer(t)
+	for id, state := range map[string]store.State{
+		"done": store.StateDone, "stopped": store.StateStopped,
+		"running": store.StateRunning, "waiting": store.StateWaiting,
+	} {
+		if err := s.Store.SaveJob(&store.Job{ID: id, State: state}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var reply struct {
+		Recent []store.Job `json:"recent"`
+	}
+	if err := json.Unmarshal(get(t, s, "/api/state").Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, j := range reply.Recent {
+		got[j.ID] = true
+	}
+	if len(got) != 2 || !got["done"] || !got["stopped"] {
+		t.Errorf("recent = %v, want only done and stopped", got)
 	}
 }

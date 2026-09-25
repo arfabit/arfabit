@@ -19,213 +19,270 @@
 
 <main>
 
-  <section id="doctor" class="card">
-    <h2 id="doctor-heading">Checking your computer</h2>
-    <p id="doctor-status" class="muted">One moment.</p>
-    <div id="doctor-list"></div>
-  </section>
+  <!-- Tasks: what is happening now. -->
+  <div class="view" data-view="tasks">
 
-  <section id="idle" class="card">
-    <h2 id="idle-title">Put a disc in</h2>
-    <p id="idle-detail" class="muted">ARFABIT is watching the drive and will notice when you do.</p>
-    <div class="button-row">
-      <button id="scan" class="primary" disabled>Read this disc</button>
-      <button id="eject">Eject</button>
-    </div>
-    <p id="eject-detail" class="muted small"></p>
-  </section>
+    <section id="doctor" class="card">
+      <h2 id="doctor-heading">Checking your computer</h2>
+      <p id="doctor-status" class="muted">One moment.</p>
+      <div id="doctor-list"></div>
+    </section>
 
-  <section id="plan" class="card" hidden>
-    <h2 id="plan-title">Found a movie</h2>
-    <p id="plan-summary" class="muted"></p>
-
-    <div id="title-choice" class="title-choice" hidden>
-      <label for="title-name">Is this right?</label>
-      <div class="title-row">
-        <input id="title-name" type="text" autocomplete="off">
-        <input id="title-year" type="text" inputmode="numeric" placeholder="Year" maxlength="4">
-        <button id="title-save">Use this name</button>
-      </div>
-      <div id="title-suggestions" class="suggestions"></div>
-    </div>
-
-    <div id="plan-notice" class="notice" hidden></div>
-
-    <div class="grid">
-      <div>
-        <h3>Picture</h3>
-        <p id="plan-video" class="muted"></p>
-      </div>
-      <div>
-        <h3>Sound</h3>
-        <div id="plan-audio"></div>
-      </div>
-      <div>
-        <h3>Subtitles</h3>
-        <div id="plan-subs"></div>
-      </div>
-    </div>
-
-    <label class="track convert-choice">
-      <input id="plan-convert" type="checkbox" checked>
-      <span>Also make the Apple TV file now</span>
-    </label>
-    <p id="convert-note" class="muted small"></p>
-
-    <p id="plan-estimate" class="estimate"></p>
-
-    <div class="actions">
-      <button id="start" class="primary">Start</button>
-      <span id="plan-blocked" class="muted"></span>
-    </div>
-  </section>
-
-  <section id="queue" class="card" hidden>
-    <div class="log-head">
-      <h2>Queue</h2>
-      <div class="log-controls">
-        <label class="follow" for="queue-filter">Show</label>
-        <select id="queue-filter">
-          <option value="all" selected>Everything</option>
-          <option value="rip">Reading discs</option>
-          <option value="convert">Converting</option>
-          <option value="lab">Test clips</option>
-        </select>
-      </div>
-    </div>
-    <p id="queue-summary" class="muted small"></p>
-    <div id="working-list"></div>
-  </section>
-
-  <section id="done" class="card" hidden>
-    <h2 id="done-title">Ready</h2>
-    <p id="done-detail" class="muted"></p>
-  </section>
-
-  <section id="log-card" class="card" hidden>
-    <div class="log-head">
-      <h2>Logs</h2>
-      <div class="log-controls">
-        <span id="log-scope" class="muted small"></span>
-        <input id="log-filter" type="search" placeholder="Filter" autocomplete="off">
-        <label class="follow"><input id="log-follow" type="checkbox" checked> Follow</label>
-      </div>
-    </div>
-    <div id="log" class="log"></div>
-    <button id="log-jump" class="jump" hidden>Jump to live</button>
-  </section>
-
-  <section class="card">
-    <h2>Your disc drive</h2>
-    <p id="drive-health" class="muted">Checking how ARFABIT is reaching the drive…</p>
-    <div class="button-row">
-      <button id="drive-check">Check the drive</button>
-      <button id="drive-free" hidden>Let go of the disc</button>
-    </div>
-  </section>
-
-  <section class="card">
-    <h2>Transcode</h2>
-    <p class="muted small">Makes a playable file from a master you already have. Pick as many profiles as you want to compare; each one produces its own file.</p>
-
-    <div class="lab-controls">
-      <label>
-        <span>Master</span>
-        <select id="lab-master"></select>
-      </label>
-      <label>
-        <span>Start</span>
-        <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
-      </label>
-      <label>
-        <span>Length</span>
-        <select id="lab-length">
-          <option value="5">5 seconds</option>
-          <option value="10">10 seconds</option>
-          <option value="15">15 seconds</option>
-          <option value="30">30 seconds</option>
-          <option value="60">1 minute</option>
-          <option value="300">5 minutes</option>
-          <option value="600">10 minutes</option>
-          <option value="0" selected>Full</option>
-        </select>
-      </label>
-    </div>
-
-    <h3 id="tracks-heading" hidden>Tracks to keep</h3>
-    <div id="track-list"></div>
-
-    <h3>Profiles</h3>
-    <div id="profile-list"></div>
-
-    <label class="track">
-      <input id="use-custom" type="checkbox">
-      <span>Also try one-off settings, just for this job</span>
-    </label>
-
-    <div id="custom-form" class="profile-form" hidden></div>
-
-    <p id="lab-destination" class="muted small"></p>
-
-    <button id="lab-run" class="primary">Start</button>
-    <p id="lab-status" class="muted small"></p>
-    <div id="lab-results"></div>
-
-    <h3 id="lab-clips-heading" hidden>Clips you have made</h3>
-    <p id="lab-folder" class="muted small"></p>
-    <div id="lab-clips"></div>
-  </section>
-
-  <section class="card">
-    <h2>Profiles</h2>
-    <p class="muted small">Named settings you can pick when transcoding.</p>
-
-    <div id="profile-manager"></div>
-
-    <div class="button-row">
-      <button id="profile-new">Make a profile</button>
-    </div>
-
-    <div id="profile-editor" class="profile-form" hidden></div>
-  </section>
-
-  <section class="card">
-    <h2>Settings</h2>
-
-    <label class="track">
-      <input id="autostart" type="checkbox">
-      <span>Start ARFABIT when this computer starts</span>
-    </label>
-    <p id="autostart-detail" class="muted small"></p>
-
-    <div class="setting">
-      <div>Converting at once</div>
-      <p id="conversions-detail" class="muted small"></p>
-    </div>
-
-    <div class="setting">
-      <div>ARFABIT itself</div>
-      <p id="restart-detail" class="muted small">Restarting clears most small problems. Nothing already saved is touched.</p>
+    <!-- The heading is the drive's own name and never changes, so this box is
+         always recognisably the same drive. What it is doing goes underneath. -->
+    <section id="drive" class="card">
+      <h2 id="drive-name">Disc drive</h2>
+      <p id="drive-status" class="muted">ARFABIT is watching the drive and will notice when you put a disc in.</p>
       <div class="button-row">
-        <button id="restart">Restart ARFABIT</button>
-        <button id="quit">Stop ARFABIT</button>
+        <button id="scan" class="primary" disabled>Plan</button>
+        <button id="eject">Eject</button>
+        <button id="drive-check">Check connection</button>
+        <button id="drive-free" hidden>Temp owner</button>
       </div>
-    </div>
+      <p id="eject-detail" class="muted small"></p>
+      <div id="drive-health" class="muted small"></div>
+    </section>
 
-    <div class="setting">
-      <div>Film list</div>
-      <p id="index-detail" class="muted small">Used to confirm a movie's name and find its year.</p>
-      <button id="index-build">Download the film list</button>
-    </div>
-  </section>
+    <section id="plan" class="card" hidden>
+      <h2 id="plan-title">Found a movie</h2>
+      <p id="plan-summary" class="muted"></p>
 
-  <section class="card">
-    <h2>Recent discs</h2>
-    <div id="recent"></div>
-    <p class="muted small">Movies go in {{.Library}}</p>
-  </section>
+      <div id="title-choice" class="title-choice" hidden>
+        <label for="title-name">Is this right?</label>
+        <div class="title-row">
+          <input id="title-name" type="text" autocomplete="off">
+          <input id="title-year" type="text" inputmode="numeric" placeholder="Year" maxlength="4">
+          <button id="title-save">Use this name</button>
+        </div>
+        <div id="title-suggestions" class="suggestions"></div>
+      </div>
+
+      <div id="plan-notice" class="notice" hidden></div>
+
+      <!-- The rip: what goes into the master. Nothing here is converted, so
+           nothing here talks about converting. -->
+      <div class="plan-part">
+        <h3>The master</h3>
+        <p class="muted small">Copied from the disc exactly as it is.</p>
+        <div class="grid">
+          <div>
+            <h4>Picture</h4>
+            <p id="master-video" class="muted"></p>
+          </div>
+          <div>
+            <h4>Sound</h4>
+            <div id="master-audio"></div>
+          </div>
+          <div>
+            <h4>Subtitles</h4>
+            <div id="master-subs"></div>
+          </div>
+        </div>
+      </div>
+
+      <label class="track convert-choice">
+        <input id="plan-convert" type="checkbox" checked>
+        <span>Plan a package</span>
+      </label>
+      <p id="convert-note" class="muted small"></p>
+
+      <!-- The package: a file made from the master afterwards, as a job of
+           its own. The same editor as on the Packages page. -->
+      <div id="plan-transcode" class="plan-part">
+        <h3>The package</h3>
+        <p id="transcode-target" class="muted small"></p>
+
+        <div class="title-choice">
+          <label for="plan-edition">Edition</label>
+          <div class="title-row">
+            <input id="plan-edition" type="text" autocomplete="off" placeholder="None">
+          </div>
+          <p id="edition-note" class="muted small"></p>
+        </div>
+
+        <div id="plan-package"></div>
+      </div>
+
+      <p id="plan-estimate" class="estimate"></p>
+
+      <div class="actions">
+        <button id="start" class="primary">Start</button>
+        <span id="plan-blocked" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="queue" class="card" hidden>
+      <h2>Queue</h2>
+      <p id="queue-summary" class="queue-summary muted small"></p>
+      <div id="working-list"></div>
+    </section>
+
+    <section id="done" class="card" hidden>
+      <h2 id="done-title">Ready</h2>
+      <p id="done-detail" class="muted"></p>
+    </section>
+
+    <section id="log-card" class="card" hidden>
+      <div class="log-head">
+        <h2>Logs</h2>
+        <div class="log-controls">
+          <span id="log-scope" class="muted small"></span>
+          <input id="log-filter" type="search" placeholder="Filter" autocomplete="off">
+          <label class="follow"><input id="log-follow" type="checkbox" checked> Follow</label>
+        </div>
+      </div>
+      <div id="log" class="log"></div>
+      <button id="log-jump" class="jump" hidden>Jump to live</button>
+    </section>
+
+    <section class="card">
+      <h2>Recent tasks</h2>
+      <p class="muted small">Packages go in {{.Library}}, clips in {{.Clips}}.</p>
+      <div id="recent"></div>
+    </section>
+
+  </div>
+
+  <!-- Packages: making a file from a master, track by track. -->
+  <div class="view" data-view="packages" hidden>
+
+    <section class="card">
+      <h2>Package</h2>
+      <p class="muted small">Make a file from a master you already have. Everything in the master is listed; choose what to keep as it is, and what to change.</p>
+
+      <div class="lab-controls">
+        <label>
+          <span>Master</span>
+          <select id="lab-master"></select>
+        </label>
+        <label>
+          <span>From</span>
+          <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
+        </label>
+        <label>
+          <span>Length</span>
+          <select id="lab-length">
+            <option value="5">5 seconds</option>
+            <option value="10">10 seconds</option>
+            <option value="15">15 seconds</option>
+            <option value="30">30 seconds</option>
+            <option value="60">1 minute</option>
+            <option value="300">5 minutes</option>
+            <option value="600">10 minutes</option>
+            <option value="0" selected>All of it</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="package-start">
+        <label for="package-blueprint" class="muted small">Start from</label>
+        <select id="package-blueprint"></select>
+        <button id="package-fill" type="button">Use</button>
+      </div>
+
+      <div id="package-editor"></div>
+
+      <div class="title-choice">
+        <label for="package-edition">Edition</label>
+        <div class="title-row">
+          <input id="package-edition" type="text" autocomplete="off" placeholder="None">
+        </div>
+      </div>
+
+      <div class="package-containers">
+        <span class="muted small">Make</span>
+        <label class="chip"><input type="checkbox" checked disabled> MKV</label>
+        <label class="chip muted" title="Not yet"><input type="checkbox" disabled> MP4, not yet</label>
+      </div>
+
+      <p id="package-destination" class="muted small"></p>
+      <button id="package-run" class="primary">Start</button>
+      <p id="package-status" class="muted small"></p>
+      <div id="lab-results"></div>
+    </section>
+
+  </div>
+
+  <div class="view" data-view="blueprints" hidden>
+
+    <section class="card">
+      <h2>Blueprints</h2>
+      <p class="muted small">Starter templates for planning a job to rip or transcode.</p>
+
+      <div id="blueprint-manager"></div>
+
+      <div class="button-row">
+        <button id="blueprint-new">Make a blueprint</button>
+      </div>
+
+      <div id="blueprint-editor" class="blueprint-form" hidden></div>
+    </section>
+
+  </div>
+
+  <div class="view" data-view="settings" hidden>
+
+    <section class="card">
+      <h2>Settings</h2>
+
+      <label class="track">
+        <input id="autostart" type="checkbox">
+        <span>Start ARFABIT when this computer starts</span>
+      </label>
+      <p id="autostart-detail" class="muted small"></p>
+
+      <div class="setting">
+        <div>Converting at once</div>
+        <p id="conversions-detail" class="muted small"></p>
+      </div>
+
+      <div class="setting">
+        <div>ARFABIT itself</div>
+        <p id="restart-detail" class="muted small">Restarting clears most small problems. Nothing already saved is touched.</p>
+        <div class="button-row">
+          <button id="restart">Restart ARFABIT</button>
+          <button id="quit">Stop ARFABIT</button>
+        </div>
+      </div>
+
+      <div class="setting">
+        <div>Film list</div>
+        <p id="index-detail" class="muted small">Used to confirm a movie's name and find its year.</p>
+        <button id="index-build">Download the film list</button>
+      </div>
+    </section>
+
+  </div>
 
 </main>
+
+<nav class="tabbar" aria-label="Sections">
+  <a href="#tasks" data-tab="tasks">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>
+    <span>Tasks</span>
+  </a>
+  <a href="#packages" data-tab="packages">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/></svg>
+    <span>Packages</span>
+  </a>
+  <a href="#blueprints" data-tab="blueprints">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+    <span>Blueprints</span>
+  </a>
+  <a href="#settings" data-tab="settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+    <span>Settings</span>
+  </a>
+</nav>
+
+<dialog id="confirm-dialog" class="dialog">
+  <h2 id="confirm-title"></h2>
+  <p id="confirm-detail" class="muted"></p>
+  <div class="actions">
+    <button id="confirm-yes" class="primary"></button>
+    <button id="confirm-no"></button>
+  </div>
+</dialog>
 
 <script src="/static/app.js"></script>
 </body>

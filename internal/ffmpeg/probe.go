@@ -21,6 +21,7 @@ type Stream struct {
 	Index     int
 	Kind      string // "video", "audio", "subtitle"
 	Codec     string // "hevc", "ac3", "hdmv_pgs_subtitle"
+	Profile   string // "DTS-HD MA" for lossless DTS, which shares its codec name with ordinary DTS
 	Lang      string
 	Title     string
 	Width     int
@@ -54,6 +55,7 @@ type probeOutput struct {
 	Streams []struct {
 		Index          int    `json:"index"`
 		CodecName      string `json:"codec_name"`
+		Profile        string `json:"profile"`
 		CodecType      string `json:"codec_type"`
 		Width          int    `json:"width"`
 		Height         int    `json:"height"`
@@ -70,6 +72,11 @@ type probeOutput struct {
 		Tags struct {
 			Language string `json:"language"`
 			Title    string `json:"title"`
+
+			// MakeMKV records each track's bitrate as a tag, which is
+			// often all there is: Matroska keeps none of its own.
+			BPS    string `json:"BPS"`
+			BPSEng string `json:"BPS-eng"`
 		} `json:"tags"`
 		SideDataList []json.RawMessage `json:"side_data_list"`
 	} `json:"streams"`
@@ -105,10 +112,16 @@ func Probe(ctx context.Context, path string) (*MediaInfo, error) {
 
 	for _, s := range raw.Streams {
 		bitrate, _ := strconv.Atoi(s.BitRate)
+		for _, tag := range []string{s.Tags.BPS, s.Tags.BPSEng} {
+			if bitrate == 0 {
+				bitrate, _ = strconv.Atoi(tag)
+			}
+		}
 		stream := Stream{
 			Index:    s.Index,
 			Kind:     s.CodecType,
 			Codec:    s.CodecName,
+			Profile:  s.Profile,
 			Lang:     s.Tags.Language,
 			Title:    s.Tags.Title,
 			Width:    s.Width,

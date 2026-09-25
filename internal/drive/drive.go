@@ -48,8 +48,8 @@ func (s State) Describe() string {
 	if !s.Mounted {
 		return "The disc is free for ARFABIT to read directly."
 	}
-	return "Your computer has this disc open, which stops ARFABIT reading it at full speed. " +
-		"Letting go of it makes a film take tens of minutes rather than hours. The disc stays in the drive."
+	return "The OS owns this drive, which stops ARFABIT from reading at full speed. " +
+		"Taking temporary ownership can improve speeds by 10-20%. The disc is not ejected."
 }
 
 // blockDevice turns a raw device path into the block one the system tools use.

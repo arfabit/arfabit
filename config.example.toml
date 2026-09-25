@@ -34,15 +34,40 @@ library = "~/Downloads/arfabit/library"
 
 # Test clips from the quality lab. They are named so a folder listing reads
 # plainly, and they are meant to be copied to a television and watched.
-lab = "~/Downloads/arfabit/lab"
+clips = "~/Downloads/arfabit/clips"
 
 [server]
 # Where the web page is served. The default listens on every network, so you
 # can open it from any device in the house.
 addr = ":7847"
 
-[profile]
-name = "Archive"
+[machine]
+# How many films may be converted at once, counting test clips from the lab.
+#
+# One is usually fastest. Converting already uses every core your computer has,
+# so a second one at the same time does not finish sooner — it makes both
+# later, and makes both estimates wrong. Reading discs is not affected: the
+# next disc goes in as soon as the last one comes out, whatever is converting.
+max_conversions = 1
+
+[drive]
+# How much ARFABIT buffers while reading a disc, in megabytes.
+#
+# Leave this out and MakeMKV chooses, which is almost always right. It is here
+# only because a wrong value has an enormous effect: reading a disc through a
+# very small buffer can hold a fast drive to walking pace.
+# read_cache_mb = 0
+
+[makemkv]
+# Ignore anything shorter than this when looking for the movie. Two minutes
+# hides menus and studio logos. Set it lower only if a disc seems to be hiding
+# something.
+min_title_seconds = 120
+
+# What every plan starts from, for ripping and transcoding alike. When a disc
+# is read these are copied into its plan, and you can change them there for
+# that disc alone.
+[defaults]
 
 # Picture quality, per kind of disc. Lower numbers mean better quality and
 # bigger files. 20 is close to indistinguishable from the disc; below about 16
@@ -60,8 +85,10 @@ preset = "slow"
 # lost, but the file stays as large as the disc.
 allow_uhd_copy = true
 
-# Sound that an Apple TV already understands is copied across untouched, which
-# is instant and loses nothing. Everything else is converted.
+# Sound that plays directly (docs/ARCHITECTURE.md §4) is copied across
+# untouched, which is instant and loses nothing. Dolby TrueHD, which does not,
+# is made into FLAC, which is still lossless. Turning this off converts lossy
+# sound too.
 copy_native_audio = true
 audio_bitrate = "256k"
 
@@ -71,36 +98,28 @@ include_forced_subs = true
 include_full_subs = true
 sub_languages = ["eng"]
 
-# How many films may be converted at once, counting test clips from the lab.
-#
-# One is usually fastest. Converting already uses every core your computer has,
-# so a second one at the same time does not finish sooner — it makes both
-# later, and makes both estimates wrong. Reading discs is not affected: the
-# next disc goes in as soon as the last one comes out, whatever is converting.
-max_conversions = 1
+# Converting after the copy is made. Turn this off to stop at the copy, which
+# is the fast way through a stack of discs; convert later from the copy.
+convert_after_rip = true
 
-# Other profiles you can choose between.
+# Blueprints: starter templates for planning a job to rip or transcode.
 #
-# Each one starts from the settings above and changes only what it names, so a
-# profile that differs in quality alone says only that. They appear in the
-# Transcode section, where you can tick several and compare the results.
+# Each one starts from the defaults above and changes only what it names, so a
+# blueprint that differs in quality alone says only that. You need none at all.
+# They can also be made on the web page, where one can be chosen to be used by
+# default, and several can be ticked in the Transcode section to compare.
 #
-# [profile.Small]
+# A blueprint's edition is what Plex shows as the name of that version, and
+# goes in the filename as {edition-...}. It is the blueprint's name unless you
+# give one; edition = "" means none. It can still be changed on each plan.
+#
+# [blueprint.Small]
 # crf_bluray = 24
 # preset = "medium"
 #
-# [profile.Exact]
+# [blueprint.Cut]
+# edition = "Director's Cut"
+#
+# [blueprint.Exact]
 # allow_uhd_copy = true
 # copy_native_audio = true
-
-# How much ARFABIT buffers while reading a disc, in megabytes.
-#
-# Leave this out and MakeMKV chooses, which is almost always right. It is here
-# only because a wrong value has an enormous effect: reading a disc through a
-# very small buffer can hold a fast drive to walking pace.
-# read_cache_mb = 0
-
-# Ignore anything shorter than this when looking for the movie. Two minutes
-# hides menus and studio logos. Set it lower only if a disc seems to be hiding
-# something.
-min_title_seconds = 120

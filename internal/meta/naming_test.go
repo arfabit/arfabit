@@ -11,12 +11,19 @@ func TestTitleString(t *testing.T) {
 	}
 }
 
-// The edition tag is always present, so a re-encode coexists in Plex rather
-// than replacing what is there.
+// An edition is written as a tag, so versions coexist in Plex. None means
+// no tag, and anything typed that would break the tag is left out.
 func TestVideoNameCarriesEdition(t *testing.T) {
 	title := Title{Name: "Blade Runner", Year: 1982}
-	if got, want := title.VideoName("Archive"), "Blade Runner (1982) {edition-Archive}.mp4"; got != want {
-		t.Errorf("VideoName = %q, want %q", got, want)
+	for edition, want := range map[string]string{
+		"Archive":            "Blade Runner (1982) {edition-Archive}.mkv",
+		"":                   "Blade Runner (1982).mkv",
+		"   ":                "Blade Runner (1982).mkv",
+		" Director's {Cut} ": "Blade Runner (1982) {edition-Director's Cut}.mkv",
+	} {
+		if got := title.VideoName(edition); got != want {
+			t.Errorf("VideoName(%q) = %q, want %q", edition, got, want)
+		}
 	}
 }
 
@@ -46,7 +53,7 @@ func TestSidecarStemMatchesVideo(t *testing.T) {
 	video := title.VideoName("Archive")
 	sub := title.SubtitleName("Archive", "eng", false, false)
 
-	stem := video[:len(video)-len(".mp4")]
+	stem := video[:len(video)-len(VideoExt)]
 	if len(sub) <= len(stem) || sub[:len(stem)] != stem {
 		t.Errorf("sidecar %q does not share the video's stem %q", sub, stem)
 	}

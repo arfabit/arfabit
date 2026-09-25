@@ -43,7 +43,7 @@ func TestClipArgsVideoSettings(t *testing.T) {
 	args := strings.Join(clipArgs(Request{Master: "m.mkv", Length: time.Minute},
 		Clip{Name: "crf18", Video: VideoSetting{CRF: 18, Preset: "medium"}}, testVideo()), " ")
 
-	for _, want := range []string{"-c:v libx265", "-crf 18", "-preset medium", "-profile:v main10", "-tag:v hvc1"} {
+	for _, want := range []string{"-c:v libx265", "-crf 18", "-preset medium", "-profile:v main10"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("missing %q in %s", want, args)
 		}
@@ -183,7 +183,7 @@ func TestClipNameIsAnEditionOfTheFilm(t *testing.T) {
 	if !strings.HasPrefix(got, "Crime 101 (2025) {edition-") {
 		t.Errorf("the clip is not named as an edition of the film: %q", got)
 	}
-	for _, want := range []string{"Lab 001", "crf20-medium", "1h15m20s", ".mp4"} {
+	for _, want := range []string{"Lab 001", "crf20-medium", "1h15m20s", ".mkv"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("name %q is missing %q", got, want)
 		}

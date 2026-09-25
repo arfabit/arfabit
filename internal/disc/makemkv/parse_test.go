@@ -457,3 +457,13 @@ func TestBackendCallbackSurvivesScans(t *testing.T) {
 		t.Error("the Backend's callback was replaced")
 	}
 }
+
+func TestParseBitrate(t *testing.T) {
+	for in, want := range map[string]int{
+		"640 Kb/s": 640000, "24.5 Mb/s": 24500000, "": 0, "fast": 0, "12 Gb/s": 0,
+	} {
+		if got := parseBitrate(in); got != want {
+			t.Errorf("parseBitrate(%q) = %d, want %d", in, got, want)
+		}
+	}
+}

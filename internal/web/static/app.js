@@ -19,11 +19,22 @@ let events = null;
 let drives = [];
 let driveBusy = "";
 let activeJobs = [];
+let lastActive = []; // every active job, whatever the queue is showing
 let queueFilter = "all";
 let focusedJob = "";
 let masterTracks = [];
 let resumable = {};
+let line = [];
 let clockTimer = null;
+
+// How far this browser's clock is ahead of ARFABIT's, which may be running on
+// another computer. Clocks are started from ARFABIT's times, so without this
+// every one of them would be out by the difference.
+let clockOffset = 0;
+
+// When each clock on the page started, by browser time. Fixed the first time
+// a stage is seen, so later updates never nudge a clock that is running.
+const clockStarts = new Map();
 
 // --- problems the page cannot hide --------------------------------------
 
@@ -72,6 +83,13 @@ const LANGUAGES = {
 
 function languageName(code) {
   return LANGUAGES[(code || "").toLowerCase()] || (code ? code.toUpperCase() : "Unknown");
+}
+
+// filmName is what to call a job on the page: its title and, once known, its
+// year, which is what tells two films of the same name apart.
+function filmName(job, fallback = "A disc") {
+  const name = job.title || job.disc_name || job.disc_label || fallback;
+  return job.year ? `${name} (${job.year})` : name;
 }
 
 function stageWords(stage) {
@@ -268,109 +286,57 @@ function note(text) {
 // --- the drive ------------------------------------------------------------
 
 // renderDrives says what is in the drive, so nobody has to ask.
+//
+// The heading is always the drive's own name. Somebody with two drives needs
+// to know which box is which, and a heading that changed with every disc would
+// make them read it again each time to find out.
 function renderDrives(list) {
   drives = list || [];
 
   const scan = $("scan");
+  const drive = drives[0];
   const loaded = drives.find((d) => d.Loaded);
+
+  $("drive-name").textContent = (drive && drive.Name) || "Disc drive";
+  scan.textContent = "Plan";
+
+  const status = (text, canRead, canEject) => {
+    $("drive-status").textContent = text;
+    scan.disabled = !canRead;
+    $("eject").disabled = !canEject;
+    $("drive-check").disabled = !drive || !!driveBusy;
+  };
 
   // The drive may be busy with a disc even while other films convert.
   if (driveBusy) {
-    $("idle-title").textContent = `The drive is busy with ${driveBusy}`;
-    $("idle-detail").textContent = "It will be free once that disc comes out.";
-    scan.disabled = true;
-    $("eject").disabled = true;
+    status(`Busy with ${driveBusy}. It will be free once that disc comes out.`, false, false);
     return;
   }
 
-  if (drives.length === 0) {
-    $("idle-title").textContent = "No disc drive found";
-    $("idle-detail").textContent =
-      "Plug one in and ARFABIT will notice. Some drives need their own power supply.";
-    scan.disabled = true;
-    $("eject").disabled = true;
+  if (!drive) {
+    status("No disc drive found. Plug one in and ARFABIT will notice. Some drives need their own power supply.", false, false);
     return;
   }
-
-  $("eject").disabled = false;
 
   if (loaded) {
-    $("idle-title").textContent = `${loaded.Label || "A disc"} is in the drive`;
-    $("idle-detail").textContent = loaded.Name || "";
-    scan.disabled = false;
-    scan.textContent = "Read this disc";
+    status(`${loaded.Label || "A disc"} is in the drive.`, true, true);
     return;
   }
 
   // The drive is there, just not holding anything readable. Saying which is
-  // the difference between "put a disc in" and "wait a moment".
-  const drive = drives[0];
-  scan.disabled = true;
-  scan.textContent = "Read this disc";
-
-  // An open tray and a closed empty one are the same thing to the person
-  // standing there: nothing to watch. Slot-loading drives have no tray to
-  // close, so the wording never mentions one.
-  const states = {
-    loading: ["Reading the disc", "The drive is spinning up. This takes a few seconds."],
-    empty: ["The drive is empty", "Insert a disc."],
-  };
-  const [title, detail] = states[drive.State] || states.empty;
-
-  $("idle-title").textContent = title;
-  $("idle-detail").textContent = `${detail}\n${drive.Name || ""}`;
+  // the difference between "put a disc in" and "wait a moment". An open tray
+  // and a closed empty one are the same thing to the person standing there,
+  // and slot-loading drives have no tray, so the wording never mentions one.
+  if (drive.State === "loading") {
+    status("Reading the disc. The drive is spinning up, which takes a few seconds.", false, true);
+    return;
+  }
+  status("Empty. Insert a disc and ARFABIT will notice.", false, true);
 }
 
 // --- the plan -------------------------------------------------------------
 
-function trackRow(id, sourceIndex, selected, label, note) {
-  const wrap = document.createElement("label");
-  wrap.className = "track";
 
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.checked = !!selected;
-  box.dataset.source = sourceIndex;
-  box.dataset.kind = id.startsWith("audio") ? "audio" : "subtitles";
-  box.addEventListener("change", sendPlanChange);
-
-  const text = document.createElement("span");
-  text.textContent = note ? `${label} — ${note}` : label;
-
-  wrap.append(box, text);
-  return wrap;
-}
-
-// groupByLanguage lays the tracks out the way a disc's own menu reads.
-function groupByLanguage(tracks, kind) {
-  const groups = [];
-  const byLang = new Map();
-
-  tracks.forEach((track, i) => {
-    const lang = languageName(track.lang);
-    if (!byLang.has(lang)) {
-      const group = { lang, rows: [] };
-      byLang.set(lang, group);
-      groups.push(group);
-    }
-    byLang.get(lang).rows.push({ track, i });
-  });
-
-  return groups.map((group) => {
-    const box = document.createElement("div");
-    box.className = "lang-group";
-
-    const heading = document.createElement("h4");
-    heading.textContent = group.lang;
-    box.append(heading);
-
-    for (const { track, i } of group.rows) {
-      box.append(trackRow(`${kind}-${i}`, track.source_index, track.selected,
-        track.label || track.codec, ""));
-    }
-    return box;
-  });
-}
 
 function spaceMessage(space) {
   if (space.Unknown) {
@@ -385,15 +351,35 @@ function spaceMessage(space) {
     `Your library folder holds ${bytes(space.Library)}.`;
 }
 
+// sendPlanChange sends what can be changed on the Plan outside its package.
 function sendPlanChange() {
-  const change = { audio: {}, subtitles: {}, convert: $("plan-convert").checked };
+  post("/api/plan", {
+    convert: $("plan-convert").checked,
+    edition: $("plan-edition").value,
+  }).then(() => refresh());
+}
 
-  for (const box of document.querySelectorAll("#plan input[type=checkbox]")) {
-    if (!box.dataset.kind) continue;
-    change[box.dataset.kind][Number(box.dataset.source)] = box.checked;
-  }
+// The package on the Plan, as last drawn and as being edited. It is drawn
+// again only when it really changes, so an update arriving from elsewhere does
+// not pull a list out from under somebody changing it.
+let planPackage = null;
+let planPackageDrawn = "";
 
-  post("/api/plan", change).then(() => refresh());
+function renderPlanPackage(plan) {
+  const incoming = JSON.stringify(plan.package || null);
+  if (incoming === planPackageDrawn && planPackage) return;
+  planPackageDrawn = incoming;
+  planPackage = plan.package ? JSON.parse(incoming) : { containers: ["mkv"], items: [] };
+  planPackage.items = planPackage.items || [];
+  drawPlanPackage(plan);
+}
+
+function drawPlanPackage(plan) {
+  renderPackageEditor($("plan-package"), plan.tracks || [], planPackage, () => {
+    drawPlanPackage(plan);
+    planPackageDrawn = JSON.stringify(planPackage);
+    post("/api/plan", { package: planPackage }).then(() => refresh());
+  });
 }
 
 async function saveTitle() {
@@ -407,8 +393,14 @@ async function saveTitle() {
 
 function renderTitleChoice(job) {
   $("title-choice").hidden = false;
-  $("title-name").value = job.title || job.disc_name || "";
-  $("title-year").value = job.year ? String(job.year) : "";
+
+  // Left alone while somebody is typing in them, or the next update would
+  // snatch the text out from under them.
+  const typing = [$("title-name"), $("title-year")].includes(document.activeElement);
+  if (!typing) {
+    $("title-name").value = job.title || job.disc_name || "";
+    $("title-year").value = job.year ? String(job.year) : "";
+  }
 
   const matches = job.matches || [];
   $("title-suggestions").replaceChildren(...matches.map((match) => {
@@ -424,11 +416,71 @@ function renderTitleChoice(job) {
   }));
 }
 
-function renderPlan(job) {
+// existingMessage says which files are already there. ARFABIT does not replace
+// files, so the Plan cannot start until they are moved or renamed.
+function existingMessage(paths) {
+  return paths.map((path) => {
+    const name = path.split(/[\\/]/).pop();
+    const folder = path.slice(0, path.length - name.length - 1);
+    return name.endsWith(".mkv")
+      ? `You already have a master of this disc: ${name}, in ${folder}. ARFABIT does not replace files, so move that one somewhere else to read this disc again.`
+      : `${name} is already in ${folder}. ARFABIT does not replace files, so give this one a different edition, or move that file somewhere else.`;
+  }).join("\n\n");
+}
+
+// renderMaster says what goes into the master: everything on the disc, as it
+// is. Nothing is chosen here and nothing is converted, so there is nothing to
+// tick and no talk of converting.
+function renderMaster(plan) {
+  const tracks = plan.tracks || [];
+  const video = tracks.find((t) => t.kind === "video");
+  $("master-video").textContent = video
+    ? video.label
+    : `${plan.source_codec} · ${plan.resolution}${plan.hdr ? " · HDR" : ""}`;
+
+  const byLanguage = (list, describe) => {
+    const groups = new Map();
+    for (const track of list) {
+      const lang = languageName(track.lang);
+      if (!groups.has(lang)) groups.set(lang, []);
+      groups.get(lang).push(track);
+    }
+    return [...groups].map(([lang, items]) => {
+      const box = document.createElement("div");
+      box.className = "lang-group";
+      const heading = document.createElement("h4");
+      heading.textContent = lang;
+      box.append(heading, ...items.map((t) => {
+        const line = document.createElement("div");
+        line.className = "small";
+        line.append(...titleOf(describe(t), t));
+        return line;
+      }));
+      return box;
+    });
+  };
+
+  // The language is the heading, so each line says the rest.
+  const rest = (t) => t.label.split(" · ").slice(1).join(" · ");
+  const sound = tracks.filter((t) => t.kind === "audio");
+  const subs = tracks.filter((t) => t.kind === "subtitle");
+
+  if (sound.length) $("master-audio").replaceChildren(...byLanguage(sound, rest));
+  else $("master-audio").textContent = "None on this disc.";
+  if (subs.length) $("master-subs").replaceChildren(...byLanguage(subs, rest));
+  else $("master-subs").textContent = "None on this disc.";
+}
+
+function renderPlan(job, existing = []) {
   const plan = job.plan;
   if (!plan) return;
 
-  $("plan-title").textContent = job.title || job.disc_name || "Found a movie";
+  // The edition names the transcode, so it is only part of the name when
+  // there is going to be one.
+  const transcoding = plan.convert !== false;
+  $("plan-title").textContent = plan.edition && transcoding
+    ? `${filmName(job, "Found a movie")} {edition-${plan.edition}}`
+    : filmName(job, "Found a movie");
   $("plan-summary").textContent = `${plan.duration} · ${bytes(plan.source_size)} on the disc`;
 
   const notices = [];
@@ -436,34 +488,43 @@ function renderPlan(job) {
   if (job.space && (!job.space.Fits || job.space.Tight || job.space.Unknown)) {
     notices.push(spaceMessage(job.space));
   }
+  if (existing.length) notices.push(existingMessage(existing));
+
+  // Nothing the blueprint asks for is on this disc. Rather than guess, the
+  // choice is handed over.
+  const items = (plan.package && plan.package.items) || [];
+  const soundChosen = items.some((it) => it.kind === "audio");
+  if (transcoding && plan.sound_not_found && !soundChosen) {
+    notices.push("None of the sound this blueprint asks for is on this disc. Add the sound you want to the package below, or turn off Plan a package to copy the disc and decide later.");
+  }
 
   $("plan-notice").hidden = notices.length === 0;
   $("plan-notice").textContent = notices.join("\n\n");
 
-  $("plan-video").textContent = plan.video_copy
-    ? `Kept exactly as it is on the disc — ${plan.resolution}.`
-    : `${plan.source_codec} · ${plan.resolution} · converted to HEVC, quality ${plan.crf}, ${plan.preset}.`;
+  renderMaster(plan);
 
-  $("plan-audio").replaceChildren(...groupByLanguage(plan.audio || [], "audio"));
-
-  const subs = plan.subtitles || [];
-  if (subs.length === 0) {
-    $("plan-subs").textContent = "This disc has no subtitles.";
-  } else {
-    $("plan-subs").replaceChildren(...groupByLanguage(subs.map((t) => ({
-      ...t,
-      label: `${t.forced ? "Only for foreign speech" : "Full subtitles"}${t.label ? ` · ${t.label}` : ""}`,
-    })), "sub"));
-  }
+  renderPlanPackage(plan);
 
   renderTitleChoice(job);
 
+  // Left alone while somebody is typing in it, or the next update would
+  // snatch the text out from under them.
+  if (document.activeElement !== $("plan-edition")) {
+    $("plan-edition").value = plan.edition || "";
+  }
+  $("edition-note").textContent = plan.edition
+    ? `The file will be called ${job.title || "the movie"}${job.year ? ` (${job.year})` : ""} {edition-${plan.edition}}. Plex shows the edition as the name of this version.`
+    : "No edition. Give one to keep this version apart from others of the same movie, such as \"Director's Cut\".";
+
   // Stopping at the copy is often the right choice: the copy is the only part
-  // that needs the disc, and converting can be done any time afterwards.
-  $("plan-convert").checked = plan.convert !== false;
-  $("convert-note").textContent = plan.convert !== false
-    ? "Turn this off to stop after copying the disc. The copy is the slow part that needs the drive; you can make the Apple TV file later from Your copies."
-    : "ARFABIT will copy the disc and stop. Make the Apple TV file whenever you like, from Your copies below.";
+  // that needs the disc, and a transcode can be made any time afterwards.
+  $("plan-convert").checked = transcoding;
+  $("plan-transcode").hidden = !transcoding;
+  $("convert-note").textContent = transcoding
+    ? "The package joins the queue as a job of its own, and starts once the master is copied."
+    : "ARFABIT will copy the disc and stop. You can make a package from the master any time, from Packages.";
+  $("transcode-target").textContent =
+    `Started from ${plan.blueprint ? `the ${plan.blueprint} blueprint` : "the defaults"}. Everything the master will hold is listed; change anything.`;
 
   const est = plan.estimated_time ? Math.round(plan.estimated_time / 60000000000) : 0;
   $("plan-estimate").textContent = est
@@ -471,19 +532,31 @@ function renderPlan(job) {
     : "";
 
   const fits = !job.space || job.space.Fits;
-  $("start").disabled = !fits;
-  $("plan-blocked").textContent = fits ? "" : "Free up some room and look for the disc again.";
+  const pictures = items.filter((it) => it.kind === "video").length;
+  const noPicture = transcoding && pictures !== 1;
+  $("start").disabled = !fits || existing.length > 0 || noPicture;
+  $("plan-blocked").textContent = !fits
+    ? "Free up some room and look for the disc again."
+    : existing.length ? "A file with this name is already there."
+      : noPicture ? "The package needs a picture." : "";
 }
 
-// The clock ticks once a second whether or not anything else changes.
+// --- the queue ------------------------------------------------------------
+
+// The clocks belong to the page.
 //
 // Copying a disc reports its first percentage a couple of minutes in, and the
 // log goes quiet while it works. A number that moves is the only thing that
 // distinguishes working from hung, so the page keeps its own time rather than
 // waiting to be told.
+//
+// Each clock starts from when ARFABIT says its stage began, fixed once, and
+// is redrawn only when the second it shows changes. Redrawing it whenever an
+// update happened to arrive made it step unevenly, sometimes twice in quick
+// succession and sometimes not for two seconds.
 function startClock() {
   if (clockTimer) return;
-  clockTimer = setInterval(tickClock, 1000);
+  clockTimer = setInterval(tickClock, 200);
 }
 
 function stopClock() {
@@ -497,20 +570,33 @@ function tickClock() {
     stopClock();
     return;
   }
-  for (const job of activeJobs) {
-    updateJobCard(job);
+  for (const card of $("working-list").children) {
+    const cell = card.querySelector(".t-elapsed");
+    const text = elapsedText(card.dataset.clock);
+    if (cell.textContent !== text) cell.textContent = text;
   }
 }
 
-// elapsedSince renders how long ago something started, counting in seconds
-// early on so the number visibly moves.
-function elapsedSince(when) {
-  if (!when) return "";
+// clockStart is when a job's current stage began, in this browser's time.
+function clockStart(job) {
+  const since = job.progress && job.progress.since;
+  if (!since) return 0;
 
-  const started = new Date(when);
-  if (Number.isNaN(started.getTime()) || started.getTime() === 0) return "";
+  const began = new Date(since).getTime();
+  if (Number.isNaN(began) || began <= 0) return 0;
 
-  const seconds = Math.max(0, Math.floor((Date.now() - started.getTime()) / 1000));
+  const key = `${job.id} ${job.stage} ${since}`;
+  if (!clockStarts.has(key)) clockStarts.set(key, began + clockOffset);
+  return clockStarts.get(key);
+}
+
+// elapsedText renders how long a clock has run: seconds while it is new, so
+// the number visibly moves, and hours and minutes once seconds stop mattering.
+function elapsedText(start) {
+  start = Number(start);
+  if (!start) return "";
+
+  const seconds = Math.max(0, Math.floor((Date.now() - start) / 1000));
   if (seconds < 60) return `${seconds}s`;
 
   const minutes = Math.floor(seconds / 60);
@@ -519,17 +605,13 @@ function elapsedSince(when) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-// renderActive draws one card per disc being worked on.
+// kindOf groups a job for the queue summary.
 //
-// More than one is ordinary: a film being converted has finished with the
-// drive, so the next disc can be going in while it runs.
-// kindOf groups a job for the queue filter.
-//
-// Test clips are their own kind. A disc is reading while it needs the drive
-// and converting once it does not, which is the distinction somebody filtering
-// the queue actually cares about.
+// A disc is being read while it needs the drive and converting once it does
+// not. Anything waiting for the processor is waiting, whatever it is.
 function kindOf(job) {
-  if (job.kind === "lab") return "lab";
+  if (job.stage === "QUEUED") return "waiting";
+  if (job.stage === "LAB") return "lab";
 
   switch (job.stage) {
     case "SCAN":
@@ -542,13 +624,38 @@ function kindOf(job) {
   }
 }
 
-function renderActive(jobs) {
-  activeJobs = (jobs || []).filter((job) =>
-    queueFilter === "all" || kindOf(job) === queueFilter);
+const KINDS = [
+  ["rip", (n) => `${n} disc${n === 1 ? "" : "s"} being read`],
+  ["convert", (n) => `${n} converting`],
+  ["lab", (n) => `${n} making test clips`],
+  ["waiting", (n) => `${n} waiting their turn`],
+];
 
+// inLineOrder puts whatever is working first, then whatever is waiting in the
+// order it will start, which is the order the line can be rearranged in.
+function inLineOrder(jobs) {
+  const place = (job) => {
+    const at = line.indexOf(job.id);
+    return at < 0 ? -1 : at;
+  };
+  return [...jobs].sort((a, b) => place(a) - place(b));
+}
+
+function renderActive(jobs) {
   const all = jobs || [];
+
+  lastActive = all;
+  const counts = new Map();
+  for (const job of all) counts.set(kindOf(job), (counts.get(kindOf(job)) || 0) + 1);
+
+  // A filter for something no longer in the queue would show nothing at all.
+  if (queueFilter !== "all" && !counts.has(queueFilter)) queueFilter = "all";
+
+  activeJobs = inLineOrder(all.filter((job) =>
+    queueFilter === "all" || kindOf(job) === queueFilter));
+
   show("queue", all.length > 0);
-  $("queue-summary").textContent = queueSummary(all);
+  renderQueueSummary(all.length, counts);
 
   const box = $("working-list");
   const wanted = new Set(activeJobs.map((j) => j.id));
@@ -558,12 +665,14 @@ function renderActive(jobs) {
     if (!wanted.has(card.dataset.job)) card.remove();
   }
 
+  // Cards are put in order every time, since moving a job in the line moves
+  // its card.
+  // Not while one is being dragged, though: the card stays where the pointer
+  // put it until it is let go.
   for (const job of activeJobs) {
     let card = box.querySelector(`[data-job="${CSS.escape(job.id)}"]`);
-    if (!card) {
-      card = jobCard(job);
-      box.append(card);
-    }
+    if (!card) card = jobCard(job);
+    if (!dragging || !card.parentNode) box.append(card);
     updateJobCard(job);
   }
 
@@ -571,20 +680,36 @@ function renderActive(jobs) {
   else stopClock();
 }
 
-// queueSummary says what the queue amounts to in one line.
-function queueSummary(jobs) {
-  const reading = jobs.filter((j) => kindOf(j) === "rip").length;
-  const converting = jobs.filter((j) => j.stage === "PACKAGE").length;
-  const clips = jobs.filter((j) => j.stage === "LAB").length;
-  const waiting = jobs.filter((j) => j.stage === "QUEUED").length;
+// renderQueueSummary says what the queue amounts to in one line.
+//
+// Each part narrows the queue to just that when clicked, and the total widens
+// it back out. With only one kind of thing in the queue there is nothing to
+// narrow, so the line is plain text.
+function renderQueueSummary(total, counts) {
+  const box = $("queue-summary");
+  const kinds = KINDS.filter(([kind]) => counts.has(kind));
+  const linked = kinds.length > 1;
+
+  const part = (text, filter) => {
+    if (!linked) return document.createTextNode(text);
+
+    const link = document.createElement("button");
+    link.className = "link";
+    link.textContent = text;
+    link.setAttribute("aria-pressed", String(queueFilter === filter));
+    link.addEventListener("click", () => {
+      queueFilter = filter;
+      refresh();
+    });
+    return link;
+  };
 
   const parts = [];
-  if (reading) parts.push(`${reading} disc${reading === 1 ? "" : "s"} being read`);
-  if (converting) parts.push(`${converting} converting`);
-  if (clips) parts.push(`${clips} making test clips`);
-  if (waiting) parts.push(`${waiting} waiting their turn`);
+  if (linked) parts.push(part(`${total} total`, "all"));
+  for (const [kind, words] of kinds) parts.push(part(words(counts.get(kind)), kind));
 
-  return parts.length ? parts.join(" · ") : "";
+  box.replaceChildren(...parts.flatMap((p, i) =>
+    i === 0 ? [p] : [document.createTextNode(" · "), p]));
 }
 
 function jobCard(job) {
@@ -592,14 +717,33 @@ function jobCard(job) {
   card.className = "card job-card";
   card.dataset.job = job.id;
 
+  const head = document.createElement("div");
+  head.className = "job-head";
+
+  // Only what is waiting has a handle, and dragging it moves the job in the
+  // line. It is a button, so the arrow keys move it too.
+  const grip = document.createElement("button");
+  grip.className = "grip";
+  grip.setAttribute("aria-label", "Drag to change the order");
+  grip.title = "Drag to change the order";
+  grip.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10M3 8h10M3 11h10"/></svg>';
+  grip.addEventListener("pointerdown", (e) => startDrag(e, card));
+  grip.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      moveInLine(job.id, e.key === "ArrowUp" ? -1 : 1).then(() => grip.focus());
+    }
+  });
+
   const title = document.createElement("h2");
   title.className = "job-title";
-  card.append(title);
+  head.append(grip, title);
+  card.append(head);
 
   // Clicking the card narrows the log to this disc, and clicking it again
   // widens it back out.
   card.addEventListener("click", (e) => {
-    if (e.target.tagName === "BUTTON") return;
+    if (e.target.closest("button")) return;
     focusJob(job.id);
   });
 
@@ -614,21 +758,30 @@ function jobCard(job) {
   bar.append(fill);
   card.append(bar);
 
-  const line = document.createElement("div");
-  line.className = "progress-line";
-  const detail = document.createElement("span");
-  detail.className = "muted job-detail";
+  // Every figure has a cell of its own, the same width whatever it holds, so
+  // a clock going from 9s to 10s does not shove everything after it along.
+  const progress = document.createElement("div");
+  progress.className = "progress-line";
+  const figures = document.createElement("span");
+  figures.className = "figures muted";
+  for (const name of ["t-elapsed", "t-pct", "t-rate", "t-op"]) {
+    const cell = document.createElement("span");
+    cell.className = name;
+    figures.append(cell);
+  }
   const estimate = document.createElement("span");
   estimate.className = "muted estimate-right job-estimate";
-  line.append(detail, estimate);
-  card.append(line);
+  progress.append(figures, estimate);
+  card.append(progress);
 
   const actions = document.createElement("div");
   actions.className = "actions";
+
   const stop = document.createElement("button");
+  stop.className = "stop";
   stop.textContent = "Stop";
-  stop.addEventListener("click", (e) =>
-    busy(e.target, "Stopping\u2026", null, () => post("/api/stop", { id: job.id })));
+  stop.addEventListener("click", (e) => askToStop(e.target, job.id));
+
   actions.append(stop);
   card.append(actions);
 
@@ -644,33 +797,240 @@ function updateJobCard(job) {
     renderLabResults(job.comparison);
   }
 
-  card.querySelector(".job-title").textContent = job.title || job.disc_name || "A disc";
-  card.querySelector(".stage").textContent = stageWords(job.stage);
-
   const progress = job.progress || {};
+  const queued = job.stage === "QUEUED";
+
+  // The file being made, exactly as it will be named, once there is one: a
+  // master is MakeMKV's own .mkv, and a package or clip is an .mkv carrying its
+  // edition.
+  card.querySelector(".job-title").textContent = job.file || filmName(job);
+  // Waiting has more than one flavour, and the job says which.
+  card.querySelector(".stage").textContent = queued && progress.operation
+    ? progress.operation
+    : stageWords(job.stage);
+
   const pct = Math.round(progress.percent || 0);
   card.querySelector(".bar-fill").style.width = `${pct}%`;
 
-  const now = [];
-  const elapsed = elapsedSince(progress.since);
-  if (elapsed) now.push(elapsed);
-  if (pct > 0) now.push(`${pct}%`);
+  card.dataset.clock = String(clockStart(job));
+  card.querySelector(".t-elapsed").textContent = elapsedText(card.dataset.clock);
+  card.querySelector(".t-pct").textContent = pct > 0 ? `${pct}%` : "";
   // A speed is the only figure here that can be compared to anything.
-  if (progress.rate) now.push(progress.rate);
-  if (progress.operation) now.push(progress.operation);
-  card.querySelector(".job-detail").textContent = now.join(" · ");
+  card.querySelector(".t-rate").textContent = progress.rate || "";
+  card.querySelector(".t-op").textContent = queued ? "" : progress.operation || "";
 
-  card.querySelector(".job-estimate").textContent = estimateText(progress, pct);
+  card.querySelector(".job-estimate").textContent =
+    queued ? "" : estimateText(progress, pct, Number(card.dataset.clock));
+
+  // Only what is waiting can be moved, and only when there is something
+  // else waiting to move it past.
+  card.querySelector(".grip").hidden = line.indexOf(job.id) < 0 || line.length < 2;
+}
+
+// moveInLine moves a waiting job some places towards the front (negative) or
+// the back.
+async function moveInLine(id, by) {
+  const place = line.indexOf(id);
+  const to = Math.max(0, Math.min(line.length - 1, place + by));
+  if (place < 0 || to === place) {
+    // Put a card dragged back to where it started exactly where it was.
+    await refresh();
+    return;
+  }
+
+  const result = await post("/api/line", { id, to });
+  if (result) line = result.line;
+  await refresh();
+}
+
+// Dragging a waiting job to a new place in the line.
+//
+// The card follows the pointer among the other waiting cards, and nothing is
+// sent until it is let go, so one drag is one change however far it goes.
+// Pointer events cover a mouse, a finger and a pen alike.
+let dragging = null;
+
+function startDrag(e, card) {
+  dragging = card;
+  const waiting = () => [...$("working-list").children]
+    .filter((c) => c !== card && line.includes(c.dataset.job));
+
+  dragAmong(e, card, waiting, () => {
+    dragging = null;
+
+    // Where it landed, as a place in the whole line. The list may be showing
+    // only some of what is waiting, so the place comes from whichever waiting
+    // job it now sits in front of.
+    const id = card.dataset.job;
+    const rest = line.filter((other) => other !== id);
+    let next = card.nextElementSibling;
+    while (next && !line.includes(next.dataset.job)) next = next.nextElementSibling;
+    const to = next ? rest.indexOf(next.dataset.job) : rest.length;
+
+    moveInLine(id, to - line.indexOf(id));
+  });
+}
+
+// dragAmong moves an element among others as the pointer moves, and calls
+// dropped when it is let go.
+//
+// The whole window is listened to, not the handle. Moving the element in the
+// page makes some browsers let go of a handle's hold on the pointer, and then
+// nothing more arrives: dragging downwards happened to work, and dragging
+// upwards stopped after the first step. Near the top or bottom of the window
+// the page scrolls, so a long list can be crossed in one drag.
+function dragAmong(e, el, others, dropped) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  el.classList.add("dragging");
+  document.body.classList.add("dragging-something");
+
+  let y = e.clientY;
+  const place = () => {
+    const list = others();
+    const before = list.find((o) => {
+      const box = o.getBoundingClientRect();
+      return y < box.top + box.height / 2;
+    });
+    if (before) {
+      if (el.nextElementSibling !== before) before.before(el);
+    } else if (list.length && list[list.length - 1].nextElementSibling !== el) {
+      list[list.length - 1].after(el);
+    }
+  };
+
+  const edge = 60;
+  const scroller = setInterval(() => {
+    const step = y < edge ? -14 : y > window.innerHeight - edge ? 14 : 0;
+    if (step) {
+      window.scrollBy(0, step);
+      place();
+    }
+  }, 30);
+
+  const move = (ev) => {
+    y = ev.clientY;
+    place();
+  };
+  const drop = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", drop);
+    window.removeEventListener("pointercancel", drop);
+    clearInterval(scroller);
+    el.classList.remove("dragging");
+    document.body.classList.remove("dragging-something");
+    dropped();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", drop);
+  window.addEventListener("pointercancel", drop);
+}
+
+// --- stopping -------------------------------------------------------------
+
+// confirmFirst asks before doing something that would throw work away, and
+// resolves true only if the answer was yes.
+//
+// Kept for the few things that could cost somebody ten minutes or more with a
+// stray click. Everything else just happens.
+function confirmFirst({ title, detail, confirm, cancel }) {
+  const dialog = $("confirm-dialog");
+  $("confirm-title").textContent = title;
+  $("confirm-detail").textContent = detail;
+  $("confirm-yes").textContent = confirm;
+  $("confirm-no").textContent = cancel;
+
+  return new Promise((resolve) => {
+    dialog.onclose = () => resolve(dialog.returnValue === "yes");
+    dialog.returnValue = "";
+    dialog.showModal();
+    $("confirm-yes").focus();
+  });
+}
+
+// working is what would lose progress if it stopped now. Anything waiting its
+// turn has done nothing yet.
+function working() {
+  return lastActive.filter((job) => job.stage !== "QUEUED");
+}
+
+// lostWork says how much work stopping a job would throw away.
+function lostWork(job) {
+  const ran = Date.now() - (clockStart(job) || Date.now());
+  return ran >= 60000
+    ? `All progress from the last ${spokenDuration(ran)} will be lost.`
+    : "It has only just started.";
+}
+
+// askToStop stops a job, asking first if stopping would throw work away.
+//
+// A job still waiting its turn has done nothing yet, so it simply stops. One
+// that is working loses what it has done so far, which after a couple of hours
+// of copying is worth a second look before it goes.
+async function askToStop(button, id) {
+  const job = working().find((j) => j.id === id);
+
+  if (job) {
+    const kept = ["PACKAGE", "LAB", "OCR", "DELIVER"].includes(job.stage)
+      ? " The master is kept, so this can be started again later."
+      : "";
+    // A transcode waiting on this rip has nothing to work from without it.
+    const follower = lastActive.find((j) => j.from === job.id);
+    const also = follower ? " The transcode waiting for it will be removed from the queue too." : "";
+    const yes = await confirmFirst({
+      title: `Stop ${filmName(job)}?`,
+      detail: lostWork(job) + kept + also,
+      confirm: "Confirm stop",
+      cancel: "Cancel stop",
+    });
+    if (!yes) return;
+  }
+
+  busy(button, "Stopping\u2026", null, () => post("/api/stop", { id }));
+}
+
+// askToEnd asks before restarting or stopping ARFABIT while something is
+// working, since either ends every job in progress.
+async function askToEnd(verb) {
+  const busyJobs = working();
+  if (busyJobs.length === 0) return true;
+
+  const longest = busyJobs.reduce((a, b) => (clockStart(a) <= clockStart(b) ? a : b));
+  const what = busyJobs.length === 1
+    ? `${filmName(longest)} is still working.`
+    : `${busyJobs.length} things are still working, the longest ${filmName(longest)}.`;
+  const waiting = lastActive.length > busyJobs.length
+    ? " Anything waiting its turn can be started again from Recent tasks."
+    : "";
+
+  return confirmFirst({
+    title: `${verb} ARFABIT?`,
+    detail: `${what} ${lostWork(longest)}${waiting}`,
+    confirm: `Confirm ${verb.toLowerCase()}`,
+    cancel: `Cancel ${verb.toLowerCase()}`,
+  });
+}
+
+// spokenDuration says a length of time the way a person would.
+function spokenDuration(ms) {
+  const minutes = Math.floor(ms / 60000);
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+
+  const unit = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (hours === 0) return unit(minutes, "minute");
+  if (rest === 0) return unit(hours, "hour");
+  return `${unit(hours, "hour")} ${unit(rest, "minute")}`;
 }
 
 // estimateText says how much longer, as honestly as it can.
-function estimateText(progress, pct) {
+function estimateText(progress, pct, started) {
   if (progress.remaining && progress.remaining !== "unknown") {
     return `about ${progress.remaining} left`;
   }
 
-  if (pct > 0 && pct < 100 && progress.since) {
-    const elapsedMs = Date.now() - new Date(progress.since).getTime();
+  if (pct > 0 && pct < 100 && started) {
+    const elapsedMs = Date.now() - started;
     const totalMs = (elapsedMs / pct) * 100;
     const leftMs = Math.max(0, totalMs - elapsedMs);
     if (elapsedMs > 20000) return `about ${humanMs(leftMs)} left`;
@@ -690,7 +1050,7 @@ function humanMs(ms) {
   return rest === 0 ? `${hours} hours` : `${hours}h ${rest}m`;
 }
 
-function renderJob(job) {
+function renderJob(job, existing) {
   if (!job) {
     show("plan", false);
     show("done", false);
@@ -701,7 +1061,7 @@ function renderJob(job) {
   show("plan", waiting);
   show("done", job.state === "done" || job.state === "stopped");
 
-  if (waiting) renderPlan(job);
+  if (waiting) renderPlan(job, existing);
 
   if (job.state === "done" || job.state === "stopped") {
     $("done-title").textContent = job.state === "done" ? "Ready" : "Stopped";
@@ -748,54 +1108,241 @@ function whenText(when) {
   return then.toLocaleDateString();
 }
 
+// Which recent tasks are open, so redrawing the list keeps them open.
+const openRecent = new Set();
+
+// speedGraph draws how fast a disc was read over the course of its copy.
+//
+// One line, one axis. The slowest and fastest speeds label the axis, the start
+// and end of the copy label the bottom, and pointing anywhere along it says
+// exactly what the speed was then.
+function speedGraph(samples) {
+  const NS = "http://www.w3.org/2000/svg";
+  const W = 600, H = 120, left = 64, right = 8, top = 8, bottom = 22;
+
+  const el = (tag, attrs, text) => {
+    const node = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+
+  const last = samples[samples.length - 1].seconds || 1;
+  const top_ = Math.max(...samples.map((p) => p.mb_per_second));
+  const ceiling = Math.max(1, Math.ceil(top_ / 5) * 5);
+
+  const x = (sec) => left + (sec / last) * (W - left - right);
+  const y = (mb) => top + (1 - mb / ceiling) * (H - top - bottom);
+
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, class: "speed-graph", role: "img",
+    "aria-label": `Reading speed over ${spokenDuration(last * 1000)}, up to ${top_.toFixed(1)} MB/s` });
+
+  // A recessive frame: a baseline, a line at the ceiling, and their values.
+  for (const mb of [0, ceiling]) {
+    svg.append(el("line", { x1: left, x2: W - right, y1: y(mb), y2: y(mb), class: "grid" }));
+    svg.append(el("text", { x: left - 8, y: y(mb) + 4, "text-anchor": "end", class: "axis" }, `${mb} MB/s`));
+  }
+  svg.append(el("text", { x: left, y: H - 4, class: "axis" }, "0"));
+  svg.append(el("text", { x: W - right, y: H - 4, "text-anchor": "end", class: "axis" }, elapsedText(Date.now() - last * 1000)));
+
+  svg.append(el("polyline", {
+    class: "speed-line",
+    points: samples.map((p) => `${x(p.seconds).toFixed(1)},${y(p.mb_per_second).toFixed(1)}`).join(" "),
+  }));
+
+  // Pointing at the graph shows the nearest sample.
+  const cross = el("line", { y1: top, y2: H - bottom, class: "cross", visibility: "hidden" });
+  const dot = el("circle", { r: 4, class: "speed-dot", visibility: "hidden" });
+  const hit = el("rect", { x: left, y: 0, width: W - left - right, height: H, fill: "transparent" });
+  svg.append(cross, dot, hit);
+
+  const wrap = document.createElement("div");
+  wrap.className = "speed-wrap";
+  const tip = document.createElement("div");
+  tip.className = "speed-tip";
+  tip.hidden = true;
+  wrap.append(svg, tip);
+
+  hit.addEventListener("pointermove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const sec = ((e.clientX - box.left) / box.width * W - left) / (W - left - right) * last;
+    const nearest = samples.reduce((a, b) =>
+      Math.abs(b.seconds - sec) < Math.abs(a.seconds - sec) ? b : a);
+
+    const px = x(nearest.seconds), py = y(nearest.mb_per_second);
+    cross.setAttribute("x1", px);
+    cross.setAttribute("x2", px);
+    cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", px);
+    dot.setAttribute("cy", py);
+    dot.setAttribute("visibility", "visible");
+
+    tip.hidden = false;
+    tip.textContent = `${nearest.mb_per_second.toFixed(1)} MB/s · ${elapsedText(Date.now() - nearest.seconds * 1000) || "0s"} in`;
+    const share = px / W;
+    tip.style.left = `${share * 100}%`;
+    tip.style.transform = `translateX(${share > 0.7 ? "-100%" : "0"})`;
+  });
+  hit.addEventListener("pointerleave", () => {
+    cross.setAttribute("visibility", "hidden");
+    dot.setAttribute("visibility", "hidden");
+    tip.hidden = true;
+  });
+
+  return wrap;
+}
+
+// What the recent list was last drawn from. A copy in progress updates the
+// page several times a second, and redrawing an unchanged list each time
+// would close whatever somebody was pointing at in it.
+let recentDrawn = "";
+
+// taskKind names what a task was.
+function taskKind(job) {
+  if (job.kind === "lab") return "Clip";
+  if (job.kind === "convert") return "Package";
+  return "Rip";
+}
+
+// taskOutcome sorts how a task ended, for its label's colour, with the same
+// thing in words for anyone who cannot tell the colours apart.
+//
+// "Stopped" covers three things that call for different reactions: one that
+// can be started again, one that did not finish and has the output to show
+// why, and one stopped on purpose or by a restart with nothing to resume.
+function taskOutcome(job) {
+  if (job.state === "done") return ["done", "Finished"];
+  if (resumable[job.id]) return ["resumable", "Did not finish, and can be started again"];
+  if (job.detail) return ["failed", "Did not finish"];
+  return ["stopped", "Stopped"];
+}
+
+// madeBy is the files a task made: a rip's master, or a package's files.
+function madeBy(job) {
+  if (job.made && job.made.length) return job.made;
+  if (job.kind === "disc") return [job.master, job.delivery].filter(Boolean);
+  return job.delivery ? [job.delivery] : [];
+}
+
 function renderRecent(jobs) {
   const box = $("recent");
+  const drawn = JSON.stringify([jobs, resumable, new Date().toDateString()]);
+  if (drawn === recentDrawn) return;
+  recentDrawn = drawn;
+
   if (!jobs || jobs.length === 0) {
     box.textContent = "Nothing yet.";
     return;
   }
 
+  // One line each: what it was, what it was of, and when. Everything else is
+  // a click away, underneath it.
   box.replaceChildren(...jobs.map((job) => {
-    const row = document.createElement("div");
-    row.className = "row";
+    const item = document.createElement("details");
+    item.className = "recent-item";
+    item.open = openRecent.has(job.id);
+    item.addEventListener("toggle", () => {
+      if (item.open) openRecent.add(job.id);
+      else openRecent.delete(job.id);
+    });
+
+    const line = document.createElement("summary");
+    const kind = document.createElement("span");
+    const [outcome, meaning] = taskOutcome(job);
+    kind.className = `tag task-${outcome}`;
+    kind.textContent = taskKind(job);
+    kind.title = meaning;
 
     const name = document.createElement("span");
-    name.textContent = job.title || job.disc_name || job.disc_label || "A disc";
+    name.className = "recent-name";
+    name.textContent = filmName(job);
 
-    const right = document.createElement("span");
-    right.className = "muted small";
-    right.textContent = `${jobOutcome(job)} · ${whenText(job.started)}`;
+    const when = document.createElement("span");
+    when.className = "muted small recent-when";
+    when.textContent = whenText(job.started);
 
-    row.append(name, right);
-
-    // Anything working from a copy can simply be started again, because the
-    // copy is still there.
-    if (resumable[job.id]) {
-      const again = document.createElement("button");
-      again.textContent = "Start again";
-      again.addEventListener("click", async (e) => {
-        const result = await busy(e.target, "Starting\u2026", "Added", () =>
-          post("/api/resume", { id: job.id }));
-        if (result) refresh();
-      });
-      row.append(again);
-    }
-
-    return row;
+    line.append(kind, name, when);
+    item.append(line, recentDetail(job));
+    return item;
   }));
+}
+
+// recentDetail is everything about a task beyond its line: how it ended, what
+// it made, how the copy went, and what can be done about it.
+function recentDetail(job) {
+  const body = document.createElement("div");
+  body.className = "recent-detail";
+
+  const said = document.createElement("p");
+  said.textContent = jobOutcome(job);
+  body.append(said);
+
+  // What it made, by name, so it can be found in the folder.
+  const made = madeBy(job);
+  if (made.length) {
+    const files = document.createElement("div");
+    files.className = "recent-files muted small";
+    for (const path of made) {
+      const file = document.createElement("div");
+      file.textContent = path.split(/[\\/]/).pop();
+      file.title = path;
+      files.append(file);
+    }
+    body.append(files);
+  }
+
+  // How the copy went. Worth seeing because a drive that slows down half way
+  // through looks just like a slow drive from the average alone.
+  if ((job.read_speed || []).length > 1) {
+    const heading = document.createElement("div");
+    heading.className = "muted small";
+    heading.textContent = "Reading speed";
+    body.append(heading, speedGraph(job.read_speed));
+  }
+
+  // The raw account, always complete, for anything that did not finish (§15).
+  if (job.detail) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Technical details";
+    const pre = document.createElement("pre");
+    pre.textContent = job.detail;
+    details.append(summary, pre);
+    body.append(details);
+  }
+
+  // Anything working from a copy can simply be started again, because the
+  // copy is still there.
+  if (resumable[job.id]) {
+    const again = document.createElement("button");
+    again.textContent = "Start again";
+    again.addEventListener("click", async (e) => {
+      const result = await busy(e.target, "Starting\u2026", "Added", () =>
+        post("/api/resume", { id: job.id }));
+      if (result) refresh();
+    });
+    body.append(again);
+  }
+
+  return body;
 }
 
 async function refresh() {
   const state = await fetch("/api/state").then((r) => r.json());
+  if (state.now) clockOffset = Date.now() - new Date(state.now).getTime();
+
+  const wasBusy = driveBusy;
   driveBusy = state.drive_busy || "";
   resumable = state.resumable || {};
+  line = state.line || [];
   renderDrives(state.drives);
   renderActive(state.active || []);
-  renderJob(state.job);
+  renderJob(state.job, state.existing || []);
   renderRecent(state.recent || []);
 
-  // The idle card is only for when nothing is asking for a decision.
-  show("idle", !state.job);
+  // The drive is free to be asked again, and a disc has just been through
+  // it, so the measured speed has probably changed.
+  if (wasBusy && !driveBusy) loadDriveHealth();
 
   const log = await fetch("/api/log").then((r) => r.json());
   appendLog(log);
@@ -885,9 +1432,13 @@ function note(text) {
 // This is the single thing that most decides how long a disc takes: reached
 // directly, a film is read in tens of minutes; reached through the operating
 // system, an encrypted disc crawls at roughly the speed it would play at.
+//
+// Asking needs the drive, so it is not asked while a disc is being read. The
+// last answer stays on screen until it can be asked again.
 async function loadDriveHealth() {
+  if (driveBusy) return;
+
   const box = $("drive-health");
-  box.textContent = "Checking how ARFABIT is reaching the drive\u2026";
 
   let report;
   try {
@@ -897,27 +1448,33 @@ async function loadDriveHealth() {
     return;
   }
 
+  // Something started using the drive while it was being asked.
+  if (driveBusy) return;
+
   if (report.message) {
     box.textContent = report.message;
     return;
   }
 
-  const drives = report.drives || [];
-  if (drives.length === 0) {
-    box.textContent = "No disc drive found.";
+  const found = report.drives || [];
+  if (found.length === 0) {
+    box.textContent = "";
     return;
   }
 
   // The system holding the disc is the usual reason a drive reads slowly, and
   // unlike the access mode it is something a person can fix in one click.
-  $("drive-free").hidden = !drives.some((d) => d.mounted);
+  $("drive-free").hidden = !found.some((d) => d.mounted);
 
-  box.replaceChildren(...drives.map((drive) => {
+  box.replaceChildren(...found.map((drive) => {
     const block = document.createElement("div");
 
-    const name = document.createElement("div");
-    name.textContent = drive.name;
-    block.append(name);
+    // The heading already names a single drive.
+    if (found.length > 1) {
+      const name = document.createElement("div");
+      name.textContent = drive.name;
+      block.append(name);
+    }
 
     const mode = document.createElement("div");
     mode.className = drive.fast ? "drive-fast" : "drive-slow";
@@ -931,20 +1488,16 @@ async function loadDriveHealth() {
       block.append(mount);
     }
 
+    const observed = document.createElement("div");
     if (drive.observed > 0) {
-      const observed = document.createElement("div");
-      observed.className = "small";
       const hours = (40700 / drive.observed / 3600).toFixed(1);
       observed.textContent =
         `Measured at ${drive.observed.toFixed(1)} MB per second over ${drive.samples} disc${drive.samples === 1 ? "" : "s"}` +
         ` — a 40 GB film would take about ${hours} hours at that rate.`;
-      block.append(observed);
     } else {
-      const observed = document.createElement("div");
-      observed.className = "small";
-      observed.textContent = "No disc has been copied yet, so there is nothing measured to compare.";
-      block.append(observed);
+      observed.textContent = "ARFABIT has not timed this drive yet. Once it has copied a disc, this will say how fast the drive reads.";
     }
+    block.append(observed);
 
     return block;
   }));
@@ -958,7 +1511,6 @@ async function loadMasters() {
 
   if (!masters || masters.length === 0) {
     select.replaceChildren(new Option("No masters yet — read a disc first", ""));
-    $("lab-run").disabled = true;
     return;
   }
 
@@ -967,7 +1519,6 @@ async function loadMasters() {
     option.dataset.film = m.title;
     return option;
   }));
-  $("lab-run").disabled = false;
 }
 
 // Remembering the Transcode settings between visits.
@@ -1000,102 +1551,573 @@ function recallTranscode() {
   }
 }
 
-// loadMasterTracks shows what is inside the chosen master.
-//
-// A master holds everything the disc had, which is the point of keeping it. A
-// file for a television usually wants a few of those and not the rest.
-async function loadMasterTracks() {
-  const master = $("lab-master").value;
-  masterTracks = [];
+// --- packages -------------------------------------------------------------
 
-  if (!master) {
-    $("tracks-heading").hidden = true;
-    $("track-list").replaceChildren();
-    return;
-  }
+// What the chosen master holds, and the package being planned from it.
+let masterInfo = { tracks: [], duration: 0 };
+let pkg = null;
+
+// The defaults' values, for a line that starts being converted by hand.
+let defaultValues = { crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, preset: "slow", audio_bitrate: "256k" };
+
+const PRESETS = ["superfast", "medium", "slow", "slower", "veryslow"];
+const BITRATES = ["128k", "192k", "256k", "320k", "448k", "640k", "768k"];
+const SECTIONS = [["video", "Picture"], ["audio", "Sound"], ["subtitle", "Subtitles"]];
+
+// loadMaster reads what the chosen master holds, then fills the package in
+// from whatever "Start from" shows, as a Plan starts from the defaults.
+async function loadMaster() {
+  const path = $("lab-master").value;
+  masterInfo = { tracks: [], duration: 0 };
+  pkg = null;
+  renderPackage();
+  if (!path) return;
 
   let reply;
   try {
-    reply = await fetch(`/api/master-tracks?master=${encodeURIComponent(master)}`)
-      .then((r) => r.json());
-  } catch {
-    $("tracks-heading").hidden = true;
+    reply = await fetch(`/api/master?path=${encodeURIComponent(path)}`).then((r) => r.json());
+  } catch (err) {
+    $("package-editor").textContent = String(err);
     return;
   }
-
-  masterTracks = reply.tracks || [];
-  $("tracks-heading").hidden = masterTracks.length === 0;
-
-  $("track-list").replaceChildren(...masterTracks.map((track, i) => {
-    const row = document.createElement("label");
-    row.className = "track";
-
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.className = "track-choice";
-    box.value = String(track.index);
-    box.dataset.kind = track.kind;
-    box.checked = track.carriable && track.selected;
-    box.disabled = !track.carriable;
-
-    const text = document.createElement("span");
-    text.textContent = track.note ? `${track.label} — ${track.note}` : track.label;
-    if (!track.carriable) text.className = "muted";
-
-    row.append(box, text);
-    return row;
-  }));
-}
-
-// chosenAudio is which sound tracks to keep.
-function chosenAudio() {
-  return [...document.querySelectorAll(".track-choice")]
-    .filter((box) => box.checked && box.dataset.kind === "audio")
-    .map((box) => Number(box.value));
-}
-
-// loadProfiles lists the named settings to choose between.
-//
-// Several at once is the point: comparing means having both to watch, and a
-// whole film under two profiles is two editions to pick between in Plex.
-async function loadProfiles() {
-  const { profiles } = await fetch("/api/profiles").then((r) => r.json());
-  const box = $("profile-list");
-
-  if (!profiles || profiles.length === 0) {
-    box.textContent = "No profiles are defined.";
+  if (!reply.tracks) {
+    $("package-editor").textContent = reply.message || "That master could not be read.";
     return;
   }
-
-  box.replaceChildren(...profiles.map((profile, i) => {
-    const row = document.createElement("label");
-    row.className = "track";
-
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.value = profile.name;
-    box.className = "profile-choice";
-    // The default is ticked, so pressing Start without thinking does the
-    // ordinary thing.
-    box.checked = profile.default;
-    box.addEventListener("change", describeDestination);
-
-    const text = document.createElement("span");
-    text.textContent = `${profile.name} — ${profile.description}`;
-
-    row.append(box, text);
-    return row;
-  }));
-
-  renderProfileManager(profiles);
-  describeDestination();
+  masterInfo = reply;
+  await fillPackage();
 }
 
-// profileForm builds the form for filling in a profile.
+// fillPackage starts the package again from a blueprint, or from the defaults.
+async function fillPackage() {
+  if (!$("lab-master").value) return;
+  const reply = await post("/api/package/fill", {
+    master: $("lab-master").value,
+    blueprint: $("package-blueprint").value,
+  });
+  if (!reply) return;
+  pkg = reply.package;
+  pkg.items = pkg.items || [];
+  renderPackage();
+}
+
+function renderPackage() {
+  const box = $("package-editor");
+  if (!pkg) {
+    box.replaceChildren();
+    describePackage();
+    return;
+  }
+  renderPackageEditor(box, masterInfo.tracks, pkg, () => {
+    renderPackage();
+  });
+  if (document.activeElement !== $("package-edition")) {
+    $("package-edition").value = pkg.edition || "";
+  }
+  describePackage();
+}
+
+// describePackage says what pressing Start will make, and where it goes.
+function describePackage() {
+  const whole = Number($("lab-length").value) === 0;
+  const pictures = pkg ? pkg.items.filter((it) => it.kind === "video").length : 0;
+
+  $("package-run").disabled = !pkg || pictures !== 1;
+  if (!pkg) {
+    $("package-destination").textContent = "";
+    return;
+  }
+  if (pictures !== 1) {
+    $("package-destination").textContent = pictures === 0
+      ? "A package needs a picture. Add it from the master, above."
+      : "A package can hold one picture.";
+    return;
+  }
+  $("package-destination").textContent = whole
+    ? "One MKV file of all of the master, saved to your library."
+    : "One MKV clip, saved to the clips folder to watch and compare.";
+}
+
+// renderPackageEditor lays out a package's line items, section by section,
+// with what else the source holds underneath each, one click to add.
 //
-// The same form serves a saved profile and a one-off, because they are the
+// Written once for both places a package is planned: from a master here, and
+// from a disc on its Plan. changed is called after anything changes.
+function renderPackageEditor(box, tracks, pkg, changed) {
+  const sections = SECTIONS.map(([kind, title]) => {
+    const section = document.createElement("div");
+    section.className = "package-section";
+
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    if (kind === "audio") {
+      const hint = document.createElement("span");
+      hint.className = "section-hint";
+      hint.textContent = "The first in the list plays first";
+      heading.append(hint);
+    }
+
+    const rows = document.createElement("div");
+    rows.className = "package-rows";
+    const items = pkg.items.filter((it) => it.kind === kind);
+    rows.append(...items.map((item, i) => itemRow(item, i, tracks, pkg, changed, rows, kind)));
+    if (items.length === 0) {
+      const none = document.createElement("p");
+      none.className = "muted small";
+      none.textContent = {
+        video: "No picture yet. A package needs one.",
+        audio: "No sound yet.",
+        subtitle: "No subtitles.",
+      }[kind];
+      rows.append(none);
+    }
+
+    section.append(heading, rows);
+
+    // Everything the source holds of this kind, one line each, to add as
+    // it is or converted. A package holds one picture, so the picture is
+    // only offered while there is none.
+    const offered = tracks.filter((t) => t.kind === kind);
+    if (offered.length && (kind !== "video" || items.length === 0)) {
+      const more = document.createElement("div");
+      more.className = "package-spare";
+      const label = document.createElement("div");
+      label.className = "muted small";
+      label.textContent = "Add from master";
+      // Each line adds its track as it is; converting it is a choice made
+      // on the line once it is in the package.
+      more.append(label, ...offered.map((track) => {
+        // How many lines already use this track, so what is in the
+        // package, and what is in it twice, shows at a glance.
+        const uses = pkg.items.filter((it) => it.kind === kind && it.source === track.index).length;
+        const count = document.createElement("span");
+        count.className = uses ? "spare-count used" : "spare-count";
+        count.textContent = `${uses}\u00d7`;
+
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "spare";
+        b.append(count, ...titleOf(track.label, track));
+        b.title = uses
+          ? `In the package ${uses === 1 ? "once" : `${uses} times`}. Click to add it again, as it is.`
+          : "Add to the package as it is";
+        b.addEventListener("click", () => {
+          pkg.items.push(copyItem(track));
+          changed();
+        });
+        return b;
+      }));
+      section.append(more);
+    }
+    return section;
+  });
+
+  box.replaceChildren(...sections);
+}
+
+// lossless is the badge a lossless track carries in its title. Lossy tracks
+// carry none: their title says their bitrate instead.
+function lossless(track) {
+  const badge = document.createElement("span");
+  badge.className = "badge-lossless";
+  badge.textContent = "Lossless";
+  return badge;
+}
+
+// titleOf is a track's title, with its Lossless badge if it has one.
+function titleOf(text, track) {
+  return track && track.lossless ? [document.createTextNode(text), lossless(track)] : [document.createTextNode(text)];
+}
+
+// lineKey is everything that makes a line what it is, so two the same can be
+// told apart from two that only share a track.
+function lineKey(it) {
+  return [it.kind, it.source, it.action, it.to, it.crf, it.preset, it.bitrate, it.out_channels || 0].join("|");
+}
+
+function copyItem(track) {
+  return {
+    kind: track.kind, action: "copy", source: track.index, codec: track.codec,
+    lang: track.lang, channels: track.channels, lossless: track.lossless, label: track.label,
+    source_bitrate: track.bitrate || 0,
+  };
+}
+
+// bitratesFor are the bitrates worth offering for a track: for lossy sound,
+// none above what it has, since more is only a bigger file of the same sound.
+function bitratesFor(track) {
+  if (track.lossless || !track.bitrate) return BITRATES;
+  const fit = BITRATES.filter((b) => parseInt(b, 10) * 1000 <= track.bitrate);
+  return fit.length ? fit : [BITRATES[0]];
+}
+
+// bitrateFor is the one to start from: what is wanted, or the most the track
+// has if that is less.
+function bitrateFor(want, track) {
+  const offered = bitratesFor(track);
+  return offered.includes(want) ? want : offered[offered.length - 1];
+}
+
+// convertItem is where a line starts when it is first converted: the
+// defaults' picture quality, FLAC for lossless sound, AAC otherwise.
+function convertItem(track) {
+  const item = { ...copyItem(track), action: "convert" };
+  if (track.kind === "video") {
+    const crf = track.height >= 2000 ? defaultValues.crf_uhd
+      : track.height && track.height < 700 ? defaultValues.crf_dvd : defaultValues.crf_bluray;
+    return { ...item, to: "hevc", crf, preset: defaultValues.preset };
+  }
+  if (track.lossless) return { ...item, to: "flac" };
+  return { ...item, to: "aac", bitrate: bitrateFor(track.channels > 2 ? "640k" : defaultValues.audio_bitrate, track) };
+}
+
+function select(options, value, onChange) {
+  const el = document.createElement("select");
+  for (const [v, label] of options) el.append(new Option(label, v, false, String(v) === String(value)));
+  el.addEventListener("change", () => onChange(el.value));
+  return el;
+}
+
+// itemRow is one line item: its track, what to do with it, and what that
+// costs on the television.
+function itemRow(item, position, tracks, pkg, changed, rows, kind) {
+  const track = tracks.find((t) => t.kind === item.kind && t.index === item.source)
+    || { ...item, index: item.source, note: "" };
+
+  const row = document.createElement("div");
+  row.className = "package-item";
+  row.item = item;
+
+  const line = document.createElement("div");
+  line.className = "package-line";
+
+  const grip = document.createElement("button");
+  grip.type = "button";
+  grip.className = "grip";
+  grip.setAttribute("aria-label", "Drag to change the order");
+  grip.title = "Drag to change the order";
+  grip.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10M3 8h10M3 11h10"/></svg>';
+  grip.hidden = kind === "video";
+  const reorder = (ordered) => {
+    let i = 0;
+    pkg.items = pkg.items.map((it) => (it.kind === kind ? ordered[i++] : it));
+    changed();
+  };
+  grip.addEventListener("pointerdown", (e) => dragRow(e, row, rows, () =>
+    reorder([...rows.children].map((r) => r.item).filter(Boolean))));
+  // The arrow keys move it too, one place at a time.
+  grip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    const ordered = pkg.items.filter((it) => it.kind === kind);
+    const at = ordered.indexOf(item);
+    const to = at + (e.key === "ArrowUp" ? -1 : 1);
+    if (to < 0 || to >= ordered.length) return;
+    [ordered[at], ordered[to]] = [ordered[to], ordered[at]];
+    reorder(ordered);
+  });
+
+  const text = document.createElement("span");
+  text.className = "package-label";
+  text.append(...titleOf(track.label || item.label, track));
+
+  // A line is copied as it is unless Convert is on, which shows what to
+  // convert it to. Keeping a track and a converted one beside it is two
+  // lines, the second added from the master below. Subtitles can only be
+  // copied until ARFABIT can read them into text (§10).
+  const convert = document.createElement("label");
+  convert.className = "chip convert-pill";
+  const toggle = document.createElement("input");
+  toggle.type = "checkbox";
+  toggle.checked = item.action === "convert";
+  toggle.addEventListener("change", () => {
+    const at = pkg.items.indexOf(item);
+    pkg.items[at] = toggle.checked ? convertItem(track) : copyItem(track);
+    changed();
+  });
+  convert.append(toggle, document.createTextNode("Convert"));
+  convert.hidden = kind === "subtitle";
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.textContent = "Remove";
+  remove.addEventListener("click", () => {
+    pkg.items.splice(pkg.items.indexOf(item), 1);
+    changed();
+  });
+
+  line.append(grip, text, convert);
+  if (item.action === "convert") line.append(...convertFields(item, track, changed));
+  line.append(remove);
+
+  row.append(line);
+
+  // A copy is exactly what the track is on the television; a conversion is
+  // into something that plays directly (§4). A line the same as another
+  // would put the same track in the file twice.
+  const notes = [];
+  if (item.action === "copy" && track.note) notes.push(track.note);
+  if (item.action === "convert" && kind === "audio" && !track.lossless) {
+    notes.push(track.note
+      ? "This sound is not lossless, so converting it loses a little more."
+      : "This sound is not lossless, so converting it loses a little more, and it plays directly as it is.");
+  }
+  const same = pkg.items.filter((other) => lineKey(other) === lineKey(item)).length;
+  if (same > 1) notes.push(`This line is the same as ${same === 2 ? "another" : `${same - 1} others`}, so the file would hold the same track ${same} times.`);
+  for (const text of notes) {
+    const n = document.createElement("p");
+    n.className = "package-note small";
+    n.textContent = text;
+    row.append(n);
+  }
+  return row;
+}
+
+// convertFields are the settings for a converted line.
+function convertFields(item, track, changed) {
+  const set = (key, cast = (v) => v) => (value) => { item[key] = cast(value); changed(); };
+
+  if (item.kind === "video") {
+    const crf = document.createElement("input");
+    crf.type = "number";
+    crf.min = "0";
+    crf.max = "51";
+    crf.value = item.crf;
+    crf.title = "Quality: lower is better and bigger. 20 is close to the disc.";
+    crf.addEventListener("change", () => set("crf", Number)(crf.value));
+    const label = document.createElement("span");
+    label.className = "muted small";
+    label.textContent = "HEVC, quality";
+    return [label, crf, select(PRESETS.map((p) => [p, p]), item.preset, set("preset"))];
+  }
+
+  // E-AC-3 is for surround a receiver can take whole. Its encoder stops at
+  // six channels (§9), and for stereo AAC does the same job everywhere.
+  const surround = track.channels > 2 && track.channels <= 6 && (item.out_channels || 0) !== 2;
+  const formats = [["aac", "AAC"]];
+  if (surround || item.to === "eac3") formats.push(["eac3", "E-AC-3"]);
+  if (track.lossless || item.to === "flac") formats.unshift(["flac", "FLAC, lossless"]);
+  const fields = [select(formats, item.to, (value) => {
+    item.to = value;
+    if (value === "flac") delete item.bitrate;
+    else if (!item.bitrate) item.bitrate = bitrateFor(track.channels > 2 ? "640k" : defaultValues.audio_bitrate, track);
+    changed();
+  })];
+
+  if ((track.channels || 0) > 2) {
+    fields.push(select([["0", `All ${track.channels} channels`], ["2", "2.0"]],
+      String(item.out_channels || 0), (value) => {
+        item.out_channels = Number(value);
+        // Stereo E-AC-3 is offered nowhere else, so it is not kept here.
+        if (item.out_channels === 2 && item.to === "eac3") item.to = "aac";
+        changed();
+      }));
+  }
+  if (item.to !== "flac") {
+    const offered = bitratesFor(track);
+    fields.push(select(offered.map((b) => [b, b]),
+      item.bitrate || bitrateFor(defaultValues.audio_bitrate, track), set("bitrate")));
+  }
+  return fields;
+}
+
+// dragRow lets a line item be dragged to a new place in its own section.
+// Nothing changes until it is let go, and then only that section's order.
+function dragRow(e, row, rows, dropped) {
+  dragAmong(e, row, () => [...rows.children].filter((r) => r !== row && r.item), dropped);
+}
+
+// loadBlueprints lists the blueprints to start a package from, and to manage.
+async function loadBlueprints() {
+  const { blueprints = [], defaults } = await fetch("/api/blueprints").then((r) => r.json());
+  if (defaults) defaultValues = { ...defaultValues, ...defaults };
+
+  const start = $("package-blueprint");
+  const was = start.value;
+  const chosen = blueprints.find((b) => b.default);
+  start.replaceChildren(
+    new Option("The defaults", ""),
+    ...blueprints.map((b) => new Option(b.name, b.name)),
+  );
+  start.value = [...start.options].some((o) => o.value === was) && was !== ""
+    ? was
+    : chosen ? chosen.name : "";
+
+  renderBlueprintManager(blueprints, defaults);
+}
+
+// --- sound rules ----------------------------------------------------------
+
+// The languages a rule can name, in the order they are offered.
+const RULE_LANGUAGES = ["eng", "fra", "spa", "deu", "ita", "jpn", "por", "nld", "rus", "kor", "zho"];
+const LAYOUTS = ["7.1", "5.1", "stereo"];
+
+// Starting points for the rules, since a blank set of rules is a puzzle.
+const SOUND_PRESETS = [
+  ["Everything", { languages: [], language_mode: "all", choices: [{ mode: "all", layouts: [], quality: "" }] }],
+  ["Best English surround and English 2.0", {
+    languages: ["eng"], language_mode: "one", choices: [
+      { mode: "one", layouts: ["7.1", "5.1"], quality: "" },
+      { mode: "one", layouts: ["stereo"], quality: "" },
+    ],
+  }],
+  ["English 2.0 only", { languages: ["eng"], language_mode: "one", choices: [{ mode: "one", layouts: ["stereo"], quality: "" }] }],
+];
+
+// describeChoice reads one choice as a phrase, the same way ARFABIT reports
+// what it found.
+function describeChoice(c) {
+  const layouts = c.layouts && c.layouts.length
+    ? c.layouts.map((l) => (l === "stereo" ? "2.0" : l)).join(" or ")
+    : "any layout";
+  const quality = c.quality === "lossless" ? ", lossless" : c.quality === "lossy" ? ", not lossless" : "";
+  return `${c.mode === "all" ? "keep all of" : "pick one of"} ${layouts}${quality}`;
+}
+
+// describeSound reads a whole set of rules as a sentence, so what they will do
+// is never a matter of working it out from the controls.
+function describeSound(rules) {
+  if (!rules) return "Stereo first, with every surround track offered beside it.";
+
+  const names = (rules.languages || []).map(languageName);
+  const which = names.length === 0
+    ? "For every language on the disc"
+    : names.length === 1
+      ? `For ${names[0]}`
+      : rules.language_mode === "all"
+        ? `For each of ${names.join(", ")}`
+        : `For the first of ${names.join(", ")} the disc has`;
+
+  const choices = (rules.choices || []).map(describeChoice);
+  return `${which}: ${choices.join("; then ") || "nothing"}.`;
+}
+
+// soundEditor is the part of the blueprint form that sets its sound rules.
+//
+// It redraws itself from one object whenever anything changes, and the form
+// reads that object back when it is saved.
+function soundEditor(initial) {
+  const box = document.createElement("div");
+  box.className = "sound-editor";
+  let rules = initial ? JSON.parse(JSON.stringify(initial)) : null;
+  box.readSound = () => rules;
+
+  const select = (options, value, onChange) => {
+    const el = document.createElement("select");
+    for (const [v, label] of options) el.append(new Option(label, v, false, v === value));
+    el.addEventListener("change", () => onChange(el.value));
+    return el;
+  };
+
+  const chip = (label, on, onChange) => {
+    const wrap = document.createElement("label");
+    wrap.className = "chip";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = on;
+    input.addEventListener("change", () => onChange(input.checked));
+    wrap.append(input, document.createTextNode(label));
+    return wrap;
+  };
+
+  const draw = () => {
+    const heading = document.createElement("h4");
+    heading.textContent = "Sound for the transcode";
+
+    const mode = select([["usual", "The usual choice"], ["rules", "Choose by rule"]],
+      rules ? "rules" : "usual", (v) => {
+        rules = v === "rules" ? JSON.parse(JSON.stringify(SOUND_PRESETS[1][1])) : null;
+        draw();
+      });
+
+    const reads = document.createElement("p");
+    reads.className = "sound-reads";
+    reads.textContent = describeSound(rules);
+
+    const parts = [heading, mode, reads];
+
+    if (rules) {
+      // Which languages.
+      const langs = document.createElement("div");
+      langs.className = "rule-row";
+      const langMode = select([["one", "The first of"], ["all", "Each of"]], rules.language_mode || "one",
+        (v) => { rules.language_mode = v; draw(); });
+      langs.append(langMode, ...RULE_LANGUAGES.map((code) =>
+        chip(languageName(code), rules.languages.includes(code), (on) => {
+          rules.languages = on
+            ? [...rules.languages, code]
+            : rules.languages.filter((c) => c !== code);
+          draw();
+        })));
+      const langNote = document.createElement("p");
+      langNote.className = "muted small";
+      langNote.textContent = "Tick none for every language on the disc. The order ticked is the order preferred.";
+
+      // What to choose in each language.
+      const choices = rules.choices.map((c, i) => {
+        const row = document.createElement("div");
+        row.className = "rule-row";
+        row.append(
+          select([["one", "Pick one of"], ["all", "Keep all of"]], c.mode, (v) => { c.mode = v; draw(); }),
+          ...LAYOUTS.map((layout) => chip(layout === "stereo" ? "2.0" : layout, c.layouts.includes(layout), (on) => {
+            // Kept widest first, which is the order of preference.
+            c.layouts = LAYOUTS.filter((l) => (l === layout ? on : c.layouts.includes(l)));
+            draw();
+          })),
+          select([["", "Lossless or not"], ["lossless", "Lossless only"], ["lossy", "Not lossless"]], c.quality,
+            (v) => { c.quality = v; draw(); }),
+        );
+        if (rules.choices.length > 1) {
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.textContent = "Remove";
+          remove.addEventListener("click", () => { rules.choices.splice(i, 1); draw(); });
+          row.append(remove);
+        }
+        return row;
+      });
+
+      const add = document.createElement("button");
+      add.type = "button";
+      add.textContent = "Add a choice";
+      add.addEventListener("click", () => {
+        rules.choices.push({ mode: "one", layouts: ["stereo"], quality: "" });
+        draw();
+      });
+
+      const presets = document.createElement("div");
+      presets.className = "suggestions";
+      presets.append(document.createTextNode("Start from: "), ...SOUND_PRESETS.map(([label, preset]) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.addEventListener("click", () => { rules = JSON.parse(JSON.stringify(preset)); draw(); });
+        return b;
+      }));
+
+      const each = document.createElement("div");
+      each.className = "muted small";
+      each.textContent = "In each language:";
+
+      const note = document.createElement("p");
+      note.className = "muted small";
+      note.textContent = "Pick one of takes the widest layout ticked that the disc has. A choice the disc cannot meet is skipped. If nothing at all fits, the Plan asks you to choose the tracks yourself.";
+
+      parts.push(langs, langNote, each, ...choices, add, presets, note);
+    }
+
+    box.replaceChildren(...parts);
+  };
+
+  draw();
+  return box;
+}
+
+// blueprintForm builds the form for filling in a blueprint.
+//
+// The same form serves a saved blueprint and a one-off, because they are the
 // same thing: one is remembered and one is not.
-function profileForm(values, options) {
+function blueprintForm(values, options) {
   const box = document.createElement("div");
 
   const fields = document.createElement("div");
@@ -1127,6 +2149,21 @@ function profileForm(values, options) {
     name.dataset.key = "name";
     name.placeholder = "A name";
     field("Name", name);
+
+    // The edition starts as the name, and follows it while the name is
+    // typed, until somebody changes the edition itself. Clearing it is a
+    // choice: that blueprint's films then have no edition.
+    const edition = document.createElement("input");
+    edition.type = "text";
+    edition.value = values.edition ?? values.name ?? "";
+    edition.dataset.key = "edition";
+    edition.placeholder = "None";
+    let following = edition.value === name.value;
+    name.addEventListener("input", () => {
+      if (following) edition.value = name.value;
+    });
+    edition.addEventListener("input", () => { following = false; });
+    field("Edition", edition);
   }
 
   const preset = document.createElement("select");
@@ -1167,7 +2204,22 @@ function profileForm(values, options) {
   };
 
   tick("Keep 4K pictures exactly as they are", "allow_uhd_copy", values.allow_uhd_copy !== false);
-  tick("Keep Dolby sound exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
+  tick("Keep the picture exactly as it is", "keep_picture", values.keep_picture === true);
+  tick("Keep sound exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
+
+  // TrueHD plays on Apple TV only by Plex converting it every time (§4), so
+  // what to do with it is a choice worth making once, here.
+  const truehd = document.createElement("label");
+  truehd.className = "inline";
+  const truehdChoice = document.createElement("select");
+  truehdChoice.dataset.key = "truehd";
+  for (const [v, text] of [["keep", "Keep it as it is"], ["flac", "Convert it to FLAC"], ["both", "Both"]]) {
+    truehdChoice.append(new Option(text, v, false, v === (values.truehd || "keep")));
+  }
+  truehd.append(document.createTextNode("Dolby TrueHD sound: "), truehdChoice);
+  box.append(truehd);
+
+  box.append(soundEditor(values.sound || null));
 
   const note = document.createElement("p");
   note.className = "muted small";
@@ -1177,8 +2229,8 @@ function profileForm(values, options) {
   return box;
 }
 
-// readProfileForm gathers what was filled in.
-function readProfileForm(box) {
+// readBlueprintForm gathers what was filled in.
+function readBlueprintForm(box) {
   const values = {};
 
   for (const input of box.querySelectorAll("[data-key]")) {
@@ -1192,94 +2244,94 @@ function readProfileForm(box) {
     }
   }
 
+  const sound = box.querySelector(".sound-editor");
+  if (sound) values.sound = sound.readSound();
+
   return values;
 }
 
-// chosenProfiles is what is ticked, in the order shown.
-function chosenProfiles() {
-  return [...document.querySelectorAll(".profile-choice")]
-    .filter((box) => box.checked)
-    .map((box) => box.value);
-}
 
-// customProfile is the one-off form's contents, or nothing if it is not in use.
-function customProfile() {
-  if (!$("use-custom").checked) return null;
 
-  const values = readProfileForm($("custom-form"));
-  if (!values.name) values.name = "Custom";
-  return values;
-}
 
-// renderProfileManager lists the profiles with a way to change them.
-function renderProfileManager(profiles) {
-  const box = $("profile-manager");
+// renderBlueprintManager lists the blueprints with a way to change them.
+function renderBlueprintManager(blueprints, defaults) {
+  const box = $("blueprint-manager");
 
-  box.replaceChildren(...profiles.map((profile) => {
+  const summary = document.createElement("p");
+  summary.className = "muted small";
+  summary.textContent = defaults.default
+    ? "No blueprint is used by default, so each new plan starts from the defaults in your settings file."
+    : "New plans start from the blueprint marked below.";
+
+  if (blueprints.length === 0) {
+    box.replaceChildren(summary);
+    return;
+  }
+
+  box.replaceChildren(summary, ...blueprints.map((blueprint) => {
     const row = document.createElement("div");
     row.className = "row";
 
     const left = document.createElement("div");
     const name = document.createElement("div");
-    name.textContent = profile.default ? `${profile.name} (used by default)` : profile.name;
+    name.textContent = blueprint.default ? `${blueprint.name} (used by default)` : blueprint.name;
 
     const detail = document.createElement("div");
     detail.className = "muted small";
-    detail.textContent = profile.description;
+    detail.textContent = blueprint.description;
 
-    left.append(name, detail);
+    const sound = document.createElement("div");
+    sound.className = "muted small";
+    sound.textContent = `Sound: ${describeSound(blueprint.sound)}`;
+
+    left.append(name, detail, sound);
 
 
 
     const buttons = document.createElement("div");
     buttons.className = "button-row";
 
-    if (!profile.default) {
-      const makeDefault = document.createElement("button");
-      makeDefault.textContent = "Use by default";
-      makeDefault.addEventListener("click", async (e) => {
-        const result = await busy(e.target, "Setting\u2026", null, () =>
-          post("/api/profiles/default", { name: profile.name }));
-        if (result) loadProfiles();
-      });
-      buttons.append(makeDefault);
-    }
+    const makeDefault = document.createElement("button");
+    makeDefault.textContent = blueprint.default ? "Stop using by default" : "Use by default";
+    makeDefault.addEventListener("click", async (e) => {
+      const result = await busy(e.target, "Setting\u2026", null, () =>
+        post("/api/blueprints/default", { name: blueprint.default ? "" : blueprint.name }));
+      if (result) loadBlueprints();
+    });
+    buttons.append(makeDefault);
 
     const edit = document.createElement("button");
     edit.textContent = "Change";
-    edit.addEventListener("click", () => openProfileEditor(profile));
+    edit.addEventListener("click", () => openBlueprintEditor(blueprint));
     buttons.append(edit);
 
     const copy = document.createElement("button");
     copy.textContent = "Copy";
     copy.addEventListener("click", () =>
-      openProfileEditor({ ...profile, name: `${profile.name} copy` }));
+      openBlueprintEditor({ ...blueprint, name: `${blueprint.name} copy` }));
     buttons.append(copy);
 
-    // The default is always needed, so it is never offered for removal.
-    if (!profile.default) {
-      const remove = document.createElement("button");
-      remove.textContent = "Remove";
-      remove.addEventListener("click", async (e) => {
-        const result = await busy(e.target, "Removing\u2026", null, () =>
-          fetch(`/api/profiles/${encodeURIComponent(profile.name)}`, { method: "DELETE" })
-            .then((res) => (res.ok ? res.json() : null)));
-        if (result) loadProfiles();
-      });
-      buttons.append(remove);
-    }
+    const remove = document.createElement("button");
+    remove.textContent = "Remove";
+    remove.addEventListener("click", async (e) => {
+      const result = await busy(e.target, "Removing\u2026", null, () =>
+        fetch(`/api/blueprints/${encodeURIComponent(blueprint.name)}`, { method: "DELETE" })
+          .then((res) => (res.ok ? res.json() : null)));
+      if (result) loadBlueprints();
+    });
+    buttons.append(remove);
 
     row.append(left, buttons);
     return row;
   }));
 }
 
-// openProfileEditor shows the form for making or changing a profile.
-function openProfileEditor(values) {
-  const editor = $("profile-editor");
+// openBlueprintEditor shows the form for making or changing a blueprint.
+function openBlueprintEditor(values) {
+  const editor = $("blueprint-editor");
   editor.hidden = false;
 
-  const form = profileForm(values || {}, { named: true });
+  const form = blueprintForm(values || {}, { named: true });
 
   const actions = document.createElement("div");
   actions.className = "actions";
@@ -1289,10 +2341,10 @@ function openProfileEditor(values) {
   save.textContent = "Save";
   save.addEventListener("click", async (e) => {
     const result = await busy(e.target, "Saving\u2026", "Saved", () =>
-      post("/api/profiles", readProfileForm(form)));
+      post("/api/blueprints", readBlueprintForm(form)));
     if (result) {
       editor.hidden = true;
-      loadProfiles();
+      loadBlueprints();
     }
   });
 
@@ -1304,27 +2356,6 @@ function openProfileEditor(values) {
   editor.replaceChildren(form, actions);
 }
 
-// describeDestination says what pressing Start will produce and where it goes.
-//
-// A whole film is a film and belongs in the library; a stretch of one is a
-// clip to watch and compare. Saying which avoids the surprise.
-function describeDestination() {
-  const chosen = chosenProfiles();
-  const custom = customProfile() ? 1 : 0;
-  const whole = Number($("lab-length").value) === 0;
-
-  if (chosen.length + custom === 0) {
-    $("lab-destination").textContent = "Tick at least one profile.";
-    $("lab-run").disabled = true;
-    return;
-  }
-
-  const count = chosen.length + custom;
-  $("lab-run").disabled = false;
-  $("lab-destination").textContent = whole
-    ? `${count} full-length file${count === 1 ? "" : "s"}, saved to your library as separate editions. This takes hours.`
-    : `${count} clip${count === 1 ? "" : "s"}, saved to the lab folder to watch and compare.`;
-}
 
 // parseTimestamp reads "1:15:20", "15:20" or plain seconds.
 function parseTimestamp(text) {
@@ -1334,39 +2365,6 @@ function parseTimestamp(text) {
   return parts.reduce((total, part) => total * 60 + part, 0);
 }
 
-// loadLabClips shows what is already in the lab folder.
-//
-// The folder is the record: clips outlive the program, and somebody coming
-// back tomorrow should find yesterday's work rather than an empty table.
-async function loadLabClips() {
-  const { folder, clips } = await fetch("/api/lab").then((r) => r.json());
-
-  $("lab-folder").textContent = clips && clips.length
-    ? `The clips are in ${folder}, a folder per master. Point Plex at it and each setting appears as an edition of the same title, so they play one after another.`
-    : `Clips will be saved in ${folder}, a folder per master.`;
-
-  $("lab-clips-heading").hidden = !clips || clips.length === 0;
-
-  if (!clips || clips.length === 0) {
-    $("lab-clips").replaceChildren();
-    return;
-  }
-
-  $("lab-clips").replaceChildren(...clips.map((clip) => {
-    const row = document.createElement("div");
-    row.className = "row";
-
-    const name = document.createElement("span");
-    name.textContent = clip.film ? `${clip.film} — ${clip.name}` : clip.name;
-
-    const right = document.createElement("span");
-    right.className = "muted small";
-    right.textContent = `${bytes(clip.size)} · ${whenText(clip.made)}`;
-
-    row.append(name, right);
-    return row;
-  }));
-}
 
 function renderLabResults(comparison) {
   const rows = (comparison && comparison.clips) || [];
@@ -1446,8 +2444,8 @@ async function loadConversionLimit() {
 
   $("conversions-detail").textContent = limit === 1
     ? "One film at a time, which is usually fastest: converting already uses every core, so a second one makes both later. " +
-      "Change profile.max_conversions in your settings file to allow more."
-    : `Up to ${limit} at once. Change profile.max_conversions in your settings file to alter this.`;
+      "Change machine.max_conversions in your settings file to allow more."
+    : `Up to ${limit} at once. Change machine.max_conversions in your settings file to alter this.`;
 }
 
 async function loadAutostart() {
@@ -1558,6 +2556,26 @@ async function waitForRestart() {
     "ARFABIT has not come back yet. Reload this page, or start it again from where you launched it.";
 }
 
+// --- sections -------------------------------------------------------------
+
+// showView shows one section of the page and hides the others.
+//
+// It is still one page: everything keeps running and listening whichever
+// section is showing, so switching never loses a log line or a clock. The
+// address remembers the section, so reloading comes back to it.
+function showView() {
+  const wanted = location.hash.slice(1);
+  const views = [...document.querySelectorAll(".view")];
+  const name = views.some((v) => v.dataset.view === wanted) ? wanted : "tasks";
+
+  for (const view of views) view.hidden = view.dataset.view !== name;
+  for (const tab of document.querySelectorAll(".tabbar a")) {
+    if (tab.dataset.tab === name) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  }
+  window.scrollTo(0, 0);
+}
+
 // --- wiring ---------------------------------------------------------------
 
 function connect() {
@@ -1570,10 +2588,7 @@ function connect() {
   events.addEventListener("index", (e) => renderIndexStatus(JSON.parse(e.data)));
 
   events.addEventListener("drives", (e) => {
-    const list = JSON.parse(e.data);
-    // Only redraw the idle card when nothing is in progress.
-    drives = list || [];
-    if (!$("idle").hidden) renderDrives(drives);
+    renderDrives(JSON.parse(e.data));
   });
 
   events.addEventListener("error", () => {
@@ -1601,7 +2616,7 @@ function on(id, event, handler) {
 
 function wireButtons() {
   // The scan outlives the request that starts it, so the button stays put
-  // until a job appears and the idle card gives way to the working one.
+  // until a job appears and the drive says it is busy.
   on("scan", "click", async (e) => {
     e.target.disabled = true;
     e.target.textContent = "Waking the drive…";
@@ -1611,7 +2626,7 @@ function wireButtons() {
       e.target.textContent = "Reading the disc…";
     } else {
       e.target.disabled = false;
-      e.target.textContent = "Look for a disc";
+      e.target.textContent = "Plan";
     }
   });
 
@@ -1626,6 +2641,7 @@ function wireButtons() {
 
   on("title-save", "click", saveTitle);
   on("plan-convert", "change", sendPlanChange);
+  on("plan-edition", "change", sendPlanChange);
 
   on("log-filter", "input", applyFilter);
 
@@ -1663,11 +2679,13 @@ function wireButtons() {
   });
 
   on("restart", "click", async (e) => {
+    if (!(await askToEnd("Restart"))) return;
     const result = await busy(e.target, "Restarting…", null, () => post("/api/restart"));
     if (result) waitForRestart();
   });
 
   on("quit", "click", async (e) => {
+    if (!(await askToEnd("Stop"))) return;
     const result = await busy(e.target, "Stopping…", null, () => post("/api/quit"));
     if (result) {
       $("restart-detail").textContent = $("autostart").checked
@@ -1688,64 +2706,63 @@ function wireButtons() {
 
   on("drive-free", "click", async (e) => {
     const box = $("drive-health");
-    box.textContent = "Asking your computer to let go of the disc\u2026";
+    box.textContent = "Taking temporary ownership of the drive\u2026";
 
-    const result = await busy(e.target, "Letting go\u2026", null, () => post("/api/drive-free"));
+    const result = await busy(e.target, "Taking ownership\u2026", null, () => post("/api/drive-free"));
 
     // Either way the drive is re-read, so the section says what is true now
     // rather than leaving the old answer on screen.
     await loadDriveHealth();
 
     if (result) {
-      $("drive-health").prepend(note("Your computer has let go of the disc. It is still in the drive."));
+      $("drive-health").prepend(note("ARFABIT has temporary ownership of the drive. The disc is still in it."));
     }
   });
 
 
 
-  on("queue-filter", "change", (e) => {
-    queueFilter = e.target.value;
-    refresh();
-  });
+  on("confirm-yes", "click", () => $("confirm-dialog").close("yes"));
+  on("confirm-no", "click", () => $("confirm-dialog").close(""));
 
   on("lab-length", "change", () => {
     rememberTranscode();
-    describeDestination();
+    describePackage();
   });
 
   on("lab-at", "input", rememberTranscode);
-  on("lab-master", "change", loadMasterTracks);
-
-  on("use-custom", "change", (e) => {
-    const box = $("custom-form");
-    box.hidden = !e.target.checked;
-
-    if (e.target.checked && box.children.length === 0) {
-      // Named, so it can be told apart in a folder listing weeks later.
-      box.replaceChildren(profileForm({ name: "Custom" }, { named: true }));
-    }
-    describeDestination();
+  on("lab-master", "change", loadMaster);
+  on("package-fill", "click", fillPackage);
+  on("package-edition", "input", (e) => {
+    if (pkg) pkg.edition = e.target.value.trim();
   });
 
-  on("profile-new", "click", () => openProfileEditor({ name: "" }));
+  on("blueprint-new", "click", () => openBlueprintEditor({ name: "" }));
 
-  on("lab-run", "click", async (e) => {
+  on("package-run", "click", async (e) => {
+    if (!pkg) return;
     const chosen = $("lab-master").selectedOptions[0];
+    const seconds = (n) => Math.round(n * 1e9);
 
     const result = await busy(e.target, "Adding\u2026", "Added to the queue", () =>
-      post("/api/transcode", {
+      post("/api/package", {
         master: $("lab-master").value,
         film: chosen ? chosen.dataset.film : "",
-        at: parseTimestamp($("lab-at").value),
-        length: Number($("lab-length").value),
-        profiles: chosenProfiles(),
-        audio: chosenAudio(),
-        custom: customProfile(),
+        package: {
+          ...pkg,
+          edition: $("package-edition").value.trim(),
+          at: seconds(parseTimestamp($("lab-at").value)),
+          length: seconds(Number($("lab-length").value)),
+        },
       }));
 
     if (result) {
-      $("lab-status").textContent =
-        "Added to the queue. Its progress and log are there with everything else.";
+      // The queue is on another page, so say which one and make it one click.
+      const link = document.createElement("a");
+      link.href = "#tasks";
+      link.textContent = "Tasks page";
+      $("package-status").replaceChildren(
+        document.createTextNode("Added to the queue on the "), link,
+        document.createTextNode(". Its progress and log are there with everything else."));
       refresh();
     }
   });
@@ -1758,6 +2775,8 @@ function wireButtons() {
 }
 
 function start() {
+  window.addEventListener("hashchange", showView);
+  showView();
   wireButtons();
   connect();
   refresh();
@@ -1766,9 +2785,8 @@ function start() {
   loadIndexStatus();
   loadConversionLimit();
   recallTranscode();
-  loadMasters().then(loadMasterTracks);
-  loadProfiles();
-  loadLabClips();
+  // The blueprints first: "Start from" has to be there to fill a package in.
+  loadBlueprints().then(() => loadMasters()).then(loadMaster);
   loadDriveHealth();
 }
 

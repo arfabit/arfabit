@@ -251,6 +251,8 @@ func applyStreamAttr(s *disc.Stream, rec Record) {
 		s.Layout = val
 	case attrSampleRate:
 		s.SampleRate, _ = strconv.Atoi(val)
+	case attrBitrate:
+		s.Bitrate = parseBitrate(val)
 	case attrSampleSize:
 		s.BitDepth, _ = strconv.Atoi(val)
 	case attrVideoSize:
@@ -373,4 +375,24 @@ func maxStreamKey(m map[int]*disc.Stream) int {
 		}
 	}
 	return max
+}
+
+// parseBitrate reads MakeMKV's "640 Kb/s" or "24.5 Mb/s" as bits per second,
+// or zero for anything else.
+func parseBitrate(val string) int {
+	fields := strings.Fields(val)
+	if len(fields) != 2 {
+		return 0
+	}
+	n, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0
+	}
+	switch strings.ToLower(fields[1]) {
+	case "kb/s":
+		return int(n * 1000)
+	case "mb/s":
+		return int(n * 1_000_000)
+	}
+	return 0
 }

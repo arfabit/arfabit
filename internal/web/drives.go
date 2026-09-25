@@ -149,7 +149,7 @@ func (s *Server) handleEject(w http.ResponseWriter, r *http.Request) {
 	// Only a job holding the drive prevents ejecting. A film being converted
 	// has long since finished with the disc.
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
-		writeError(w, fmt.Sprintf("The drive is busy with %s. Wait for that disc to come out.", busy.Title), nil)
+		writeError(w, fmt.Sprintf("The drive is busy with %s. Wait for that disc to come out.", busy.Name()), nil)
 		return
 	}
 

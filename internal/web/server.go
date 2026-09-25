@@ -18,13 +18,13 @@ import (
 	"time"
 
 	"github.com/arfabit/arfabit/internal/autostart"
+	"github.com/arfabit/arfabit/internal/blueprints"
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
-	"github.com/arfabit/arfabit/internal/profiles"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -41,8 +41,8 @@ type Server struct {
 	Runner  *pipeline.Runner
 	Backend *makemkv.Backend
 
-	// Profiles are the named settings people make and edit here.
-	Profiles *profiles.Store
+	// Blueprints are the named settings people make and edit here.
+	Blueprints *blueprints.Store
 
 	// Restart starts ARFABIT again. Set by the program that owns the process,
 	// because only it knows how to shut down tidily first.
@@ -130,13 +130,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/drive-health", s.handleDriveHealth)
 	mux.HandleFunc("POST /api/drive-free", s.handleFreeDrive)
 	mux.HandleFunc("GET /api/masters", s.handleMasters)
-	mux.HandleFunc("GET /api/lab", s.handleLabClips)
-	mux.HandleFunc("GET /api/profiles", s.handleProfiles)
-	mux.HandleFunc("POST /api/profiles", s.handleSaveProfile)
-	mux.HandleFunc("DELETE /api/profiles/{name}", s.handleDeleteProfile)
-	mux.HandleFunc("POST /api/profiles/default", s.handleDefaultProfile)
-	mux.HandleFunc("POST /api/transcode", s.handleTranscode)
-	mux.HandleFunc("GET /api/master-tracks", s.handleMasterTracks)
+	mux.HandleFunc("GET /api/blueprints", s.handleBlueprints)
+	mux.HandleFunc("POST /api/blueprints", s.handleSaveBlueprint)
+	mux.HandleFunc("DELETE /api/blueprints/{name}", s.handleDeleteBlueprint)
+	mux.HandleFunc("POST /api/blueprints/default", s.handleDefaultBlueprint)
+	mux.HandleFunc("GET /api/master", s.handleMaster)
+	mux.HandleFunc("POST /api/package/fill", s.handleFillPackage)
+	mux.HandleFunc("POST /api/package", s.handleStartPackage)
 	mux.HandleFunc("POST /api/resume", s.handleResume)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
@@ -145,6 +145,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("POST /api/start", s.handleStart)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
+	mux.HandleFunc("POST /api/line", s.handleMoveInLine)
 	mux.HandleFunc("POST /api/plan", s.handleUpdatePlan)
 
 	mux.HandleFunc("POST /api/title", s.handleChooseTitle)
@@ -166,7 +167,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		"Started":  s.started.Format("3:04 PM"),
 		"Library":  s.Config.Paths.Library,
 		"Masters":  s.Config.Paths.Masters,
-		"Profile":  s.Config.Profile,
+		"Clips":    s.Config.Paths.Clips,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -182,6 +183,10 @@ type state struct {
 	// being converted does not need the drive, so the next one can go in.
 	Active []*pipeline.Job `json:"active"`
 
+	// Existing lists files the waiting Plan would replace, which it will not
+	// do. The Plan cannot start until they are moved or the edition changes.
+	Existing []string `json:"existing,omitempty"`
+
 	// DriveBusy names the job holding the drive, if any.
 	DriveBusy string `json:"drive_busy,omitempty"`
 
@@ -190,9 +195,17 @@ type state struct {
 	ConversionsAtOnce int `json:"conversions_at_once"`
 	Queued            int `json:"queued"`
 
+	// Line is the jobs waiting for the processor, by id, in the order they
+	// will start.
+	Line []string `json:"line"`
+
 	// Resumable names the stopped jobs that can simply be started again,
 	// which is anything working from a copy that is still there.
 	Resumable map[string]bool `json:"resumable,omitempty"`
+
+	// Now is ARFABIT's own time, so a page on another computer can keep its
+	// clocks in step with the times it is sent.
+	Now time.Time `json:"now"`
 
 	Recent   []*store.Job `json:"recent"`
 	Drives   []disc.Drive `json:"drives"`
@@ -201,9 +214,18 @@ type state struct {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	recent, _ := s.Store.AllJobs()
-	if len(recent) > 20 {
-		recent = recent[:20]
+	// Recent tasks are the ones that are over. Anything working or waiting
+	// is in the queue, and a disc waiting to be started is its Plan.
+	all, _ := s.Store.AllJobs()
+	recent := []*store.Job{}
+	for _, job := range all {
+		if job.State != store.StateDone && job.State != store.StateStopped {
+			continue
+		}
+		recent = append(recent, job)
+		if len(recent) == 20 {
+			break
+		}
 	}
 
 	resumable := map[string]bool{}
@@ -220,6 +242,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reply := state{
+		Now:       time.Now(),
 		Resumable: resumable,
 		Job:       current,
 		Active:    s.Runner.Active(),
@@ -228,12 +251,14 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		NodeName:  s.Config.Node.Name,
 		Paths:     s.Config.Paths,
 	}
+	reply.Existing = s.Runner.Existing(current)
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
-		reply.DriveBusy = busy.Title
+		reply.DriveBusy = busy.Name()
 	}
 	if s.Runner.Slots != nil {
 		reply.ConversionsAtOnce = s.Runner.Slots.Count()
 		reply.Queued = s.Runner.Queued()
+		reply.Line = s.Runner.Slots.Line()
 	}
 
 	writeJSON(w, reply)
@@ -328,6 +353,27 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"stopped": true})
 }
 
+// handleMoveInLine puts a waiting job at a new place in the line for the
+// processor, counting from zero at the front.
+func (s *Server) handleMoveInLine(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+		To int    `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "That request could not be read.", err)
+		return
+	}
+
+	if s.Runner.Slots == nil || !s.Runner.Slots.Move(req.ID, req.To) {
+		writeError(w, "That has already started, so it cannot be moved.", nil)
+		return
+	}
+
+	s.events.send("job", map[string]string{"id": req.ID})
+	writeJSON(w, map[string][]string{"line": s.Runner.Slots.Line()})
+}
+
 // handleUpdatePlan applies the user's changes to the Plan before it runs.
 func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	job := s.Runner.Current()
@@ -337,18 +383,33 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var change struct {
-		Audio     map[int]bool `json:"audio"`
-		Subtitles map[int]bool `json:"subtitles"`
-		Convert   *bool        `json:"convert"`
+		Audio     map[int]bool   `json:"audio"`
+		Subtitles map[int]bool   `json:"subtitles"`
+		Convert   *bool          `json:"convert"`
+		Edition   *string        `json:"edition"`
+		Package   *store.Package `json:"package"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
 		writeError(w, "ARFABIT could not read that change.", err)
 		return
 	}
 
+	if change.Package != nil {
+		if err := s.Runner.UpdatePackage(*change.Package); err != nil {
+			writeError(w, capitalise(err.Error())+".", nil)
+			return
+		}
+	}
 	if change.Convert != nil {
 		job.Plan.Convert = *change.Convert
 	}
+	if change.Edition != nil {
+		job.Plan.Edition = strings.TrimSpace(*change.Edition)
+		if job.Plan.Package != nil {
+			job.Plan.Package.Edition = job.Plan.Edition
+		}
+	}
+	s.Runner.Reestimate(job)
 
 	for i := range job.Plan.Audio {
 		if selected, ok := change.Audio[job.Plan.Audio[i].SourceIndex]; ok {

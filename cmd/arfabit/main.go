@@ -21,12 +21,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/blueprints"
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
-	"github.com/arfabit/arfabit/internal/profiles"
 	"github.com/arfabit/arfabit/internal/restart"
 	"github.com/arfabit/arfabit/internal/store"
 	"github.com/arfabit/arfabit/internal/web"
@@ -79,8 +79,8 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	}
 
 	backend := &makemkv.Backend{
-		MinLength: cfg.Profile.MinTitleLength,
-		CacheMB:   cfg.Profile.ReadCacheMB,
+		MinLength: cfg.MakeMKV.MinTitleLength,
+		CacheMB:   cfg.Drive.ReadCacheMB,
 	}
 
 	// A missing film list is not a problem: without it a disc's own name is
@@ -96,7 +96,8 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		Backend:     backend,
 		Calibration: calibration,
 		Index:       index,
-		Slots:       pipeline.NewSlots(cfg.Profile.MaxConversions),
+		Slots:       pipeline.NewSlots(cfg.Machine.MaxConversions),
+		Hold:        pipeline.TranscodeHold,
 	}
 
 	// Anything left running by a restart is settled before the page opens, so
@@ -108,21 +109,22 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 			map[bool]string{true: "was", false: "were"}[len(interrupted) == 1])
 	}
 
-	// Profiles made here, as opposed to written in the settings file.
-	profileStore, err := profiles.Open(cfg.Paths.Data)
+	// Blueprints made here, as opposed to written in the settings file.
+	blueprintStore, err := blueprints.Open(cfg.Paths.Data)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "The saved profiles could not be read, so only the ones in your settings file are available: %v\n", err)
+		fmt.Fprintf(os.Stderr, "The saved blueprints could not be read, so only the ones in your settings file are available: %v\n", err)
 	}
 
 	server, err := web.New(cfg, st, runner, backend)
 	if err != nil {
 		return err
 	}
-	server.Profiles = profileStore
+	server.Blueprints = blueprintStore
 
-	// A disc gets whichever profile is currently the default, which can be
-	// changed on the page while ARFABIT runs.
-	runner.DefaultProfile = func() config.Profile { return profileStore.DefaultProfile(cfg) }
+	// A new Plan starts from the blueprint used by default, or from the
+	// defaults when none is. Which one can be changed on the page while
+	// ARFABIT runs.
+	runner.ForPlan = func() config.Blueprint { return blueprintStore.ForPlan(cfg) }
 
 	// Stopping from the page matters for anyone whose computer starts ARFABIT
 	// on its own: they have no terminal to press Ctrl+C in.
@@ -325,7 +327,7 @@ func explainListenFailure(addr string, err error) error {
 // Problems are not fatal: Doctor reports them properly a moment later, and
 // stopping here would mean the page never opens to explain why.
 func prepareFolders(cfg config.Config) {
-	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Masters, cfg.Paths.Library, cfg.Paths.Lab} {
+	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Masters, cfg.Paths.Library, cfg.Paths.Clips} {
 		if dir != "" {
 			_ = os.MkdirAll(dir, 0o755)
 		}

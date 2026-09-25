@@ -6,7 +6,7 @@ package disc
 
 import "time"
 
-// Kind is the physical disc format, which drives profile matching (§8).
+// Kind is the physical disc format, which drives blueprint matching (§8).
 type Kind string
 
 const (
@@ -88,6 +88,10 @@ type Stream struct {
 	Layout     string // "7.1"
 	SampleRate int
 	BitDepth   int
+
+	// Bitrate is what the disc says the track runs at, in bits per second:
+	// for lossy sound, the most there is to keep. Zero when not said.
+	Bitrate int
 
 	// Flags
 	Default bool

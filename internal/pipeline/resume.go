@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -54,6 +55,9 @@ func interruptedNote(job *store.Job) string {
 	case job.Kind == store.KindDisc && (job.Stage == store.StageScan || job.Stage == store.StagePlan):
 		return "ARFABIT was restarted while this disc was being read. Nothing was copied, so read it again when you like."
 
+	case job.From != "" && job.Master == "":
+		return "ARFABIT was restarted before this disc was copied, so its transcode never started. Read the disc again to plan it."
+
 	case job.Master != "":
 		// Everything after the disc works from the copy, and the copy is
 		// still there.
@@ -64,47 +68,101 @@ func interruptedNote(job *store.Job) string {
 	}
 }
 
-// Resumable reports whether an interrupted job can simply be started again.
+// Resumable reports whether a stopped job can simply be started again.
 //
-// Anything working from a copy can, because the copy is still there. A disc
-// cannot: its copy stopped mid-file.
+// A job can be run again when its copy is still there and it knows what it was
+// going to do with it: a disc job that got past the copy has its Plan, and a
+// Transcode has its Plans. A disc still being copied cannot, because its copy
+// stopped mid-file.
 func Resumable(job *store.Job) bool {
-	if job.Kind == store.KindDisc {
-		return false
-	}
 	if job.Master == "" {
 		return false
+	}
+
+	switch {
+	case job.Package != nil:
+		// A package has its line items, which is all it needs.
+	case job.Kind == store.KindDisc:
+		// Disc jobs from before a rip and its transcode were separate jobs
+		// carried their own conversion, and can still be picked up.
+		if job.Plan == nil || !job.Plan.Convert {
+			return false
+		}
+		switch job.Stage {
+		case store.StageEject, store.StageOCR, store.StageQueued, store.StagePackage, store.StageDeliver:
+		default:
+			return false
+		}
+	case job.Transcode != nil:
+		// Made by the Transcode form packages replaced. Its copy is still
+		// there to make a package from.
+		return false
+	default:
+		// A transcode planned with its disc has that disc's Plan.
+		if job.Plan == nil {
+			return false
+		}
 	}
 
 	_, err := os.Stat(job.Master)
 	return err == nil
 }
 
-// ResumeJob starts an interrupted job again from its copy.
+// ResumeJob runs a stopped job again from its copy, as it was planned.
+//
+// The job keeps its record, its log and its Plans. Nothing is looked up again:
+// the blueprints it started from may have changed or gone since, and that does
+// not reach a job that already has its settings (§8).
 func (r *Runner) ResumeJob(id string) (*Job, error) {
-	previous, err := r.Store.LoadJob(id)
+	rec, err := r.Store.LoadJob(id)
 	if err != nil {
 		return nil, fmt.Errorf("there is nothing here called %s", id)
 	}
-	if !Resumable(previous) {
-		return nil, fmt.Errorf("%s cannot be picked up where it left off", previous.Title)
+	for _, active := range r.Active() {
+		if active.ID == id {
+			return nil, fmt.Errorf("%s is already running", rec.Title)
+		}
+	}
+	if rec.State != store.StateStopped || !Resumable(rec) {
+		return nil, fmt.Errorf("%s cannot be picked up where it left off", rec.Title)
 	}
 
-	profiles := []string{}
-	if previous.Plan != nil && previous.Plan.Profile != "" {
-		profiles = append(profiles, previous.Plan.Profile)
-	}
-
-	return r.StartTranscode(context.Background(), LabRequest{
-		Master:     previous.Master,
-		Film:       previous.Title,
-		Year:       previous.Year,
-		Length:     0, // the whole of it, as before
-		Profiles:   profiles,
-		Lookup:     r.Config.ProfileNamed,
-		LabDir:     r.Config.Paths.Lab,
-		LibraryDir: r.Config.Paths.Library,
+	log, err := NewLog(r.Store.LogPath(rec.ID), func(e Entry) {
+		if r.OnLog != nil {
+			r.OnLog(e)
+		}
 	})
+	if err != nil {
+		return nil, err
+	}
+	log.Describe(rec.ID, rec.Title)
+
+	rec.State = store.StateRunning
+	rec.Note = ""
+	rec.Detail = ""
+
+	ctx, cancel := context.WithCancel(context.Background())
+	job := &Job{Job: rec, Log: log, cancel: cancel}
+	job.Progress = Progress{Since: time.Now(), Operation: "Waiting to start"}
+	log.Printf(rec.Stage, "Starting again from the copy, with the settings it had before.")
+
+	r.begin(job)
+	r.save(job)
+
+	go func() {
+		defer cancel()
+		defer r.finish(job)
+
+		if rec.Package != nil {
+			// Started again now, with nothing to hold back for: whoever
+			// pressed Start again meant it.
+			r.runPackage(ctx, job, r.configuredDirs(), 0)
+			return
+		}
+		_ = r.convert(ctx, job, meta.Title{Name: rec.Title, Year: rec.Year})
+	}()
+
+	return job, nil
 }
 
 // InterruptedAt is when a job was last heard from, for the page to show.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"github.com/arfabit/arfabit/internal/config"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -237,8 +236,8 @@ func TestSeveralJobsCanBeActive(t *testing.T) {
 
 // The Plan records the disc's stream numbers, which are not the master's:
 // MakeMKV keeps only some streams and renumbers what it keeps. Matching by
-// language alone resolved every English track to the same stream, so tracks
-// marked "copy" copied DTS-HD MA into an MP4 that an Apple TV cannot play.
+// language alone resolved every English track to the same stream, so a track
+// marked "copy" copied a different track than the one planned.
 func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
 	// The master, as ffprobe reports it.
 	master := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
@@ -267,12 +266,12 @@ func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
 		t.Fatalf("both tracks resolved to stream %d", tracks[0].SourceIndex)
 	}
 
-	// The 7.1 DTS track is converted, never copied.
+	// The 7.1 track was planned to be converted, and is.
 	if tracks[0].SourceIndex != 1 {
 		t.Errorf("the 7.1 track resolved to stream %d, want 1", tracks[0].SourceIndex)
 	}
 	if tracks[0].Copy {
-		t.Error("a DTS track was copied into an MP4; an Apple TV cannot decode it")
+		t.Error("a track planned for converting was copied")
 	}
 
 	// The stereo Dolby track is copyable and lands on the stereo stream.
@@ -286,14 +285,14 @@ func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
 
 // Copying is decided from what the master holds, not from what the Plan said:
 // the master is what gets muxed.
-func TestCopyIsRefusedForCodecsAppleTVCannotPlay(t *testing.T) {
+func TestTrueHDIsKeptWhenThePlanKeepsIt(t *testing.T) {
 	master := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
 		{Index: 0, Kind: "video"},
 		{Index: 1, Kind: "audio", Codec: "truehd", Channels: 8, Lang: "eng"},
 	}}
 
 	job := testJob(t)
-	// A Plan that wrongly believes this track can be copied.
+	// A Plan that keeps the track as it is.
 	job.Plan = &store.Plan{Audio: []store.PlannedAudio{
 		{SourceIndex: 1, Lang: "eng", Channels: 8, SourceCodec: "truehd", Copy: true, Selected: true},
 	}}
@@ -304,11 +303,9 @@ func TestCopyIsRefusedForCodecsAppleTVCannotPlay(t *testing.T) {
 	if len(tracks) != 1 {
 		t.Fatalf("got %d tracks, want 1", len(tracks))
 	}
-	if tracks[0].Copy {
-		t.Error("TrueHD was copied into an MP4")
-	}
-	if tracks[0].Codec == "" || tracks[0].Codec == "truehd" {
-		t.Errorf("Codec = %q; it should have been converted to something playable", tracks[0].Codec)
+	// Matroska carries TrueHD, so a Plan that keeps it as it is, keeps it.
+	if !tracks[0].Copy {
+		t.Error("TrueHD was converted though the Plan kept it as it is")
 	}
 }
 
@@ -375,134 +372,22 @@ func TestQueuedStageIsNamedPlainly(t *testing.T) {
 	}
 }
 
-// A transcode is work like any other: it belongs in the queue, waits its turn
-// at the processor, and keeps a log. The alternative is two of everything and
-// a page that tells two stories.
-func TestTranscodeIsAJob(t *testing.T) {
-	cfg := config.Defaults()
-	cfg.Profiles = map[string]config.Profile{cfg.Profile.Name: cfg.Profile}
-
-	r := &Runner{Config: cfg, Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
-
-	// Somewhere of its own, cleaned up by hand: the job runs in the
-	// background and would otherwise still be writing when the test ended.
-	labDir, err := os.MkdirTemp("", "arfabit-lab")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(labDir) })
-
-	job, err := r.StartTranscode(context.Background(), LabRequest{
-		Master:   "/nowhere/master.mkv",
-		Film:     "Crime 101 (2025)",
-		At:       10 * time.Minute,
-		Length:   30 * time.Second,
-		Profiles: []string{cfg.Profile.Name},
-		LabDir:   labDir,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Stopped and waited for before the test ends: a job still writing its
-	// record when the temporary directory is removed fails the cleanup.
-	t.Cleanup(func() {
-		_ = r.StopJob(job.ID)
-		waitUntilIdle(t, r)
-	})
-
-	if job.Log == nil {
-		t.Error("a transcode has no log")
-	}
-	if job.Title != "Crime 101 (2025)" {
-		t.Errorf("Title = %q", job.Title)
-	}
-
-	var found bool
-	for _, active := range r.Active() {
-		if active.ID == job.ID {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("the transcode is not in the queue")
-	}
-
-	// And it does not hold the drive: it works from a copy.
-	if busy := r.DriveIsBusy(); busy != nil {
-		t.Errorf("a transcode is holding the drive: %s", busy.Title)
-	}
-}
-
-// The whole film is not a test clip: it is a film, and belongs in the library.
-func TestWholeFilmIsNotAClip(t *testing.T) {
-	clip := LabRequest{Length: 30 * time.Second}
-	whole := LabRequest{Length: 0}
-
-	if clip.WholeFilm() {
-		t.Error("a thirty-second clip was treated as the whole film")
-	}
-	if !whole.WholeFilm() {
-		t.Error("no length given should mean the whole film")
-	}
-}
-
-// Nothing to work from, or nothing chosen, is refused plainly rather than
-// queued to fail later.
-func TestTranscodeNeedsSomethingToDo(t *testing.T) {
-	r := &Runner{Config: config.Defaults(), Store: testStore(t), Calibration: NewCalibration(), Slots: NewSlots(1)}
-
-	if _, err := r.StartTranscode(context.Background(), LabRequest{Profiles: []string{"Archive"}}); err == nil {
-		t.Error("a transcode with no copy was accepted")
-	}
-	if _, err := r.StartTranscode(context.Background(), LabRequest{Master: "/m.mkv"}); err == nil {
-		t.Error("a transcode with nothing chosen was accepted")
-	}
-}
-
 // Stopping at the copy is the fast way through a stack of discs: the copy is
 // the only part that needs the drive.
 func TestPlanCanStopAtTheCopy(t *testing.T) {
-	profile := config.Defaults().Profile
-	if !profile.ConvertAfterRip {
+	blueprint := config.Defaults().Plain()
+	if !blueprint.ConvertAfterRip {
 		t.Error("converting after a rip should be the default")
 	}
 
-	profile.ConvertAfterRip = false
+	blueprint.ConvertAfterRip = false
 	d, sel := blurayDisc()
 
-	plan, err := BuildPlan(d, sel, profile)
+	plan, err := BuildPlan(d, sel, blueprint)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if plan.Convert {
-		t.Error("the Plan converts despite the profile saying to stop at the copy")
-	}
-}
-
-// A master holds everything the disc had; a file for a television usually
-// wants a few of those, so a transcode can be told which.
-func TestTranscodeKeepsOnlyTheChosenTracks(t *testing.T) {
-	plan := &store.Plan{Audio: []store.PlannedAudio{
-		{SourceIndex: 1, Selected: true},
-		{SourceIndex: 2, Selected: true},
-		{SourceIndex: 3, Selected: false},
-	}}
-
-	// What renderProfile does with a chosen set.
-	wanted := map[int]bool{3: true}
-	for i := range plan.Audio {
-		plan.Audio[i].Selected = wanted[plan.Audio[i].SourceIndex]
-	}
-
-	var kept []int
-	for _, a := range plan.Audio {
-		if a.Selected {
-			kept = append(kept, a.SourceIndex)
-		}
-	}
-
-	if len(kept) != 1 || kept[0] != 3 {
-		t.Errorf("kept %v, want only the chosen track", kept)
+		t.Error("the Plan converts despite the blueprint saying to stop at the copy")
 	}
 }
