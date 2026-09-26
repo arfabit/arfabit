@@ -211,8 +211,6 @@ func (r *Runner) StartProject(parent context.Context, req ProjectRequest) (*Job,
 
 // runPackage waits its turn at the processor, then makes the Project's files.
 func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold time.Duration) {
-	pkg := job.Project
-
 	if r.Slots != nil {
 		job.Stage = store.StageQueued
 		r.save(job)
@@ -233,10 +231,15 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		defer r.Slots.Give()
 	}
 
+	// From here the line items are what they are: a film planned with its
+	// disc could be changed until now (editing.go).
+	r.mu.Lock()
+	pkg := job.Project
 	job.Stage = store.StageLab
 	if pkg.WholeFilm() {
 		job.Stage = store.StagePackage
 	}
+	r.mu.Unlock()
 
 	info, err := ffmpeg.Probe(ctx, job.Original)
 	if err != nil {

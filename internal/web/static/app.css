@@ -198,6 +198,8 @@ table.results td.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.results tr.best td { font-weight: 600; }
 
 .drive-fast { color: var(--ok); }
+.drive-when { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem; }
+[inert] { opacity: 0.55; }
 .drive-slow { color: var(--warn); }
 
 /* Which disc a line belongs to, shown only when several are in flight. */

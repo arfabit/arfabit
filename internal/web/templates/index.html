@@ -39,6 +39,11 @@
         <button id="drive-check">Check connection</button>
         <button id="drive-free" hidden>Temp owner</button>
       </div>
+      <div class="drive-when">
+        <label for="drive-when">When a disc goes in</label>
+        <select id="drive-when" disabled></select>
+      </div>
+      <p id="drive-when-note" class="muted small"></p>
       <p id="eject-detail" class="muted small"></p>
       <div id="drive-health" class="muted small"></div>
     </section>
@@ -105,10 +110,11 @@
 
       <p id="plan-estimate" class="estimate"></p>
 
-      <div class="actions">
+      <div id="plan-actions" class="actions">
         <button id="start" class="primary">Start</button>
         <span id="plan-blocked" class="muted"></span>
       </div>
+      <p id="plan-started" class="muted small" hidden></p>
     </section>
 
     <section id="queue" class="card" hidden>

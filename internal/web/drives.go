@@ -2,15 +2,18 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
-	"fmt"
-
+	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/eject"
+	"github.com/arfabit/arfabit/internal/store"
 )
 
 // driveWatchEmpty is how often an empty drive is asked what it holds.
@@ -37,6 +40,10 @@ type driveWatcher struct {
 	mu     sync.Mutex
 	drives []disc.Drive
 	poke   chan struct{}
+
+	// looked is set once the drives have been looked at: a disc already in
+	// when ARFABIT starts did not just go in.
+	looked bool
 }
 
 // Poke asks the watcher to look again.
@@ -101,11 +108,17 @@ func (s *Server) WatchDrives(ctx context.Context) {
 
 		s.drives.mu.Lock()
 		changed := !reflect.DeepEqual(found, s.drives.drives)
-		s.drives.drives = found
+		before, looked := s.drives.drives, s.drives.looked
+		s.drives.drives, s.drives.looked = found, true
 		s.drives.mu.Unlock()
 
 		if changed {
 			s.events.send("drives", found)
+		}
+		if looked {
+			for _, d := range wentIn(before, found) {
+				go s.discWentIn(ctx, d)
+			}
 		}
 	}
 
@@ -171,4 +184,102 @@ func (s *Server) handleEject(w http.ResponseWriter, r *http.Request) {
 		"ok":      result.OK,
 		"message": result.Describe(hadDisc),
 	})
+}
+
+// wentIn lists the drives holding a disc now that held none, or another,
+// before.
+func wentIn(before, now []disc.Drive) []disc.Drive {
+	var in []disc.Drive
+	for _, d := range now {
+		if !d.Loaded {
+			continue
+		}
+		fresh := true
+		for _, was := range before {
+			if was.Name == d.Name && was.Loaded && was.Label == d.Label {
+				fresh = false
+			}
+		}
+		if fresh {
+			in = append(in, d)
+		}
+	}
+	return in
+}
+
+// discWentIn does what the drive is set to do when a disc goes in: nothing,
+// or read it and start copying it, with or without a film. The Plan can be
+// changed while it copies (§2). What stops it starting on its own, such as
+// too little room or a file already there, leaves the Plan waiting, saying
+// why.
+func (s *Server) discWentIn(ctx context.Context, d disc.Drive) {
+	setting := s.Store.DriveSettings()[d.Name]
+	if setting.When != store.WhenCopy && setting.When != store.WhenBlueprint {
+		return
+	}
+
+	blueprint, missing := s.Runner.ForPlan, ""
+	if setting.When == store.WhenBlueprint {
+		if setting.Blueprint == "" {
+			plain := s.Config.Plain()
+			blueprint = func() config.Blueprint { return plain }
+		} else if named, ok := s.Blueprints.Named(s.Config, setting.Blueprint); ok {
+			blueprint = func() config.Blueprint { return named }
+		} else {
+			missing = setting.Blueprint
+		}
+	}
+	plan := s.Config.Plain()
+	if blueprint != nil {
+		plan = blueprint()
+	}
+
+	job, err := s.Runner.ScanWith(ctx, d, plan)
+	if err != nil || job == nil || job.Plan == nil {
+		return
+	}
+	if missing != "" {
+		job.Log.Printf(store.StagePlan, "This drive is set to make a film from the %s blueprint, which is no longer there, so this Plan waits for you.", missing)
+		return
+	}
+
+	if err := s.Runner.SetConvert(ctx, setting.When == store.WhenBlueprint); err != nil {
+		job.Log.Printf(store.StagePlan, "Not started on its own: %s. The Plan waits for you.", err)
+		return
+	}
+	job.Log.Printf(store.StagePlan, "Starting on its own, as this drive is set to do when a disc goes in. Anything on the Plan can still be changed until that part starts.")
+	if err := s.Runner.Start(ctx); err != nil {
+		job.Log.Printf(store.StagePlan, "Not started on its own: %s. The Plan waits for you.", strings.TrimSuffix(err.Error(), "."))
+	}
+}
+
+// handleDriveSetting says what a drive does when a disc goes in.
+func (s *Server) handleDriveSetting(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Drive     string `json:"drive"`
+		When      string `json:"when"`
+		Blueprint string `json:"blueprint"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Drive == "" {
+		writeError(w, "ARFABIT could not read that.", err)
+		return
+	}
+	switch req.When {
+	case store.WhenNothing, store.WhenCopy:
+		req.Blueprint = ""
+	case store.WhenBlueprint:
+		if _, ok := s.Blueprints.Named(s.Config, req.Blueprint); req.Blueprint != "" && !ok {
+			writeError(w, fmt.Sprintf("There is no blueprint called %s.", req.Blueprint), nil)
+			return
+		}
+	default:
+		writeError(w, fmt.Sprintf("%q is not something a drive can do.", req.When), nil)
+		return
+	}
+	if err := s.Store.SaveDriveSetting(req.Drive, store.DriveSetting{When: req.When, Blueprint: req.Blueprint}); err != nil {
+		writeError(w, "ARFABIT could not save that.", err)
+		return
+	}
+	s.events.send("job", map[string]string{})
+	writeJSON(w, map[string]string{"when": req.When, "blueprint": req.Blueprint})
 }

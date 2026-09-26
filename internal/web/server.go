@@ -13,7 +13,6 @@ import (
 	"html/template"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -133,6 +132,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/drives", s.handleDrives)
 	mux.HandleFunc("GET /api/drive-health", s.handleDriveHealth)
 	mux.HandleFunc("POST /api/drive-free", s.handleFreeDrive)
+	mux.HandleFunc("POST /api/drive-setting", s.handleDriveSetting)
 	mux.HandleFunc("GET /api/originals", s.handleOriginals)
 	mux.HandleFunc("GET /api/blueprints", s.handleBlueprints)
 	mux.HandleFunc("POST /api/blueprints", s.handleSaveBlueprint)
@@ -183,8 +183,10 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 
 // state is everything a page needs to render itself.
 type state struct {
-	// Job is whatever is asking for a decision: a Plan waiting to be started.
-	Job *pipeline.Job `json:"job"`
+	// Job is the disc whose Plan can be changed: waiting to be started, or
+	// started with some of it still to begin. Editing says what can.
+	Job     *pipeline.Job     `json:"job"`
+	Editing *pipeline.Editing `json:"editing,omitempty"`
 
 	// Active is everything being worked on. More than one is ordinary: a disc
 	// being converted does not need the drive, so the next one can go in.
@@ -215,6 +217,10 @@ type state struct {
 	Now time.Time `json:"now"`
 
 	Recent []*store.Job `json:"recent"`
+
+	// DriveSettings says what each drive does when a disc goes in, by its
+	// name.
+	DriveSettings map[string]store.DriveSetting `json:"drive_settings"`
 
 	// Copies says how each film's SRTs stand against those beside its
 	// original, by the task that made them; CopiesOf says the same by the
@@ -268,11 +274,9 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	current := s.Runner.Current()
-	if current != nil && current.State != store.StateWaiting {
-		// Only a Plan awaiting an answer belongs in the decision slot.
-		current = nil
-	}
+	// The Plan shown is a disc's that can still be changed: waiting to be
+	// started, or started with some of it yet to begin.
+	current := s.Runner.Editable()
 
 	reply := state{
 		Now:       time.Now(),
@@ -280,17 +284,25 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Job:       current,
 		Active:    s.Runner.Active(),
 		Recent:    recent,
-		Copies:    copies,
-		CopiesOf:  copiesOf,
-		Drives:    s.Drives(),
-		NodeName:  s.Config.Node.Name,
-		Paths:     s.Config.Paths,
-		OCR:       s.Runner.OCR != nil,
+
+		DriveSettings: s.Store.DriveSettings(),
+		Copies:        copies,
+		CopiesOf:      copiesOf,
+		Drives:        s.Drives(),
+		NodeName:      s.Config.Node.Name,
+		Paths:         s.Config.Paths,
+		OCR:           s.Runner.OCR != nil,
 	}
 	if !reply.OCR {
 		reply.OCRNote = ocr.NotAvailable
 	}
-	reply.Existing = s.Runner.Existing(current)
+	if current != nil {
+		editing := s.Runner.EditingOf(current)
+		reply.Editing = &editing
+		if !editing.Started {
+			reply.Existing = s.Runner.Existing(current)
+		}
+	}
 	if busy := s.Runner.DriveIsBusy(); busy != nil {
 		reply.DriveBusy = busy.Name()
 	}
@@ -413,83 +425,48 @@ func (s *Server) handleMoveInLine(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string][]string{"line": s.Runner.Slots.Line()})
 }
 
-// handleUpdatePlan applies the user's changes to the Plan before it runs.
+// handleUpdatePlan applies the user's changes to a disc's Plan: before it
+// starts, or while each step of it has still to start (§2).
 func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
-	job := s.Runner.Current()
+	job := s.Runner.Editable()
 	if job == nil || job.Plan == nil {
 		writeError(w, "There is no disc waiting.", nil)
 		return
 	}
 
 	var change struct {
-		Audio     map[int]bool   `json:"audio"`
-		Subtitles map[int]bool   `json:"subtitles"`
-		Read      map[int]bool   `json:"read"`
-		Convert   *bool          `json:"convert"`
-		Edition   *string        `json:"edition"`
-		Project   *store.Project `json:"project"`
+		Read    map[int]bool   `json:"read"`
+		Convert *bool          `json:"convert"`
+		Edition *string        `json:"edition"`
+		Project *store.Project `json:"project"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
 		writeError(w, "ARFABIT could not read that change.", err)
 		return
 	}
 
+	var err error
 	if change.Project != nil {
-		if err := s.Runner.UpdateProject(*change.Project); err != nil {
-			writeError(w, capitalise(err.Error())+".", nil)
-			return
-		}
+		err = s.Runner.UpdateProject(*change.Project)
 	}
-	if change.Convert != nil {
-		job.Plan.Convert = *change.Convert
+	if err == nil && change.Edition != nil {
+		err = s.Runner.SetEdition(*change.Edition)
 	}
-	if change.Edition != nil {
-		job.Plan.Edition = strings.TrimSpace(*change.Edition)
-		if job.Plan.Project != nil {
-			job.Plan.Project.Edition = job.Plan.Edition
-		}
+	if err == nil && change.Convert != nil {
+		err = s.Runner.SetConvert(context.Background(), *change.Convert)
 	}
-	s.Runner.Reestimate(job)
-
-	for i := range job.Plan.Audio {
-		if selected, ok := change.Audio[job.Plan.Audio[i].SourceIndex]; ok {
-			job.Plan.Audio[i].Selected = selected
-		}
+	if err == nil && change.Read != nil {
+		err = s.Runner.SetRead(change.Read)
 	}
-	// Which subtitle tracks are read into text with the copy, by their
-	// number on the disc, in the disc's order.
-	if change.Read != nil {
-		var read []int
-		for _, t := range job.Plan.Tracks {
-			chosen, changed := change.Read[t.Index]
-			if !changed {
-				chosen = slices.Contains(job.Plan.Read, t.Index)
-			}
-			if chosen && t.Kind == store.KindSubtitle {
-				read = append(read, t.Index)
-			}
-		}
-		job.Plan.Read = read
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
 	}
-
-	for i := range job.Plan.Subtitles {
-		if selected, ok := change.Subtitles[job.Plan.Subtitles[i].SourceIndex]; ok {
-			job.Plan.Subtitles[i].Selected = selected
-		}
-	}
-
-	_ = s.Store.SaveJob(job.Job)
 	writeJSON(w, job.Plan)
 }
 
 // handleChooseTitle applies the name and year the user picked.
 func (s *Server) handleChooseTitle(w http.ResponseWriter, r *http.Request) {
-	job := s.Runner.Current()
-	if job == nil {
-		writeError(w, "There is no disc waiting.", nil)
-		return
-	}
-
 	var choice struct {
 		Title string `json:"title"`
 		Year  int    `json:"year"`
@@ -503,10 +480,11 @@ func (s *Server) handleChooseTitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job.Title = strings.TrimSpace(choice.Title)
-	job.Year = choice.Year
-	_ = s.Store.SaveJob(job.Job)
-
+	job, err := s.Runner.SetTitle(strings.TrimSpace(choice.Title), choice.Year)
+	if err != nil {
+		writeError(w, capitalise(err.Error())+".", nil)
+		return
+	}
 	writeJSON(w, job.Job)
 }
 

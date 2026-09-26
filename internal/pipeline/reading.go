@@ -235,6 +235,9 @@ func (r *Runner) waitForReading(ctx context.Context, original string, stream int
 // Plan, once its Original is copied: those it lists to read, and those its
 // film converts to text, which the film takes from beside the Original.
 func (r *Runner) readAfterCopy(ctx context.Context, copied *Job) {
+	// The Plan can be changed from the page until the copy is finished, so
+	// what it says is taken once, now.
+	r.mu.Lock()
 	plan := copied.Plan
 	wanted := append([]int(nil), plan.Read...)
 	if plan.Convert && plan.Project != nil {
@@ -244,6 +247,8 @@ func (r *Runner) readAfterCopy(ctx context.Context, copied *Job) {
 			}
 		}
 	}
+	discTracks := plan.Tracks
+	r.mu.Unlock()
 	if len(wanted) == 0 {
 		return
 	}
@@ -257,7 +262,7 @@ func (r *Runner) readAfterCopy(ctx context.Context, copied *Job) {
 		copied.Log.Detail(store.StageOCR, "ARFABIT could not read the original, so its subtitles are not read.", err.Error())
 		return
 	}
-	streams := bindSubtitles(plan.Tracks, OriginalTracks(info))
+	streams := bindSubtitles(discTracks, OriginalTracks(info))
 
 	started := map[int]bool{}
 	for _, index := range wanted {

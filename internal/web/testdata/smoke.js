@@ -128,6 +128,8 @@ const plan = {
 const answers = {
   "/api/state": {
     node_name: "test",
+    editing: { started: true, name: true, read: true, film: true },
+    drive_settings: { "BD-RE BU40N": { when: "blueprint", blueprint: "Small" } },
     ocr: true,
     now: new Date().toISOString(),
     line: ["queued-job", "queued-disc"],

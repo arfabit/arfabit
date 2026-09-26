@@ -66,6 +66,10 @@ type Runner struct {
 	pending *Job   // scanned, waiting for the user to say go
 	active  []*Job // being worked on
 
+	// planned is the disc last started. Its Plan can still be changed while
+	// it is copied, and its film's while the film waits (editing.go).
+	planned *Job
+
 	// readings are the OCR tasks running, by the track they read, so a film
 	// wanting that track's SRT can wait for it.
 	readings map[string]*Job
@@ -99,6 +103,18 @@ type Job struct {
 	// read is closed when an OCR task is over, however it ended. Nil for
 	// anything else.
 	read chan struct{}
+
+	// film is the film planned with a disc, a task of its own, while it can
+	// still be changed. copied is set once the disc is copied, when the
+	// copy's name and the subtitles to read are settled.
+	film   *Job
+	copied bool
+
+	// discTracks are what a film planned with its disc was planned from,
+	// and bound what its Original holds, once it exists: the film's line
+	// items are pointed from one to the other (bindToOriginal).
+	discTracks []Track
+	bound      []Track
 }
 
 // Progress is how far the current stage has got.
@@ -197,9 +213,15 @@ func (r *Runner) begin(job *Job) {
 	r.active = append(r.active, job)
 }
 
-// Scan reads the disc and builds a Plan, stopping short of doing anything to
-// it. Nothing starts until the user says so (§8).
+// Scan reads the disc and builds a Plan from the blueprint used by default,
+// or the defaults, stopping short of doing anything to it. Nothing starts
+// until the user says so (§8), or the drive is set to start on its own.
 func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
+	return r.ScanWith(ctx, drive, r.blueprint())
+}
+
+// ScanWith is Scan with the Plan filled in from a blueprint of its own.
+func (r *Runner) ScanWith(ctx context.Context, drive disc.Drive, blueprint config.Blueprint) (*Job, error) {
 	// The drive can only do one thing at a time, but only reading and copying
 	// need it. A disc that has been ejected leaves its job converting on its
 	// own, and the next disc can go straight in.
@@ -284,7 +306,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 		return job, fmt.Errorf("no usable title")
 	}
 
-	plan, err := BuildPlan(d, sel, r.blueprint(), r.OCR != nil)
+	plan, err := BuildPlan(d, sel, blueprint, r.OCR != nil)
 	if err != nil {
 		r.stop(job, "ARFABIT could not work out what to do with this disc.", err.Error())
 		return job, err
@@ -365,6 +387,9 @@ func (r *Runner) Start(parent context.Context) error {
 	job.State = store.StateRunning
 	job.ripped = make(chan struct{})
 	r.begin(job)
+	r.mu.Lock()
+	r.planned = job
+	r.mu.Unlock()
 	r.save(job)
 
 	go func() {
@@ -390,9 +415,11 @@ func (r *Runner) Start(parent context.Context) error {
 // once is only convenient, since the Plan is where the disc's contents are
 // known. The package is copied from the Plan as it stood when started.
 func (r *Runner) followRip(parent context.Context, rip *Job) {
+	r.mu.Lock()
 	pkg := *rip.Plan.Project
 	pkg.Items = slices.Clone(rip.Plan.Project.Items)
 	pkg.Containers = slices.Clone(rip.Plan.Project.Containers)
+	r.mu.Unlock()
 
 	rec := store.NewJob(store.NewJobID(time.Now(), rip.Title+" film"))
 	rec.Kind = store.KindConvert
@@ -415,11 +442,14 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 	log.Printf(store.StageQueued, "Waiting for the original of %s. This starts once the disc is copied.", rip.Title)
 
 	ctx, cancel := context.WithCancel(parent)
-	job := &Job{Job: rec, Log: log, cancel: cancel}
+	job := &Job{Job: rec, Log: log, cancel: cancel, discTracks: rip.Plan.Tracks}
 	job.File = meta.Title{Name: rec.Title, Year: rec.Year}.VideoName(pkg.Edition)
 	job.Progress = Progress{Since: time.Now(), Operation: "Waiting for its original"}
 
 	r.begin(job)
+	r.mu.Lock()
+	rip.film = job
+	r.mu.Unlock()
 	r.save(job)
 
 	go func() {
@@ -442,13 +472,21 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 		job.Original = rip.Original
 
 		// The package was planned from the scan; the original numbers its
-		// tracks its own way.
+		// tracks its own way. It can still be changed until it starts, and a
+		// change is pointed at the original in the same way (editing.go).
 		info, err := ffmpeg.Probe(ctx, job.Original)
 		if err != nil {
 			r.stop(job, "ARFABIT could not read the original.", err.Error())
 			return
 		}
-		if err := bindToOriginal(job.Project, rip.Plan.Tracks, OriginalTracks(info)); err != nil {
+		tracks := OriginalTracks(info)
+		r.mu.Lock()
+		err = bindToOriginal(job.Project, job.discTracks, tracks)
+		if err == nil {
+			job.bound = tracks
+		}
+		r.mu.Unlock()
+		if err != nil {
 			r.stop(job, sentence(err.Error())+". Nothing was made. The original is kept, so a film can be made from it in Projects.", "")
 			return
 		}
@@ -529,6 +567,8 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	// The copy is made in the film's own folder, where the original stays
 	// beside the films made from it (§6).
 	folder := title.LibraryDir(r.Config.Paths.Library)
+	_, statErr := os.Stat(folder)
+	madeFolder := os.IsNotExist(statErr)
 	ripStart := time.Now()
 
 	job.Stage = store.StageRip
@@ -595,7 +635,8 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	}
 
 	r.Calibration.ObserveRip(DriveKey(job.DriveName, job.Drive), disc.Kind(job.DiscKind), job.Plan.SourceSize, time.Since(ripStart))
-	job.Original = r.nameOriginal(job, res.Files[0], filepath.Join(folder, title.OriginalName()))
+
+	job.Original = r.placeOriginal(job, res.Files[0], folder, madeFolder)
 	job.File = filepath.Base(job.Original)
 
 	// The disc has nothing left to give: everything from here happens on the
@@ -612,8 +653,11 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	// transcode planned with it is a job of its own, waiting on this one.
 	job.State = store.StateDone
 	job.Progress = Progress{Percent: 100}
+	r.mu.Lock()
+	convert := job.Plan.Convert
+	r.mu.Unlock()
 	job.Note = fmt.Sprintf("%s is copied.", job.Title)
-	if !job.Plan.Convert {
+	if !convert {
 		job.Note += " Make a film from it whenever you like, in Projects."
 	}
 	job.Log.Printf(store.StageEject, "%s", job.Note)
@@ -623,6 +667,30 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	// own, while the film waits its turn at the processor.
 	r.readAfterCopy(ctx, job)
 	return nil
+}
+
+// placeOriginal settles the copy MakeMKV made in folder as the Original, and
+// returns where it is. The name, and what to read, could be changed until now
+// (editing.go). A name changed while copying moves the copy to the folder for
+// that name, and the folder made for it under the old one goes, if nothing
+// else is in it.
+func (r *Runner) placeOriginal(job *Job, copied, folder string, madeFolder bool) string {
+	r.mu.Lock()
+	job.copied = true
+	title := meta.Title{Name: job.Title, Year: job.Year}
+	r.mu.Unlock()
+
+	into := title.LibraryDir(r.Config.Paths.Library)
+	if into != folder {
+		if err := os.MkdirAll(into, 0o755); err != nil {
+			into = folder
+		}
+	}
+	original := r.nameOriginal(job, copied, filepath.Join(into, title.OriginalName()))
+	if into != folder && madeFolder && filepath.Dir(original) == into {
+		_ = os.Remove(folder) // only ever an empty folder: os.Remove takes nothing else
+	}
+	return original
 }
 
 // nameOriginal renames the file MakeMKV made to the original's own name, beside
@@ -669,23 +737,6 @@ func (r *Runner) Reestimate(job *Job) {
 
 	// The original and the film both exist at once, so both must fit.
 	job.Space, _ = CheckSpace(plan.SourceSize+packEst.Size, r.Config.Paths.Library, r.Config.Paths.Masters)
-}
-
-// UpdateProject replaces the waiting Plan's package with one the user has
-// changed.
-func (r *Runner) UpdateProject(pkg store.Project) error {
-	r.mu.Lock()
-	job := r.pending
-	r.mu.Unlock()
-	if job == nil || job.Plan == nil || job.State != store.StateWaiting {
-		return errors.New("there is no disc waiting")
-	}
-
-	job.Plan.Project = &pkg
-	job.Plan.Edition = pkg.Edition
-	r.Reestimate(job)
-	r.save(job)
-	return nil
 }
 
 // speedEvery is how long each point on the read-speed graph drawn after a

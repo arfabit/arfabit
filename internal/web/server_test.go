@@ -1009,3 +1009,51 @@ func TestPlanChoosesSubtitlesToRead(t *testing.T) {
 		t.Errorf("read = %v, want [9]", job.Plan.Read)
 	}
 }
+
+// What a drive does when a disc goes in is kept by the drive's name, and a
+// blueprint that is not there is refused.
+func TestDriveSettingIsKept(t *testing.T) {
+	s := newTestServer(t)
+	for body, ok := range map[string]bool{
+		`{"drive":"BD-RE BU40N","when":"copy"}`:                         true,
+		`{"drive":"BD-RE BU40N","when":"blueprint","blueprint":""}`:     true,
+		`{"drive":"BD-RE BU40N","when":"blueprint","blueprint":"Gone"}`: false,
+		`{"drive":"BD-RE BU40N","when":"sometimes"}`:                    false,
+	} {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/drive-setting", strings.NewReader(body)))
+		if (rec.Code == http.StatusOK) != ok {
+			t.Errorf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/drive-setting", strings.NewReader(`{"drive":"BD-RE BU40N","when":"copy"}`)))
+	if got := s.Store.DriveSettings()["BD-RE BU40N"]; got.When != store.WhenCopy {
+		t.Errorf("kept as %+v", got)
+	}
+	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/drive-setting", strings.NewReader(`{"drive":"BD-RE BU40N","when":"nothing"}`)))
+	if _, kept := s.Store.DriveSettings()["BD-RE BU40N"]; kept {
+		t.Error("doing nothing is kept as a setting")
+	}
+}
+
+// A disc goes in when a drive holds one it did not before: not when it holds
+// the same one still, and not when it is emptied.
+func TestNoticingADiscGoIn(t *testing.T) {
+	empty := disc.Drive{Name: "D"}
+	one := disc.Drive{Name: "D", Loaded: true, Label: "ONE"}
+	two := disc.Drive{Name: "D", Loaded: true, Label: "TWO"}
+	for _, tc := range []struct {
+		before, now disc.Drive
+		in          bool
+	}{
+		{empty, one, true},
+		{one, one, false},
+		{one, empty, false},
+		{one, two, true},
+	} {
+		if got := len(wentIn([]disc.Drive{tc.before}, []disc.Drive{tc.now})) == 1; got != tc.in {
+			t.Errorf("%+v then %+v: went in = %v", tc.before, tc.now, got)
+		}
+	}
+}

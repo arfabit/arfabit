@@ -23,6 +23,9 @@ let lastActive = []; // every active job, whatever the queue is showing
 let queueFilter = "all";
 let focusedJob = "";
 let resumable = {};
+let driveSettings = {}; // what each drive does when a disc goes in, by name
+let blueprintNames = []; // for "When a disc goes in"
+let editing = null;  // what on the Plan shown can still be changed
 let copies = {};   // how each film's SRTs stand, by the task that made them
 let copiesOf = {}; // the same, by the OCR task whose SRT they copy
 let line = [];
@@ -300,6 +303,7 @@ function renderDrives(list) {
 
   $("drive-name").textContent = (drive && drive.Name) || "Disc drive";
   scan.textContent = "Plan";
+  renderDriveWhen(drive);
 
   const status = (text, canRead, canEject) => {
     $("drive-status").textContent = text;
@@ -333,6 +337,37 @@ function renderDrives(list) {
     return;
   }
   status("Empty. Insert a disc and ARFABIT will notice.", false, true);
+}
+
+// renderDriveWhen shows what the drive does when a disc goes in, and lets it
+// be changed. Left alone while somebody has it open.
+function renderDriveWhen(drive) {
+  const select = $("drive-when");
+  if (document.activeElement === select) return;
+  select.disabled = !drive;
+  const options = [["nothing", "Nothing"], ["copy", "Copy"], ["blueprint:", "Blueprint: Defaults"],
+    ...blueprintNames.map((name) => [`blueprint:${name}`, `Blueprint: ${name}`])];
+  const set = (drive && driveSettings[drive.Name]) || { when: "nothing" };
+  const value = set.when === "blueprint" ? `blueprint:${set.blueprint || ""}` : set.when;
+  if (!options.some(([v]) => v === value)) options.push([value, `Blueprint: ${set.blueprint}, which is no longer there`]);
+  select.replaceChildren(...options.map(([v, label]) => new Option(label, v, false, v === value)));
+
+  $("drive-when-note").textContent = {
+    nothing: "Press Plan to read a disc and decide what to do with it.",
+    copy: "A disc is copied as soon as it goes in, and its subtitles read into text. Its Plan stays open while it copies, to add a film or change anything.",
+    blueprint: `A disc is copied as soon as it goes in, its subtitles read, and a film made from ${set.blueprint ? `the ${set.blueprint} blueprint` : "the defaults"}. Its Plan stays open while it copies.`,
+  }[set.when] || "";
+}
+
+async function saveDriveWhen() {
+  const drive = drives[0];
+  if (!drive) return;
+  const [when, blueprint = ""] = $("drive-when").value.split(/:(.*)/s);
+  const result = await post("/api/drive-setting", { drive: drive.Name, when, blueprint });
+  if (result) {
+    driveSettings[drive.Name] = result;
+    renderDriveWhen(drive);
+  }
 }
 
 // --- the plan -------------------------------------------------------------
@@ -481,6 +516,7 @@ function renderOriginal(plan) {
     const box = document.createElement("input");
     box.type = "checkbox";
     box.checked = read.has(track.index);
+    box.disabled = Boolean(editing && !editing.read);
     box.title = "Read into text once the disc is copied";
     box.addEventListener("change", () =>
       post("/api/plan", { read: { [track.index]: box.checked } }).then(() => refresh()));
@@ -562,6 +598,21 @@ function renderPlan(job, existing = []) {
   $("plan-estimate").textContent = est
     ? `About ${est} minutes, finishing around ${bytes(plan.estimated_size)}.`
     : "";
+
+  // Once started, each part stays open until its step begins (§2).
+  const open = editing || { started: false, name: true, read: true, film: true };
+  $("title-choice").inert = !open.name;
+  $("plan-convert").disabled = !open.film;
+  $("plan-film").inert = !open.film;
+  $("plan-actions").hidden = open.started;
+  $("plan-started").hidden = !open.started;
+  if (open.started) {
+    const parts = [];
+    if (open.name) parts.push("its name and the subtitles to read, until the copy is finished");
+    if (open.film) parts.push(transcoding ? "the film, until it starts" : "whether to make a film, until the copy is finished");
+    $("plan-started").textContent = (job.state === "running" ? "Being copied." : "Copied.")
+      + (parts.length ? ` You can still change ${parts.join("; and ")}.` : "");
+  }
 
   const fits = !job.space || job.space.Fits;
   const pictures = items.filter((it) => it.kind === "video").length;
@@ -1091,9 +1142,10 @@ function renderJob(job, existing) {
     return;
   }
 
-  const waiting = job.state === "waiting";
+  // A disc's Plan stays up after Start while any of it can still change.
+  const waiting = job.state === "waiting" || Boolean(editing && editing.started);
   show("plan", waiting);
-  show("done", job.state === "done" || job.state === "stopped");
+  show("done", !waiting && (job.state === "done" || job.state === "stopped"));
 
   if (waiting) renderPlan(job, existing);
 
@@ -1552,6 +1604,8 @@ async function refresh() {
   const wasBusy = driveBusy;
   driveBusy = state.drive_busy || "";
   resumable = state.resumable || {};
+  driveSettings = state.drive_settings || {};
+  editing = state.editing || null;
   copies = state.copies || {};
   copiesOf = state.copies_of || {};
   line = state.line || [];
@@ -2174,6 +2228,9 @@ function dragRow(e, row, rows, dropped) {
 async function loadBlueprints() {
   const { blueprints = [], defaults } = await fetch("/api/blueprints").then((r) => r.json());
   if (defaults) defaultValues = { ...defaultValues, ...defaults };
+
+  blueprintNames = blueprints.map((b) => b.name);
+  renderDriveWhen(drives[0]);
 
   const start = $("project-blueprint");
   const was = start.value;
@@ -2887,6 +2944,7 @@ function wireButtons() {
   });
 
   on("title-save", "click", saveTitle);
+  on("drive-when", "change", saveDriveWhen);
   on("plan-convert", "change", sendPlanChange);
   on("plan-edition", "change", sendPlanChange);
 

@@ -134,6 +134,19 @@ the processor) and are stopped separately. The transcode records its rip as
 `from`. A rip that is stopped or does not finish takes its waiting transcode
 off the queue, saying why.
 
+**Each step stays open to change until it starts.** The copy can start the
+moment the disc is read, since the scan already knows every track, and the Plan
+stays on the page while it runs. The film's name and the subtitle tracks to
+read can be changed until the copy is finished: that is when the original is
+named, and its subtitles begin. A name changed while copying moves the copy to
+the folder for that name when it is renamed, and the folder made for the old
+name goes if nothing else is in it. The film — its line items, its edition,
+and whether to make one at all — can be changed until it leaves the line for
+the processor; a change made after the original exists is pointed at the
+original's tracks as the first one was. Each step takes what the Plan says
+under the same lock a change is made under, so a change is either in the step
+or refused with a sentence saying that step has started.
+
 **QUEUED** is waiting for a processor slot, shown as a stage of its own because
 waiting and working otherwise look the same. A job that gets a slot straight away
 passes through it without stopping. Whatever waits, waits in a line that can be
@@ -269,6 +282,7 @@ No locking, no SQLite-over-NFS corruption, no coordination.
   nodes/
     <node-id>/
       calibration.json            # estimator model (§12)
+      drives.json                 # what each drive does when a disc goes in (§14)
       jobs/<job-id>.json
       log/<job-id>.txt
   library/
@@ -991,6 +1005,18 @@ section keeps running whichever is showing, so switching loses nothing.
 The drive's box is headed with the drive's own name, which never changes; what
 the drive is doing is written underneath.
 
+Each drive has **When a disc goes in: Nothing / Copy / Blueprint: [name]**,
+kept by the drive's name in the node's own `drives.json`. *Nothing* waits for
+Plan to be pressed. *Copy* reads the disc as soon as it goes in and starts
+copying it, from the blueprint used by default, with no film; its subtitles
+are read as the Plan chose. *Blueprint* does the same and makes a film too,
+from that blueprint or, as *Blueprint: Defaults*, from the defaults. Either
+way the Plan stays open while the disc copies (§2), to change anything or add
+a film. What stops a disc starting on its own — too little room, a file
+already there, a blueprint since removed — leaves its Plan waiting, and the
+log says why. A disc already in the drive when ARFABIT starts did not just go
+in, and is left alone.
+
 ### The Plan
 
 A disc's Plan is two parts. **The original** says what is on the disc and goes
@@ -999,6 +1025,9 @@ and nothing else: nothing in it is converted, so it never talks about
 converting. **Make a film** turns on the second part, **the film**: the
 same line-item editor as the Projects page, fed with the disc's tracks, started
 from the default blueprint or the defaults (§8, Projects).
+
+Once started, the Plan stays up while any of it can still change (§2), saying
+which parts are still open; the rest is greyed and cannot be changed.
 
 The Plan will not start a job that would replace a file already there — an
 original, or a film in the library under the same edition — and says which file
@@ -1141,6 +1170,7 @@ blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
 | Web page, log view, server-sent events | built, tested |
 | Defaults and blueprints: settings file, made on the page, one-off, optional default blueprint | built, tested |
 | Processor slots and QUEUED | built, tested |
+| A disc's Plan open to change until each step starts; what a drive does when a disc goes in | built, tested (starting on its own not yet tried with a real drive) |
 | Projects: line items copied or converted, blueprints as recipes, lab clips and whole-Original Deliveries | built, tested (no VMAF) |
 | Offline IMDb index: download, lookup, suggestions on the Plan | built, tested |
 | Jobs left behind by a restart; running a stopped job again from its own Plans | built, tested |
@@ -1214,19 +1244,15 @@ out of Recent tasks. Both are what this changes.
 Built so far, and folded into the sections they belong to: the words Original,
 Project and Task (§2); originals kept beside their films, and their SRTs (§6);
 OCR as tasks of their own after the copy, films taking the SRTs at DELIVER,
-tags on OCR tasks, and copies brought up to date after a fix (§2, §10, §14).
-
-### Planning while copying
-
-- **Each step stays editable until it starts.** The copy can start the moment a
-  disc goes in, with the plan changed while it runs: SCAN already knows every
-  track before copying, and a transcode already waits for its rip.
+tags on OCR tasks, and copies brought up to date after a fix (§2, §10, §14);
+each step open to change until it starts, and what a drive does when a disc
+goes in (§2, §14).
 
 ### The page (replaces §14's sections)
 
-- **Tasks** — watching. Each drive, with **"When a disc goes in: Nothing / Copy /
-  Blueprint: [name]"**, and a Plan button that opens the disc's project. The
-  queue, logs, and recent tasks.
+- **Tasks** — watching. Each drive (with its "When a disc goes in", built) and
+  a Plan button that opens the disc's project. The queue, logs, and recent
+  tasks.
 - **Projects** — creating. Pick a source: a disc in a drive, an original, or any
   file ARFABIT made (a converted MKV can be remuxed to MP4 with other subtitles,
   say). Pick what to make: copy; read subtitles (OCR only, no picture or sound
