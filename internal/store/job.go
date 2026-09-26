@@ -36,7 +36,7 @@ const (
 // exists the disc has nothing left to give, and everything after it happens on
 // the copy. Holding the disc through a two-hour encode would be keeping it for
 // no reason.
-var Stages = []Stage{StageScan, StagePlan, StageRip, StageEject, StageOCR, StageQueued, StagePackage, StageDeliver}
+var Stages = []Stage{StageScan, StagePlan, StageRip, StageEject, StageQueued, StagePackage, StageOCR, StageDeliver}
 
 // State is where a job has got to.
 type State string
@@ -125,6 +125,11 @@ type Job struct {
 	Master   string   `json:"master,omitempty"`
 	Delivery string   `json:"delivery,omitempty"`
 	Sidecars []string `json:"sidecars,omitempty"`
+
+	// LowConfidence lists the subtitles OCR may have read wrong, for a
+	// person to check (§10). The sidecars hold the first reading of each
+	// until somebody chooses otherwise.
+	LowConfidence []LowConfidence `json:"low_confidence,omitempty"`
 
 	// ReadSpeed is how fast the disc was read through the copy, averaged over
 	// each half minute, so the page can draw how it went once it is over.
@@ -371,4 +376,31 @@ type LibraryEntry struct {
 	Node      string    `json:"node"`
 	JobID     string    `json:"job_id"`
 	Delivered time.Time `json:"delivered"`
+}
+
+// LowConfidence is one subtitle OCR may have read wrong: nothing was read
+// from it, what was read holds a mark known to be a misreading, or a second
+// reading says other words. "Low confidence" is ARFABIT's own measure; no
+// reader's score goes into it.
+type LowConfidence struct {
+	// Sidecar is the SRT the subtitle is in, and Start and End when it
+	// shows.
+	Sidecar string        `json:"sidecar"`
+	Start   time.Duration `json:"start"`
+	End     time.Duration `json:"end"`
+
+	// Text is what the sidecar holds, from the first reading; empty when
+	// nothing was read, and then the subtitle is not in it. Fast is the
+	// second reading, where there was one.
+	Text string `json:"text"`
+	Fast string `json:"fast,omitempty"`
+
+	// Picture is the subtitle as it is on the disc, kept so a person can
+	// see what it says (Store.PicturePath).
+	Picture string `json:"picture"`
+
+	// Changed is set once a person has chosen what the subtitle says, and
+	// Chosen is what they chose, now in the sidecar. Empty means left out.
+	Changed bool   `json:"changed,omitempty"`
+	Chosen  string `json:"chosen,omitempty"`
 }

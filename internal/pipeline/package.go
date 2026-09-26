@@ -43,8 +43,9 @@ func (r *Runner) configuredDirs() outputDirs {
 var containers = map[string]string{"mkv": meta.VideoExt}
 
 // checkPackage refuses a Package that could not be made, before anything
-// waits in the line for it.
-func checkPackage(p *store.Package) error {
+// waits in the line for it. canRead says whether this computer can read
+// subtitles into text (§10).
+func checkPackage(p *store.Package, canRead bool) error {
 	if len(p.Containers) == 0 {
 		p.Containers = []string{"mkv"}
 	}
@@ -61,11 +62,21 @@ func checkPackage(p *store.Package) error {
 		return errors.New("a package can hold one picture")
 	}
 
+	converted := map[string]bool{}
 	for _, it := range p.Items {
+		// Each becomes a file named by its language (§6), so two would need
+		// the same name.
+		if it.Kind == store.KindSubtitle && it.Action == store.ActionConvert {
+			lang := strings.ToLower(it.Lang)
+			if converted[lang] {
+				return fmt.Errorf("only one %s subtitle track can be read into text, since each becomes a file named by its language", languageName(it.Lang))
+			}
+			converted[lang] = true
+		}
 		switch it.Action {
 		case store.ActionCopy:
 		case store.ActionConvert:
-			if err := checkConversion(it); err != nil {
+			if err := checkConversion(it, canRead); err != nil {
 				return err
 			}
 		default:
@@ -75,7 +86,7 @@ func checkPackage(p *store.Package) error {
 	return nil
 }
 
-func checkConversion(it store.Item) error {
+func checkConversion(it store.Item, canRead bool) error {
 	switch it.Kind {
 	case store.KindVideo:
 		if it.To != "hevc" {
@@ -109,7 +120,15 @@ func checkConversion(it store.Item) error {
 			return fmt.Errorf("%s is more than the %d kbps the track has, which would only make the file bigger", it.Bitrate, it.SourceBitrate/1000)
 		}
 	case store.KindSubtitle:
-		return errors.New("subtitles can only be copied until ARFABIT can read them into text")
+		if !canRead {
+			return errors.New("subtitles cannot be read into text on this computer, so they can only be copied as they are")
+		}
+		if it.Codec != pictureSubtitles {
+			return errors.New("only a Blu-ray's picture subtitles can be read into text")
+		}
+		if it.To != "srt" {
+			return fmt.Errorf("subtitles can only be converted to text (SRT), not %q", it.To)
+		}
 	}
 	return nil
 }
@@ -121,7 +140,7 @@ func (r *Runner) StartPackage(parent context.Context, req PackageRequest) (*Job,
 		return nil, errors.New("there is no master to work from")
 	}
 	pkg := req.Package
-	if err := checkPackage(&pkg); err != nil {
+	if err := checkPackage(&pkg, r.OCR != nil); err != nil {
 		return nil, err
 	}
 
@@ -134,7 +153,12 @@ func (r *Runner) StartPackage(parent context.Context, req PackageRequest) (*Job,
 	// would be replaced. Refused now, before anything waits in the line.
 	if pkg.WholeFilm() {
 		title := meta.Title{Name: film, Year: req.Year}
-		if err := wouldReplace(existingFilm(title.LibraryDir(req.LibraryDir), title, pkg.Edition)); err != nil {
+		dir := title.LibraryDir(req.LibraryDir)
+		existing := existingFilm(dir, title, pkg.Edition)
+		for _, path := range sidecarPaths(&pkg, filepath.Join(dir, title.VideoName(pkg.Edition))) {
+			existing = append(existing, existingAt(path)...)
+		}
+		if err := wouldReplace(existing); err != nil {
 			return nil, err
 		}
 	}
@@ -217,7 +241,10 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		run = lab.NextRun(filepath.Join(dirs.clips, job.Title))
 	}
 
-	var made []lab.Clip
+	var (
+		made  []lab.Clip
+		notes []string
+	)
 	for i, container := range pkg.Containers {
 		if ctx.Err() != nil {
 			r.stop(job, "Stopped at your request.", "")
@@ -233,8 +260,10 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		}
 		r.save(job)
 
-		start := time.Now()
-		err := r.makePackageFile(ctx, job, info, out)
+		took, note, err := r.makePackageFile(ctx, job, info, out)
+		if note != "" {
+			notes = append(notes, note)
+		}
 
 		var replace *ReplaceError
 		switch {
@@ -255,8 +284,7 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		if st, err := os.Stat(out); err == nil {
 			size = st.Size()
 		}
-		job.Log.Printf(job.Stage, "Made %s (%s) in %s.", filepath.Base(out), HumanBytes(size), time.Since(start).Round(time.Second))
-		made = append(made, lab.Clip{Name: packageName(pkg), Path: out, Size: size, Took: time.Since(start)})
+		made = append(made, lab.Clip{Name: packageName(pkg), Path: out, Size: size, Took: took})
 		job.Made = append(job.Made, out)
 
 		if pkg.WholeFilm() {
@@ -279,6 +307,9 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 	job.Note = fmt.Sprintf("%s is ready.", job.File)
 	if len(made) > 1 {
 		job.Note = fmt.Sprintf("%d files are ready.", len(made))
+	}
+	for _, note := range notes {
+		job.Note += " " + note
 	}
 	job.Log.Printf(job.Stage, "%s", job.Note)
 	r.save(job)
@@ -318,13 +349,24 @@ func packageOutput(job *Job, title meta.Title, dirs outputDirs, container string
 //
 // Copied streams can only start on a keyframe, so a clip starts at the last
 // one before the time asked for: on a disc, usually under a second before.
-func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, out string) error {
+//
+// Once the file is made, subtitles converted to text are read (OCR) from the
+// same piece, into SRT files beside it (readSubtitles). It returns how long
+// making the file took, and anything to add to the job's note about the
+// subtitles.
+func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, out string) (time.Duration, string, error) {
 	pkg := job.Package
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return err
+		return 0, "", err
 	}
 	if err := refuseToReplace(out); err != nil {
-		return err
+		return 0, "", err
+	}
+	// Found now rather than after hours of converting.
+	for _, path := range sidecarPaths(pkg, out) {
+		if err := refuseToReplace(path); err != nil {
+			return 0, "", err
+		}
 	}
 
 	input := job.Master
@@ -353,7 +395,7 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		job.Log.Printf(job.Stage, "Cutting %s from %s.", formatDuration(pkg.Length), formatDuration(pkg.At))
 		if err := ffmpeg.Run(ctx, args, ffmpeg.RunOptions{Duration: pkg.Length}); err != nil {
 			_ = os.Remove(piece)
-			return err
+			return 0, "", err
 		}
 		defer os.Remove(piece)
 
@@ -364,11 +406,11 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 
 	req, err := encodeRequest(pkg, info, input, out, index)
 	if err != nil {
-		return err
+		return 0, "", err
 	}
 	args, err := req.Args()
 	if err != nil {
-		return err
+		return 0, "", err
 	}
 
 	start := time.Now()
@@ -387,20 +429,26 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		},
 	})
 	if err != nil {
-		return err
+		return 0, "", err
 	}
+	took := time.Since(start)
+
+	size := int64(0)
+	if st, err := os.Stat(out); err == nil {
+		size = st.Size()
+	}
+	job.Log.Printf(job.Stage, "Made %s (%s) in %s.", filepath.Base(out), HumanBytes(size), took.Round(time.Second))
 
 	// A whole film's encode is what the estimator learns from.
 	video := pkg.ItemsOf(store.KindVideo)[0]
-	if pkg.WholeFilm() && video.Action == store.ActionConvert {
-		if written, err := os.Stat(out); err == nil {
-			if v := info.VideoStream(); v != nil {
-				r.Calibration.ObserveEncode(calibrationPlan(pkg, info), v.Width, v.Height,
-					written.Size(), duration, time.Since(start))
-			}
+	if pkg.WholeFilm() && video.Action == store.ActionConvert && size > 0 {
+		if v := info.VideoStream(); v != nil {
+			r.Calibration.ObserveEncode(calibrationPlan(pkg, info), v.Width, v.Height, size, duration, took)
 		}
 	}
-	return nil
+
+	note, err := r.readSubtitles(ctx, job, input, index, out)
+	return took, note, err
 }
 
 // encodeRequest turns the line items into what the encoder is asked for.
@@ -444,13 +492,17 @@ func encodeRequest(pkg *store.Package, info *ffmpeg.MediaInfo, input, out string
 		req.Audio = append(req.Audio, track)
 	}
 
-	// No subtitle track is switched on by default: a player showing
-	// subtitles nobody asked for is worse than one that needs a click.
 	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
 		if s := streamAt(info, it.Source); s == nil || s.Kind != "subtitle" {
 			return req, fmt.Errorf("the master has no subtitles at stream %d", it.Source)
 		}
-		req.SubtitleCopies = append(req.SubtitleCopies, ffmpeg.SubtitleCopy{
+		// Converted, they become SRT files beside the one made.
+		if it.Action == store.ActionConvert {
+			continue
+		}
+		// No subtitle track is switched on by default: a player showing
+		// subtitles nobody asked for is worse than one that needs a click.
+		req.Subtitles = append(req.Subtitles, ffmpeg.SubtitleTrack{
 			SourceIndex: index(it.Source),
 			Lang:        it.Lang,
 			Title:       languageName(it.Lang),

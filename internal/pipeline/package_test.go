@@ -33,11 +33,11 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "eac3", Channels: 6, OutChannels: 2}}}, "AAC for stereo"},
 		{"more than the track has", store.Package{Items: []store.Item{video,
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "aac", Channels: 2, Bitrate: "768k", SourceBitrate: 192000}}}, "192 kbps"},
-		{"subtitles converted", store.Package{Items: []store.Item{video,
-			{Kind: store.KindSubtitle, Action: store.ActionConvert}}}, "copied"},
+		{"subtitles converted where they cannot be read", store.Package{Items: []store.Item{video,
+			{Kind: store.KindSubtitle, Action: store.ActionConvert, To: "srt", Codec: "hdmv_pgs_subtitle"}}}, "cannot be read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkPackage(&tc.pkg)
+			err := checkPackage(&tc.pkg, false)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
 			}
@@ -45,7 +45,7 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 	}
 
 	ok := store.Package{Items: []store.Item{video}}
-	if err := checkPackage(&ok); err != nil {
+	if err := checkPackage(&ok, false); err != nil {
 		t.Errorf("a picture copied as it is was refused: %v", err)
 	}
 	if len(ok.Containers) != 1 || ok.Containers[0] != "mkv" {

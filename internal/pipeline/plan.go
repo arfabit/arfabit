@@ -15,7 +15,7 @@ import (
 //
 // Everything it decides is shown to the user before anything happens, and
 // every choice can be changed. Nothing here acts on its own (§8).
-func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint) (*store.Plan, error) {
+func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, canRead bool) (*store.Plan, error) {
 	if sel.Feature < 0 || sel.Feature >= len(d.Titles) {
 		return nil, fmt.Errorf("no title was selected")
 	}
@@ -46,7 +46,7 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint) (*s
 
 	// What the Master will hold, and the package the blueprint makes of it.
 	plan.Tracks = DiscTracks(title)
-	pkg := Recipe(plan.Tracks, blueprint)
+	pkg := Recipe(plan.Tracks, blueprint, canRead)
 	plan.Package = &pkg
 	plan.Seconds = int(title.Duration.Seconds())
 	plan.Subtitles = planSubtitles(title, blueprint)

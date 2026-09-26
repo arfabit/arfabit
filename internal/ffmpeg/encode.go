@@ -59,24 +59,16 @@ type AudioTrack struct {
 	Default  bool
 }
 
-// SubtitleTrack is one output subtitle track, carried as SRT.
+// SubtitleTrack is one output subtitle track, copied from the input as it
+// is. Subtitles read into text by OCR are not put in the file; they go beside
+// it as SRT files (§10).
 type SubtitleTrack struct {
-	// Path to an SRT file on disk. The bitmap subtitles a disc ships would
-	// force Plex to convert the picture to show them (§10), so subtitles reach
-	// here only after OCR.
-	Path    string
+	SourceIndex int
+
 	Lang    string
 	Title   string
 	Forced  bool
 	Default bool
-}
-
-// SubtitleCopy is a subtitle track taken from the input as it is.
-type SubtitleCopy struct {
-	SourceIndex int
-	Lang        string
-	Title       string
-	Default     bool
 }
 
 // EncodeRequest is one packaging job: an input file plus what to make of it.
@@ -86,10 +78,8 @@ type EncodeRequest struct {
 	Video  VideoPlan
 	Audio  []AudioTrack
 
-	// SubtitleCopies come first among the subtitles, then Subtitles, which
-	// are SRT files made by OCR.
-	SubtitleCopies []SubtitleCopy
-	Subtitles      []SubtitleTrack
+	// Subtitles are in the order they go into the file.
+	Subtitles []SubtitleTrack
 
 	// VideoSourceIndex is the input stream index of the picture.
 	VideoSourceIndex int
@@ -159,20 +149,12 @@ func (r EncodeRequest) Args() ([]string, error) {
 
 	args := []string{"-hide_banner", "-y", "-i", r.Input}
 
-	// Each SRT is a separate input, numbered from 1.
-	for _, s := range r.Subtitles {
-		args = append(args, "-i", s.Path)
-	}
-
 	args = append(args, "-map", fmt.Sprintf("0:%d", r.VideoSourceIndex))
 	for _, a := range r.Audio {
 		args = append(args, "-map", fmt.Sprintf("0:%d", a.SourceIndex))
 	}
-	for _, s := range r.SubtitleCopies {
+	for _, s := range r.Subtitles {
 		args = append(args, "-map", fmt.Sprintf("0:%d", s.SourceIndex))
-	}
-	for i := range r.Subtitles {
-		args = append(args, "-map", fmt.Sprintf("%d:0", i+1))
 	}
 
 	args = append(args, r.videoArgs()...)
@@ -333,25 +315,12 @@ func LosslessFrames(codec string) string {
 
 func (r EncodeRequest) subtitleArgs() []string {
 	var args []string
-
-	// Copied tracks stay as they are, whatever they are; Matroska carries
-	// picture subtitles too, though showing them costs a player more (§4).
-	for i, s := range r.SubtitleCopies {
+	for i, s := range r.Subtitles {
 		out := strconv.Itoa(i)
+		// A copied track stays as it is, whatever it is; Matroska carries
+		// picture subtitles too, though showing them costs a player more
+		// (§4).
 		args = append(args, "-c:s:"+out, "copy")
-		if s.Lang != "" {
-			args = append(args, "-metadata:s:s:"+out, "language="+s.Lang)
-		}
-		if s.Title != "" {
-			args = append(args, "-metadata:s:s:"+out, "title="+s.Title)
-		}
-		args = append(args, "-disposition:s:"+out, dispositionOf(s.Default, false))
-	}
-
-	for n, s := range r.Subtitles {
-		out := strconv.Itoa(len(r.SubtitleCopies) + n)
-		// SRT, as text, which plays directly; Matroska carries it as it is.
-		args = append(args, "-c:s:"+out, "srt")
 		if s.Lang != "" {
 			args = append(args, "-metadata:s:s:"+out, "language="+s.Lang)
 		}
@@ -360,7 +329,6 @@ func (r EncodeRequest) subtitleArgs() []string {
 		}
 		args = append(args, "-disposition:s:"+out, dispositionOf(s.Default, s.Forced))
 	}
-
 	return args
 }
 

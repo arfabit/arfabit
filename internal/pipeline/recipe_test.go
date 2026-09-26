@@ -39,7 +39,7 @@ func TestRecipeKeepsTheOneLanguageThereIs(t *testing.T) {
 		Choices: []config.SoundChoice{{Mode: config.SoundOne, Layouts: []string{"7.1", "5.1"}}},
 	}
 
-	pkg := Recipe(tracks, b)
+	pkg := Recipe(tracks, b, false)
 	if got := describe(pkg.ItemsOf(store.KindAudio)); got != "audio:jpn:truehd:copy" {
 		t.Errorf("sound = %q, want the Japanese 5.1 kept as it is", got)
 	}
@@ -55,7 +55,7 @@ func TestRecipeAddsNoSoundWhenNothingFits(t *testing.T) {
 	b := config.Defaults().Plain()
 	b.Sound = &config.SoundRules{Languages: []string{"eng"}, Choices: []config.SoundChoice{{Mode: config.SoundAll}}}
 
-	pkg := Recipe(tracks, b)
+	pkg := Recipe(tracks, b, false)
 	if n := len(pkg.ItemsOf(store.KindAudio)); n != 0 {
 		t.Errorf("%d sound line items were added from rules that fit nothing", n)
 	}
@@ -81,7 +81,7 @@ func TestRecipeTrueHDChoice(t *testing.T) {
 	} {
 		b := config.Defaults().Plain()
 		b.Sound, b.TrueHD = everything, choice
-		if got := describe(Recipe(tracks, b).ItemsOf(store.KindAudio)); got != want {
+		if got := describe(Recipe(tracks, b, false).ItemsOf(store.KindAudio)); got != want {
 			t.Errorf("TrueHD %q: sound = %q, want %q", choice, got, want)
 		}
 	}
@@ -94,18 +94,19 @@ func TestRecipePicture(t *testing.T) {
 
 	b := config.Defaults().Plain()
 	b.CRFBluray, b.Preset = 22, "medium"
-	v := Recipe(tracks, b).ItemsOf(store.KindVideo)[0]
+	v := Recipe(tracks, b, false).ItemsOf(store.KindVideo)[0]
 	if v.Action != store.ActionConvert || v.To != "hevc" || v.CRF != 22 || v.Preset != "medium" {
 		t.Errorf("picture = %+v, want HEVC at quality 22, medium", v)
 	}
 
 	b.KeepPicture = true
-	if v := Recipe(tracks, b).ItemsOf(store.KindVideo)[0]; v.Action != store.ActionCopy {
+	if v := Recipe(tracks, b, false).ItemsOf(store.KindVideo)[0]; v.Action != store.ActionCopy {
 		t.Errorf("picture = %+v, want it kept as it is", v)
 	}
 }
 
-// Subtitles in the wanted languages are copied; others are left out.
+// Subtitles in the wanted languages are copied where they cannot be read
+// into text; others are left out.
 func TestRecipeSubtitles(t *testing.T) {
 	tracks := masterOf(
 		Track{Index: 0, Kind: store.KindVideo, Codec: "h264", Height: 1080},
@@ -113,7 +114,7 @@ func TestRecipeSubtitles(t *testing.T) {
 		Track{Index: 6, Kind: store.KindSubtitle, Codec: "hdmv_pgs_subtitle", Lang: "fra"},
 	)
 	b := config.Defaults().Plain() // English subtitles
-	if got := describe(Recipe(tracks, b).ItemsOf(store.KindSubtitle)); got != "subtitle:eng:hdmv_pgs_subtitle:copy" {
+	if got := describe(Recipe(tracks, b, false).ItemsOf(store.KindSubtitle)); got != "subtitle:eng:hdmv_pgs_subtitle:copy" {
 		t.Errorf("subtitles = %q", got)
 	}
 }
@@ -159,5 +160,28 @@ func TestBitrateNeverExceedsTheSource(t *testing.T) {
 		if got := bitrateFor(tc.want, tc.track); got != tc.got {
 			t.Errorf("bitrateFor(%s, %d kbps) = %s, want %s", tc.want, tc.track.Bitrate/1000, got, tc.got)
 		}
+	}
+}
+
+// Where subtitles can be read into text, a Blu-ray's picture subtitles are
+// converted to SRT, unless the blueprint keeps them as pictures. Subtitles
+// that cannot be read are copied.
+func TestRecipeReadsSubtitlesIntoText(t *testing.T) {
+	tracks := masterOf(
+		Track{Index: 0, Kind: store.KindVideo, Codec: "h264", Height: 1080},
+		Track{Index: 5, Kind: store.KindSubtitle, Codec: "hdmv_pgs_subtitle", Lang: "eng"},
+		Track{Index: 6, Kind: store.KindSubtitle, Codec: "dvd_subtitle", Lang: "eng"},
+		Track{Index: 7, Kind: store.KindSubtitle, Codec: "hdmv_pgs_subtitle", Lang: "eng"},
+	)
+	b := config.Defaults().Plain()
+	// The second English picture track is copied: each track read becomes a
+	// file named by its language.
+	if got := describe(Recipe(tracks, b, true).ItemsOf(store.KindSubtitle)); got != "subtitle:eng:hdmv_pgs_subtitle:convert>srt subtitle:eng:dvd_subtitle:copy subtitle:eng:hdmv_pgs_subtitle:copy" {
+		t.Errorf("subtitles = %q", got)
+	}
+
+	b.KeepSubtitlePictures = true
+	if got := describe(Recipe(tracks, b, true).ItemsOf(store.KindSubtitle)); got != "subtitle:eng:hdmv_pgs_subtitle:copy subtitle:eng:dvd_subtitle:copy subtitle:eng:hdmv_pgs_subtitle:copy" {
+		t.Errorf("kept as pictures: subtitles = %q", got)
 	}
 }

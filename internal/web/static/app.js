@@ -1291,6 +1291,9 @@ function recentDetail(job) {
     body.append(files);
   }
 
+  // Subtitles OCR may have read wrong, to check against their pictures.
+  if ((job.low_confidence || []).length) body.append(lowConfidenceList(job));
+
   // How the copy went. Worth seeing because a drive that slows down half way
   // through looks just like a slow drive from the average alone.
   if ((job.read_speed || []).length > 1) {
@@ -1327,6 +1330,112 @@ function recentDetail(job) {
   return body;
 }
 
+// Subtitles of low confidence (§10), each beside its picture. The sidecar
+// holds the accurate reading until somebody chooses otherwise. Picking a
+// reading saves it; Custom starts from whichever was picked last.
+const openLowConfidence = new Set();
+
+function lowConfidenceList(job) {
+  const entries = job.low_confidence;
+  const box = document.createElement("details");
+  box.className = "low-confidence";
+  box.open = openLowConfidence.has(job.id);
+  box.addEventListener("toggle", () => {
+    if (box.open) openLowConfidence.add(job.id);
+    else openLowConfidence.delete(job.id);
+  });
+
+  const summary = document.createElement("summary");
+  const chosen = entries.filter((e) => e.changed).length;
+  summary.textContent = `Low confidence: ${entries.length} subtitle${entries.length === 1 ? "" : "s"}`
+    + (chosen ? `, ${chosen} chosen` : "");
+  box.append(summary, ...entries.map((entry, n) => lowConfidenceRow(job, entry, n)));
+  return box;
+}
+
+function lowConfidenceRow(job, entry, n) {
+  const row = document.createElement("div");
+  row.className = "low-confidence-row";
+
+  const when = document.createElement("div");
+  when.className = "muted small";
+  when.textContent = clockText(entry.start);
+
+  const picture = document.createElement("img");
+  picture.loading = "lazy";
+  picture.alt = "The subtitle as it is on the disc";
+  picture.src = `/api/jobs/${encodeURIComponent(job.id)}/low-confidence/${n}/picture`;
+
+  // The readings to choose from: both where there were two, otherwise the
+  // one there was.
+  const readings = entry.fast
+    ? [["Accurate", entry.text || ""], ["Fast", entry.fast]]
+    : [["As read", entry.text || ""]];
+  const current = entry.changed ? entry.chosen || "" : entry.text || "";
+  const picked = readings.findIndex(([, text]) => text === current);
+
+  const choose = async (text) => {
+    const reply = await post(`/api/jobs/${encodeURIComponent(job.id)}/low-confidence/${n}`, { text });
+    if (reply) refresh();
+    return reply;
+  };
+
+  const custom = document.createElement("div");
+  custom.className = "low-confidence-custom";
+  custom.hidden = picked !== -1;
+  const box = document.createElement("textarea");
+  box.rows = 2;
+  box.value = current;
+  const save = document.createElement("button");
+  save.type = "button";
+  save.textContent = "Save";
+  save.addEventListener("click", (e) => busy(e.target, "Saving\u2026", "Saved", () => choose(box.value)));
+  custom.append(box, save);
+
+  const group = document.createElement("div");
+  group.className = "low-confidence-choices";
+  const option = (label, text, checked, chosen) => {
+    const wrap = document.createElement("label");
+    wrap.className = "inline";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = `low-confidence-${job.id}-${n}`;
+    radio.checked = checked;
+    radio.addEventListener("change", chosen);
+    const name = document.createElement("span");
+    name.textContent = label;
+    wrap.append(radio, name);
+    if (text !== null) {
+      const said = document.createElement("span");
+      said.className = "low-confidence-reading";
+      said.textContent = text || "Nothing was read";
+      wrap.append(said);
+    }
+    group.append(wrap);
+  };
+  readings.forEach(([label, text], i) => option(label, text, i === picked, () => {
+    box.value = text;
+    custom.hidden = true;
+    choose(text);
+  }));
+  option("Custom", null, picked === -1, () => {
+    custom.hidden = false;
+    box.focus();
+  });
+
+  row.append(when, picture, group, custom);
+  return row;
+}
+
+// clockText is a moment in a film, given in nanoseconds, as a player shows it.
+function clockText(ns) {
+  const total = Math.round((ns || 0) / 1e9);
+  const h = Math.floor(total / 3600);
+  const m = String(Math.floor(total / 60) % 60).padStart(2, "0");
+  const sec = String(total % 60).padStart(2, "0");
+  return `${h}:${m}:${sec}`;
+}
+
 async function refresh() {
   const state = await fetch("/api/state").then((r) => r.json());
   if (state.now) clockOffset = Date.now() - new Date(state.now).getTime();
@@ -1335,6 +1444,7 @@ async function refresh() {
   driveBusy = state.drive_busy || "";
   resumable = state.resumable || {};
   line = state.line || [];
+  subtitleReading = { ocr: Boolean(state.ocr), note: state.ocr_note || "" };
   renderDrives(state.drives);
   renderActive(state.active || []);
   renderJob(state.job, state.existing || []);
@@ -1555,6 +1665,9 @@ function recallTranscode() {
 
 // What the chosen master holds, and the package being planned from it.
 let masterInfo = { tracks: [], duration: 0 };
+
+// Whether this computer can read picture subtitles into text (§10).
+let subtitleReading = { ocr: false, note: "" };
 let pkg = null;
 
 // The defaults' values, for a line that starts being converted by hand.
@@ -1767,6 +1880,7 @@ function convertItem(track) {
       : track.height && track.height < 700 ? defaultValues.crf_dvd : defaultValues.crf_bluray;
     return { ...item, to: "hevc", crf, preset: defaultValues.preset };
   }
+  if (track.kind === "subtitle") return { ...item, to: "srt" };
   if (track.lossless) return { ...item, to: "flac" };
   return { ...item, to: "aac", bitrate: bitrateFor(track.channels > 2 ? "640k" : defaultValues.audio_bitrate, track) };
 }
@@ -1823,8 +1937,9 @@ function itemRow(item, position, tracks, pkg, changed, rows, kind) {
 
   // A line is copied as it is unless Convert is on, which shows what to
   // convert it to. Keeping a track and a converted one beside it is two
-  // lines, the second added from the master below. Subtitles can only be
-  // copied until ARFABIT can read them into text (§10).
+  // lines, the second added from the master below. Subtitles are converted
+  // only where this computer can read them into text, and only a Blu-ray's
+  // picture subtitles are read (§10).
   const convert = document.createElement("label");
   convert.className = "chip convert-pill";
   const toggle = document.createElement("input");
@@ -1836,7 +1951,8 @@ function itemRow(item, position, tracks, pkg, changed, rows, kind) {
     changed();
   });
   convert.append(toggle, document.createTextNode("Convert"));
-  convert.hidden = kind === "subtitle";
+  const readable = track.codec === "hdmv_pgs_subtitle";
+  convert.hidden = kind === "subtitle" && !(readable && subtitleReading.ocr);
 
   const remove = document.createElement("button");
   remove.type = "button";
@@ -1857,6 +1973,12 @@ function itemRow(item, position, tracks, pkg, changed, rows, kind) {
   // would put the same track in the file twice.
   const notes = [];
   if (item.action === "copy" && track.note) notes.push(track.note);
+  if (item.action === "copy" && kind === "subtitle" && readable && !subtitleReading.ocr && subtitleReading.note) {
+    notes.push(subtitleReading.note);
+  }
+  if (item.action === "convert" && kind === "subtitle") {
+    notes.push("Read into text once the file is made, and kept beside it as an SRT file. Lines of low confidence are listed in the task's log.");
+  }
   if (item.action === "convert" && kind === "audio" && !track.lossless) {
     notes.push(track.note
       ? "This sound is not lossless, so converting it loses a little more."
@@ -1876,6 +1998,13 @@ function itemRow(item, position, tracks, pkg, changed, rows, kind) {
 // convertFields are the settings for a converted line.
 function convertFields(item, track, changed) {
   const set = (key, cast = (v) => v) => (value) => { item[key] = cast(value); changed(); };
+
+  if (item.kind === "subtitle") {
+    const label = document.createElement("span");
+    label.className = "muted small";
+    label.textContent = "Text (SRT)";
+    return [label];
+  }
 
   if (item.kind === "video") {
     const crf = document.createElement("input");
@@ -2206,6 +2335,10 @@ function blueprintForm(values, options) {
   tick("Keep 4K pictures exactly as they are", "allow_uhd_copy", values.allow_uhd_copy !== false);
   tick("Keep the picture exactly as it is", "keep_picture", values.keep_picture === true);
   tick("Keep sound exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
+  // Picture subtitles make Plex convert the whole picture to show them (§4),
+  // so they are read into text, where this computer can (§10), unless kept.
+  tick("Keep subtitles as pictures, rather than reading them into text", "keep_subtitle_pictures",
+    values.keep_subtitle_pictures === true);
 
   // TrueHD plays on Apple TV only by Plex converting it every time (§4), so
   // what to do with it is a choice worth making once, here.

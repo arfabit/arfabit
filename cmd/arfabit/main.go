@@ -26,6 +26,7 @@ import (
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
+	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/restart"
 	"github.com/arfabit/arfabit/internal/store"
@@ -96,6 +97,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		Backend:     backend,
 		Calibration: calibration,
 		Index:       index,
+		OCR:         ocr.System(),
 		Slots:       pipeline.NewSlots(cfg.Machine.MaxConversions),
 		Hold:        pipeline.TranscodeHold,
 	}

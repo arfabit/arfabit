@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -684,7 +685,7 @@ func TestPackageNeedsNoBlueprint(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/package",
-		strings.NewReader(`{"master":"/nowhere/m.mkv","film":"x","package":{"length":30000000000,
+		strings.NewReader(`{"master":`+strconv.Quote(filepath.Join(s.Config.Paths.Masters, "x", "m.mkv"))+`,"film":"x","package":{"length":30000000000,
 			"items":[{"kind":"video","action":"convert","to":"hevc","crf":26,"preset":"medium","source":0}]}}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a package of line items alone was refused: %s", rec.Body)
@@ -705,7 +706,7 @@ func TestPackageIsRefusedPlainly(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/package",
-		strings.NewReader(`{"master":"/nowhere/m.mkv","package":{"items":[]}}`)))
+		strings.NewReader(`{"master":`+strconv.Quote(filepath.Join(s.Config.Paths.Masters, "x", "m.mkv"))+`,"package":{"items":[]}}`)))
 	if rec.Code == http.StatusOK {
 		t.Fatal("a package with no picture was accepted")
 	}
@@ -721,9 +722,19 @@ func TestMasterMustBeReadable(t *testing.T) {
 	if rec := get(t, s, "/api/master"); rec.Code == http.StatusOK {
 		t.Error("tracks were listed for no master at all")
 	}
-	rec := get(t, s, "/api/master?path=/nowhere/at/all.mkv")
+	missing := filepath.Join(s.Config.Paths.Masters, "Gone (2020)", "gone.mkv")
+	rec := get(t, s, "/api/master?path="+url.QueryEscape(missing))
 	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be read") {
 		t.Errorf("a master that does not exist: %d %s", rec.Code, rec.Body)
+	}
+
+	// ARFABIT listens on the whole network, so it reads nothing outside the
+	// masters folder, however the path is dressed up.
+	for _, outside := range []string{"/etc/hosts", filepath.Join(s.Config.Paths.Masters, "..", "config.toml"), s.Config.Paths.Masters} {
+		rec := get(t, s, "/api/master?path="+url.QueryEscape(outside))
+		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not a master") {
+			t.Errorf("%s was read: %d %s", outside, rec.Code, rec.Body)
+		}
 	}
 }
 
@@ -929,5 +940,22 @@ func TestRecentTasksAreOnlyFinishedOnes(t *testing.T) {
 	}
 	if len(got) != 2 || !got["done"] || !got["stopped"] {
 		t.Errorf("recent = %v, want only done and stopped", got)
+	}
+}
+
+// The page is told whether this computer can read subtitles into text, and
+// where it cannot, what to say (§10).
+func TestStateSaysWhetherSubtitlesCanBeRead(t *testing.T) {
+	s := newTestServer(t)
+	s.Runner.OCR = nil
+	var reply struct {
+		OCR     bool   `json:"ocr"`
+		OCRNote string `json:"ocr_note"`
+	}
+	if err := json.Unmarshal(get(t, s, "/api/state").Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.OCR || !strings.Contains(reply.OCRNote, "cannot be read into text on this computer") {
+		t.Errorf("no reader: %+v", reply)
 	}
 }

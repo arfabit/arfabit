@@ -58,6 +58,18 @@ func (s *Store) LogPath(id string) string {
 	return filepath.Join(s.logsDir(), id+".txt")
 }
 
+// PicturePath is where a job keeps a picture of a subtitle: its pictures of
+// low confidence (§10), in this node's own folder.
+func (s *Store) PicturePath(jobID, name string) string {
+	return filepath.Join(s.nodeDir(), "ocr", jobID, name)
+}
+
+// SavePicture keeps a picture for a job, at PicturePath.
+func (s *Store) SavePicture(jobID, name string, png []byte) (string, error) {
+	path := s.PicturePath(jobID, name)
+	return path, writeAtomic(path, png)
+}
+
 // SaveJob writes a job record.
 func (s *Store) SaveJob(j *Job) error {
 	if j.ID == "" {

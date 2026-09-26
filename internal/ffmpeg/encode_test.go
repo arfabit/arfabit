@@ -180,24 +180,20 @@ func TestEncodeArgsSubtitles(t *testing.T) {
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
 		Subtitles: []SubtitleTrack{
-			{Path: "eng.srt", Lang: "eng", Title: "English"},
-			{Path: "eng-forced.srt", Lang: "eng", Title: "English (Forced)", Forced: true, Default: true},
+			{SourceIndex: 6, Lang: "fra", Title: "French"},
+			{SourceIndex: 5, Lang: "eng", Title: "English", Forced: true, Default: true},
 		},
 	})
 
-	// Each SRT is its own input, numbered from 1.
-	if !strings.Contains(got, "-i eng.srt") || !strings.Contains(got, "-i eng-forced.srt") {
-		t.Errorf("subtitle inputs missing\ngot: %s", got)
-	}
-	if !strings.Contains(got, "-map 1:0") || !strings.Contains(got, "-map 2:0") {
-		t.Errorf("subtitle maps missing\ngot: %s", got)
-	}
-	// SRT plays directly, and Matroska carries it as it is.
-	if !strings.Contains(got, "-c:s:0 srt") || !strings.Contains(got, "-c:s:1 srt") {
-		t.Errorf("subtitles not carried as SRT\ngot: %s", got)
-	}
-	if !strings.Contains(got, "-disposition:s:1 default+forced") {
-		t.Errorf("forced disposition missing\ngot: %s", got)
+	// In the order given, each copied as it is.
+	for _, want := range []string{
+		"-map 0:6 -map 0:5",
+		"-c:s:0 copy", "-metadata:s:s:0 language=fra", "-disposition:s:0 0",
+		"-c:s:1 copy", "-disposition:s:1 default+forced",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args missing %q\ngot: %s", want, got)
+		}
 	}
 }
 
@@ -247,25 +243,5 @@ func TestLosslessEncodesGetEvenFrames(t *testing.T) {
 	}
 	if strings.Contains(got, "-filter:a:0") {
 		t.Errorf("the AAC track was filtered for no reason\ngot: %s", got)
-	}
-}
-
-// Subtitle tracks copied from the master come first and stay as they are; SRT
-// files made from them follow, as text.
-func TestSubtitleCopiesAndFilesTogether(t *testing.T) {
-	got := argString(t, EncodeRequest{
-		Input: "master.mkv", Output: "out.mkv",
-		Video:          VideoPlan{Copy: true},
-		SubtitleCopies: []SubtitleCopy{{SourceIndex: 5, Lang: "eng", Default: true}},
-		Subtitles:      []SubtitleTrack{{Path: "eng.srt", Lang: "eng"}},
-	})
-	for _, want := range []string{
-		"-map 0:5 -map 1:0",
-		"-c:s:0 copy", "-disposition:s:0 default",
-		"-c:s:1 srt",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("args missing %q\ngot: %s", want, got)
-		}
 	}
 }

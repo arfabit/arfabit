@@ -383,7 +383,7 @@ func TestPlanCanStopAtTheCopy(t *testing.T) {
 	blueprint.ConvertAfterRip = false
 	d, sel := blurayDisc()
 
-	plan, err := BuildPlan(d, sel, blueprint)
+	plan, err := BuildPlan(d, sel, blueprint, false)
 	if err != nil {
 		t.Fatal(err)
 	}

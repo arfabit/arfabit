@@ -194,6 +194,8 @@ func (s *Server) handleBlueprints(w http.ResponseWriter, r *http.Request) {
 
 		KeepPicture bool   `json:"keep_picture"`
 		TrueHD      string `json:"truehd"`
+
+		KeepSubtitlePictures bool `json:"keep_subtitle_pictures"`
 	}
 
 	all := s.Blueprints.All(s.Config)
@@ -217,6 +219,8 @@ func (s *Server) handleBlueprints(w http.ResponseWriter, r *http.Request) {
 			Sound:           p.Sound,
 			KeepPicture:     p.KeepPicture,
 			TrueHD:          orKeep(p.TrueHD),
+
+			KeepSubtitlePictures: p.KeepSubtitlePictures,
 		})
 	}
 
@@ -239,6 +243,8 @@ func (s *Server) handleBlueprints(w http.ResponseWriter, r *http.Request) {
 			Sound:           def.Sound,
 			KeepPicture:     def.KeepPicture,
 			TrueHD:          orKeep(def.TrueHD),
+
+			KeepSubtitlePictures: def.KeepSubtitlePictures,
 		},
 	})
 }
@@ -313,6 +319,8 @@ func readBlueprintForm(r *http.Request, base config.Blueprint) (config.Blueprint
 
 		KeepPicture *bool   `json:"keep_picture"`
 		TrueHD      *string `json:"truehd"`
+
+		KeepSubtitlePictures *bool `json:"keep_subtitle_pictures"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&form); err != nil {
 		return base, err
@@ -326,6 +334,9 @@ func readBlueprintForm(r *http.Request, base config.Blueprint) (config.Blueprint
 	p.Sound = form.Sound
 	if form.KeepPicture != nil {
 		p.KeepPicture = *form.KeepPicture
+	}
+	if form.KeepSubtitlePictures != nil {
+		p.KeepSubtitlePictures = *form.KeepSubtitlePictures
 	}
 	if form.TrueHD != nil {
 		switch *form.TrueHD {
@@ -460,12 +471,27 @@ func capitalise(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
+// insideMasters reports whether a path is a file in the masters folder, which
+// is all these endpoints read. ARFABIT listens on the whole network, so a
+// path is not taken on trust.
+func (s *Server) insideMasters(path string) bool {
+	if path == "" || s.Config.Paths.Masters == "" {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(s.Config.Paths.Masters), filepath.Clean(path))
+	return err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
+}
+
 // handleMaster says what a master holds, track by track, and what each would
 // cost on the television (§4), so a package can be planned from it.
 func (s *Server) handleMaster(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
 		writeError(w, "No master was given.", nil)
+		return
+	}
+	if !s.insideMasters(path) {
+		writeError(w, "That is not a master in your masters folder.", nil)
 		return
 	}
 
@@ -496,6 +522,10 @@ func (s *Server) handleFillPackage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
+	if !s.insideMasters(req.Master) {
+		writeError(w, "That is not a master in your masters folder.", nil)
+		return
+	}
 
 	blueprint := s.Config.Plain()
 	if req.Blueprint != "" {
@@ -515,7 +545,7 @@ func (s *Server) handleFillPackage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, map[string]any{"package": pipeline.Recipe(pipeline.MasterTracks(info), blueprint)})
+	writeJSON(w, map[string]any{"package": pipeline.Recipe(pipeline.MasterTracks(info), blueprint, s.Runner.OCR != nil)})
 }
 
 // handleStartPackage makes a package from a master.
@@ -527,6 +557,10 @@ func (s *Server) handleStartPackage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
+		return
+	}
+	if !s.insideMasters(req.Master) {
+		writeError(w, "That is not a master in your masters folder.", nil)
 		return
 	}
 

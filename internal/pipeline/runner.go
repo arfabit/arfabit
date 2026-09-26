@@ -20,6 +20,7 @@ import (
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/lab"
 	"github.com/arfabit/arfabit/internal/meta"
+	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -42,6 +43,10 @@ type Runner struct {
 	// defaults when none is chosen. Set by whatever owns the blueprints, since
 	// which one is the default can be changed while ARFABIT is running.
 	ForPlan func() config.Blueprint
+
+	// OCR reads picture subtitles into text: the operating system's own
+	// reader, or nil where there is none (§10).
+	OCR ocr.Reader
 
 	// Index is the offline film list, used to confirm a title and find its
 	// year. Nil when it has not been downloaded, in which case the disc's own
@@ -271,7 +276,7 @@ func (r *Runner) Scan(ctx context.Context, drive disc.Drive) (*Job, error) {
 		return job, fmt.Errorf("no usable title")
 	}
 
-	plan, err := BuildPlan(d, sel, r.blueprint())
+	plan, err := BuildPlan(d, sel, r.blueprint(), r.OCR != nil)
 	if err != nil {
 		r.stop(job, "ARFABIT could not work out what to do with this disc.", err.Error())
 		return job, err
@@ -342,7 +347,7 @@ func (r *Runner) Start(parent context.Context) error {
 			return errors.New("there is no package planned; turn off Plan a transcode to copy the disc only")
 		}
 		check := *job.Plan.Package
-		if err := checkPackage(&check); err != nil {
+		if err := checkPackage(&check, r.OCR != nil); err != nil {
 			return err
 		}
 	}

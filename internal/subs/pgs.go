@@ -1,8 +1,9 @@
-// Package subs turns a disc's picture subtitles into text.
+// Package subs reads a disc's picture subtitles out of a master, and writes
+// subtitles as text.
 //
 // Blu-ray and DVD subtitles are not text: they are little images, one per
 // line of dialogue, which is why showing them makes Plex convert the whole picture (§10).
-// Reading them back into words is what this package does.
+// This package decodes the images; package ocr reads them into words.
 package subs
 
 import (

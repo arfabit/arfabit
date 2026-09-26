@@ -408,5 +408,14 @@ body.dragging-something { user-select: none; -webkit-user-select: none; cursor: 
 .recent-detail { padding: 0 0 0.9rem 0.25rem; display: grid; gap: 0.5rem; justify-items: start; }
 .recent-detail p { margin: 0; }
 .recent-detail .speed-wrap { width: 100%; }
+.low-confidence { width: 100%; }
+.low-confidence > summary { cursor: pointer; }
+.low-confidence-row { display: grid; gap: 0.35rem; padding: 0.7rem 0; border-top: 1px solid var(--line); }
+.low-confidence-row img { max-width: 100%; height: auto; justify-self: start; background: #fff; border: 1px solid var(--line); }
+.low-confidence-choices { display: grid; gap: 0.25rem; }
+.low-confidence-choices label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; }
+.low-confidence-reading { white-space: pre-line; color: var(--muted); }
+.low-confidence-custom { display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; }
+.low-confidence-custom textarea { flex: 1 1 16rem; min-width: 0; font: inherit; }
 .recent-detail pre { white-space: pre-wrap; word-break: break-word; color: var(--muted); font-size: 0.8rem; }
 .recent-files { overflow-wrap: anywhere; }

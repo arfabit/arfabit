@@ -97,6 +97,10 @@ audio_bitrate = "256k"
 include_forced_subs = true
 include_full_subs = true
 sub_languages = ["eng"]
+# A Blu-ray's subtitles are pictures, which make Plex convert the whole
+# picture to show them. They are read into text where this computer can;
+# turn this on to keep them as pictures instead.
+keep_subtitle_pictures = false
 
 # Converting after the copy is made. Turn this off to stop at the copy, which
 # is the fast way through a stack of discs; convert later from the copy.

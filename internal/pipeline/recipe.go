@@ -153,7 +153,12 @@ func heightName(h int) string {
 // blueprint asking for something the tracks do not have adds nothing for it,
 // and a blueprint whose rules fit nothing at all adds no sound: the user adds
 // what they want themselves, rather than ARFABIT guessing.
-func Recipe(tracks []Track, b config.Blueprint) store.Package {
+//
+// canRead says whether this computer can read subtitles into text (§10). A
+// Blu-ray's picture subtitles are converted to text where it can, unless the
+// blueprint keeps them as pictures: the first track of each language, since
+// each becomes a file named by its language. Any others are copied.
+func Recipe(tracks []Track, b config.Blueprint, canRead bool) store.Package {
 	pkg := store.Package{
 		Containers: []string{"mkv"},
 		Edition:    b.Edition,
@@ -169,8 +174,16 @@ func Recipe(tracks []Track, b config.Blueprint) store.Package {
 
 	pkg.Items = append(pkg.Items, soundItems(tracks, b)...)
 
+	converted := map[string]bool{}
 	for _, t := range tracks {
 		if t.Kind != store.KindSubtitle || !b.IncludeFullSubs || !wantLanguage(t.Lang, b.SubLanguages) {
+			continue
+		}
+		if canRead && !b.KeepSubtitlePictures && t.Codec == pictureSubtitles && !converted[strings.ToLower(t.Lang)] {
+			converted[strings.ToLower(t.Lang)] = true
+			it := itemFor(t, store.ActionConvert)
+			it.To = "srt"
+			pkg.Items = append(pkg.Items, it)
 			continue
 		}
 		pkg.Items = append(pkg.Items, itemFor(t, store.ActionCopy))

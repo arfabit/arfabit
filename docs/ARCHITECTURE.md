@@ -45,7 +45,8 @@ Do not re-litigate them, work around them, or "improve" them without being asked
 Three places where a bug is silent rather than loud:
 
 - **HDR metadata propagation (§9)** — wrong output, no error, looks like a disc problem.
-- **Glyph clustering (§10)** — a bad cluster merge corrupts every line using that glyph.
+- **Reading subtitles (§10)** — a line read wrong still looks like a line. Lines of
+  low confidence are listed on the job and in the log, never passed off as read.
 - **Atomic file writes (§6)** — a partial write to shared state is invisible until read.
 
 ---
@@ -79,6 +80,7 @@ These words are used consistently in code, UI, and logs. No synonyms.
 | **Package**   | What to make from a Master: line items, and the containers to make them into, one file each. |
 | **Line item** | One track of the Master in a Package, and what to do with it: copy as is, or convert. |
 | **Delivery**  | The finished `.mkv` plus its sidecar subtitles.                          |
+| **Low confidence** | A subtitle OCR may have read wrong: nothing was read, what was read holds a mark known to be a misreading, or a second reading says other words. ARFABIT's own measure; no reader's score goes into it (§10). |
 | **Edition**   | A Plan's version name, written as `{edition-...}` in the Delivery's filename. Plex's word. Blank means none. |
 | **Job**       | One piece of work: a rip, copying a disc to its Master, or a Package made from a Master. A Package planned with its disc is a job of its own that waits for the rip. |
 | **Library**   | Where Deliveries land, in Plex layout.                                   |
@@ -104,10 +106,14 @@ drive never idles, and the processor works through a queue behind it.
 
 ```
 rip:        SCAN  →  PLAN  →  RIP  →  EJECT
-transcode:                               OCR  →  QUEUED  →  PACKAGE  →  DELIVER
+transcode:                               QUEUED  →  PACKAGE  →  OCR  →  DELIVER
 ```
 
 Stage names appear verbatim in the logs and on the page.
+
+**OCR comes after PACKAGE.** Subtitles are read into text once the file is made,
+which takes a minute or two for a film. A problem reading them never costs the
+film: it is still delivered, and the job says what happened (§10).
 
 **A disc is two jobs.** The rip makes the Master and ends when the disc is out.
 If the Plan asked for a transcode, pressing Start also makes a second job, which
@@ -146,7 +152,7 @@ keeps the drive spinning.
 | Config    | **TOML**, layered                     | See §7.                                                                                         |
 | Rip       | `makemkvcon` via `os/exec`            | Robot mode (`-r`) is machine-parseable. No wrapper libs.                                        |
 | Encode    | `ffmpeg` + `libx265` via `os/exec`    | `-progress pipe:1` gives structured progress.                                                   |
-| OCR       | glyph clustering + small OCR model    | See §10. Under 20 MB, fully offline.                                                            |
+| OCR       | A reader the computer already has     | Vision on macOS, Windows.Media.Ocr on Windows, Tesseract elsewhere if installed. See §10.       |
 | Metadata  | **Offline IMDb index**                | No network at rip time. See §11.                                                                |
 | Autostart | Written by the binary itself          | LaunchAgent / Task Scheduler / systemd user unit. See §13.                                      |
 | Docker    | **Not used**                          | Cannot pass an optical drive through Docker Desktop on macOS or Windows.                        |
@@ -203,6 +209,7 @@ arfabit/
       runner.go                SCAN → DELIVER for a disc
       plan.go  audio.go        Plan construction, audio track rules
       package.go               Package jobs: clips and whole-Master Deliveries, from line items
+      subtitles.go             OCR stage: subtitle line items read into SRT, sidecars
       recipe.go                blueprints as recipes; a Master's or a disc's tracks
     playback/                  what was tested to play where (§4), as notes
       slots.go                 processor slots (QUEUED)
@@ -216,7 +223,8 @@ arfabit/
       probe.go  run.go         ffprobe, subprocess + progress
     lab/                       clip rendering and the comparison table
     blueprints/                blueprints made on the page (blueprints.json)
-    subs/                      PGS decode, glyph splitting, alphabets (not wired in)
+    subs/                      PGS decode, a track read from a master, SRT writing
+    ocr/                       the computer's own text reader (§10): Vision, Windows, Tesseract
     meta/
       index.go                 offline IMDb index build + lookup
       naming.go                Plex naming rules
@@ -291,8 +299,7 @@ job, and no "are you sure" dialog, because the program simply does not have that
   library/
     Blade Runner (1982)/
       Blade Runner (1982).mkv                         # no edition
-      Blade Runner (1982).en.sdh.srt                  # once OCR exists
-      Blade Runner (1982).en.forced.srt
+      Blade Runner (1982).en.srt                      # subtitles read into text (§10)
       Blade Runner (1982) {edition-Small}.mkv         # edition "Small"
 ```
 
@@ -306,7 +313,9 @@ they would end the tag early. Lab clips use the same shape, with a run number, t
 with several editions to play in turn. The run number comes from what is already in
 the folder, so it survives restarts.
 Sidecar names match the video filename exactly, which is what Plex requires;
-`.sdh` and `.forced` are flags Plex understands.
+`.sdh` and `.forced` are flags Plex understands, which ARFABIT does not set yet
+because it does not yet tell those tracks apart (Appendix A). One sidecar is made
+per language, so only one track of each language can be read into text.
 
 ---
 
@@ -410,6 +419,7 @@ audio_bitrate = "256k"
 include_forced_subs = true
 include_full_subs = true
 sub_languages = ["eng"]
+keep_subtitle_pictures = false  # read picture subtitles into text where possible (§10)
 convert_after_rip = true
 
 [blueprint.Small]
@@ -436,8 +446,10 @@ accepted. Converting lossy sound is noted as losing a little more. Every line st
 and shows what to convert it to. "Add from master", under each section, lists
 everything the Master holds, one line each, and adds a track as it is. Keeping a
 track and a converted one beside it is two lines. Two lines exactly the same
-are pointed out, since the file would hold the same track twice. Subtitles can only
-be copied until OCR exists (§10). Within a section, line items are dragged into
+are pointed out, since the file would hold the same track twice. A Blu-ray's
+picture subtitles can be converted to text (SRT) where the computer can read them
+(§10), and a blueprint does so unless it keeps them as pictures; elsewhere, and for
+other subtitles, they can only be copied, and the page says why. Within a section, line items are dragged into
 order (or moved with the arrow keys): the order of the tracks in the file, the
 first sound track being the one a player starts with.
 
@@ -675,36 +687,116 @@ which forces a full video transcode at playback — the exact thing this project
 to avoid. SRT is handed to the client as text and direct-plays. There is also no
 fidelity to gain: the source is bitmaps, so any styling would be invented.
 
-Output: **SRT sidecars** (for Plex) **plus an embedded SRT track**, which Matroska
-carries as it is and which plays directly (§4). Both are cheap.
+Output: **SRT sidecars**, beside the file, named as Plex matches them (§6). Subtitles
+read into text are not put inside the MKV. A sidecar SRT is not yet in §4's table
+of what was tested to play directly; SRT inside MKV is.
 
-### OCR pipeline
+### Reading subtitles (OCR)
 
-This is the design. Only the first part of stage 1 exists (§16).
+A disc's subtitles are pictures of text. ARFABIT reads them with a reader the
+computer already has, rather than shipping one: nothing to download, nothing to
+train, and nothing in the binary.
 
-PGS subtitles use one font for an entire disc. Exploit that.
+| System | Reader | How |
+|---|---|---|
+| macOS | Vision (`VNRecognizeTextRequest`, accurate, language correction on) | a JavaScript for Automation script run by `osascript` |
+| Windows | `Windows.Media.Ocr` | a Windows PowerShell 5.1 script, awaiting WinRT calls with `AsTask` |
+| Linux and others | Tesseract, when installed | the `tesseract` command, one run per 100 pictures, TSV out |
+| — without one | none | the page says subtitles cannot be read into text on this computer, and that Tesseract is used when installed |
 
-**Stage 1 — glyph clustering.** Render every subtitle image, segment into individual
-glyph bitmaps, cluster identical shapes. ~60,000 glyph instances in a film collapse to
-roughly **100–150 unique shapes**. This is pixel matching, not recognition, so it is exact.
+ARFABIT never installs a reader. On macOS and Windows one is always there; on
+Linux, one that somebody installed is used.
 
-**Stage 2 — recognize ~150 images, not 60,000.** A small OCR model labels the cluster
-representatives. Every occurrence inherits the answer, so there is no per-line drift —
-an `I` never becomes an `l` in one scene and not another.
+Both scripts live in `internal/ocr`, are embedded in the binary, and are written
+beside the pictures when used. Each reads a list of PNG files and writes its
+answer as JSON to a file, so text never passes through a console's character set.
+Tesseract is given the list itself and reads each picture as a page.
 
-**Stage 3 — context pass.** Hunspell dictionary + bigram table over the assembled SRT
-fixes genuine ambiguities (`rn`/`m`, spacing, line joins).
+**Measured so far.** On macOS, an earlier version of the Vision script read a real
+film's English subtitles with about 99.98% of characters right. The misses were
+`f`→`t` three times, `I`→`|` once, `!`→`.` once, and one short line, "I...",
+that came back empty. On *The Sheep Detectives* (1,864 subtitles, read in 57
+seconds) the misses that could be seen were `I`→`|` three times, all listed for
+checking, and one empty line, which the picture shows is a lone "I..." again.
+Vision's own confidence was 1.00 on every line read, the wrong ones included, so
+ARFABIT does not use it. Read again in Vision's fast mode, 205 lines differed;
+compared by words alone (below), 34 did, and about 22 of those were real
+misreadings in the accurate reading that nothing else had caught: 11 lines
+starting "I" with the "I" dropped, "II" for "ll", "tor", "ot", "tell" and "ort"
+for "for", "of", "fell" and "orf". On *In the Grey* (1,996 subtitles, 79 seconds
+for both readings), 50 were listed at first; with fast mode's own habits left out
+of the comparison ("!" read as "l", accents dropped), 26 are, and 20 of those are
+real misreadings in the accurate reading: "II" for "ll" eight times, "t" for "f"
+six times ("wondertul", "torce", "shitt"), a dropped "I" three times, "out" for
+"but", "ifourteen" and a `|`. Four are fast mode's slips ("Mclntyre",
+"papenNork") and two are unclear. The Windows and Tesseract readers have not
+been run on real subtitles yet.
 
-**Stage 4 — flag the rest.** Anything still uncertain is surfaced in the UI so you
-eyeball ten lines, not fifteen hundred.
+**When.** Subtitle line items set to convert (to `srt`) are read as stage OCR, in
+their Package job, once the file is made (§2). If they cannot be read — a
+language the reader does not have, or anything else — the film is delivered all
+the same, and the job's note and log say so. Only one track per language can be
+converted, since each becomes a file named by its language.
 
-Footprint: PaddleOCR mobile recognition (~10 MB) + dictionary (~5 MB). **Under 20 MB**,
-shipped in the binary, fully offline. Per-disc glyph dictionaries are cached and reused.
+**How a track is read.**
+
+1. The track is copied out of the file being read (`ffmpeg -f sup`) and its
+   pictures decoded (`subs.ParseSUP`). Only a Blu-ray's picture subtitles (PGS)
+   are read; DVD subtitles are not yet.
+2. The pictures are written as they are to the system's temporary folder, 100 at
+   a time, and read in chunks so progress can be shown; they are removed as each
+   chunk is done.
+3. The reader is asked for the track's language: the ISO 639-2 code is turned into
+   the reader's own name for it ("eng" → "en" for macOS and Windows, "eng" for
+   Tesseract) and matched against the languages the reader has. A language it
+   cannot read is said in plain words: on Windows, that the language pack is not
+   installed; with Tesseract, that its language data is not.
+4. On macOS each picture is read twice, in Vision's accurate mode and then its
+   fast mode, in the same run. The accurate reading is what goes into the SRT.
+   The fast one is a second opinion only.
+5. A subtitle is of **low confidence** when nothing was read from it, when the
+   reading holds a mark known to be a misreading, or when the fast reading says
+   other words. The marks are a `|` (for `I`, on both films) and, in English, a
+   letter English does not use ("killeriại"); the accents English borrows, as in
+   "café", do not count. Other languages get their own marks when a film shows
+   what their misreadings look like. Words are compared with case, punctuation and
+   spacing left out, and a lone `l`, `1` or `|` counted as `I`, since fast mode
+   gets those wrong all the time. Windows and Tesseract have no second reading,
+   so there only the first two apply.
+6. Every line is kept as read, never corrected (§15). Each subtitle of low
+   confidence is listed on the job with both readings and its picture, kept in
+   the node's own folder (`nodes/<id>/ocr/<job>/`), and in the log with its time;
+   the job's note says how many there are. A subtitle with nothing read is left
+   out of the SRT.
+7. The SRT is written beside the file as a sidecar, named after it and the
+   language (`Film (2020).en.srt`), for a clip as for a film. A file already there
+   with that name is not replaced: that is checked before anything is made.
+
+**Clips.** A clip's subtitles are read from the piece cut for it, not from the
+Master, and trimmed to its length. A piece copied from the Master starts at the
+keyframe before the time asked for, so shifting the Master's times by that time
+would put every line early by up to the gap between keyframes. The piece is on
+the same clock as the clip.
+
+**Blueprints.** A Blu-ray's picture subtitles are converted to text wherever the
+computer can read them, unless the blueprint says `keep_subtitle_pictures`. Where
+it cannot, they are copied, and the line says why.
+
+**Checking them.** A finished task lists its subtitles of low confidence under
+Tasks, each with its time and picture. Where there were two readings, the choice is
+Accurate, Fast or Custom; otherwise it is the line as read, or Custom. Picking a
+reading writes it into the sidecar at once; Custom opens a box filled with
+whichever was picked last, to change and save. Only that subtitle in the sidecar
+changes, and an empty Custom takes it out. Nothing is changed until somebody
+chooses, and the file inside the MKV is never touched, since subtitles read into
+text are only ever sidecars.
+
+Not built: a context pass over what was read; telling SDH and forced tracks apart;
+DVD subtitles.
 
 **Forced subtitles** are identified separately and default to **on**. On most Blu-rays
 the alien-language and signage translations are a distinct PGS track flagged `forced`,
-not burned into the picture. They are usually under 100 lines — the cheapest possible
-place to spend OCR effort, and the highest value.
+not burned into the picture. Not built yet (Appendix A).
 
 ---
 
@@ -815,7 +907,7 @@ section keeps running whichever is showing, so switching loses nothing.
 | Section | Holds |
 |---|---|
 | **Tasks** | Doctor, the drive, the Plan, the queue, logs, recent tasks |
-| **Packages** | Making a file from a Master: line items, from a blueprint or by hand; later, OCR training |
+| **Packages** | Making a file from a Master: line items, from a blueprint or by hand |
 | **Blueprints** | Making and changing blueprints |
 | **Settings** | Autostart, restart and stop, the film list |
 
@@ -950,7 +1042,7 @@ nothing in the UI presents a scary choice. Word substitutions:
 
 ## 16. What is built
 
-**Working today.** SCAN, PLAN, RIP, EJECT, PACKAGE, DELIVER, running end to end
+**Working today.** SCAN, PLAN, RIP, EJECT, OCR, PACKAGE, DELIVER, running end to end
 from the web page on one machine, with a queue for the processor, optional
 blueprints as recipes, and Packages (lab clips and whole-Master Deliveries).
 
@@ -975,14 +1067,11 @@ blueprints as recipes, and Packages (lab clips and whole-Master Deliveries).
 | Doctor | built |
 | Autostart on all three platforms | built |
 | Eject on all three platforms | built |
+| Subtitles read into text by the computer's own reader, as sidecars, with low confidence listed (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 
-**Not built: subtitles.** Reading bitmap subtitles into text is the one day-one
-piece still missing. `internal/subs` decodes PGS, splits glyphs and keeps
-alphabets of known shapes, but it is not wired into the pipeline: there is no
-recognition model, context pass, SRT writer or subtitle mux yet (§10). Until it
-exists the Delivery carries no subtitles, and the job log says so plainly rather
-than quietly leaving them out. The bitmap tracks are still in the Master, so
-nothing is lost by ripping now.
+**Subtitles.** A Package converts a Blu-ray's picture subtitles to SRT on macOS,
+on Windows, and wherever Tesseract is installed (§10), once the file is made.
+A disc's Plan made before Packages still logs that its subtitles are not read.
 
 **Known shortcuts.**
 
@@ -1002,17 +1091,21 @@ nothing is lost by ripping now.
 ## 17. Roadmap
 
 **Next**
-Subtitles end to end · the encoder's own observed frame rate rather than an assumed 24 ·
-VMAF in the lab.
+Measuring OCR on more discs, on Windows and with Tesseract · the encoder's own observed frame rate
+rather than an assumed 24 · VMAF in the lab.
 
 **Later**
 Blueprint matchers (§8) · multichannel E-AC-3 · OS-level disc detection ·
-"fix my subtitle file" as a standalone tool · TV series naming.
+"fix my subtitle file" as a standalone tool · TV series naming ·
+**lining up a subtitle file the user downloads** (from opensubtitles.com, say) with
+the film: shifting and stretching its times to match the disc's own subtitles or
+sound. A computer with no reader, such as Linux without Tesseract, gets subtitles
+this way, and it helps everywhere a disc's own subtitles are missing or poor.
 
 **Eventually**
 Music CDs (a separate backend — MakeMKV cannot read CDDA; needs libcdio and
 MusicBrainz) · Dolby Vision (P7 to P8.1 via `dovi_tool`) · HDR10+ ·
-`arfabit-control` for NAS targets · a local text model for the OCR context pass.
+`arfabit-control` for NAS targets · a context pass over what OCR read.
 
 ---
 

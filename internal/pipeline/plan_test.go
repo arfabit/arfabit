@@ -34,7 +34,7 @@ func blurayDisc() (*disc.Disc, disc.Selection) {
 
 func TestBuildPlanVideo(t *testing.T) {
 	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestBuildPlanUHDCopies(t *testing.T) {
 	d.Titles[0].Streams[0].CodecID = "V_MPEGH/ISO/HEVC"
 	d.Titles[0].Streams[0].Width, d.Titles[0].Streams[0].Height = 3840, 2160
 
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestBuildPlanUHDCopyCanBeTurnedOff(t *testing.T) {
 	blueprint := config.Defaults().Plain()
 	blueprint.AllowUHDCopy = false
 
-	plan, err := BuildPlan(d, sel, blueprint)
+	plan, err := BuildPlan(d, sel, blueprint, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestBuildPlanUHDCopyCanBeTurnedOff(t *testing.T) {
 // must be encoded because Apple TV cannot decode them.
 func TestBuildPlanAudioCopyRule(t *testing.T) {
 	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 // Forced subtitles default to on; other languages are left unselected.
 func TestBuildPlanSubtitles(t *testing.T) {
 	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestBuildPlanCarriesObfuscation(t *testing.T) {
 	sel.Obfuscated = true
 	sel.Reason = "This disc lists 3 titles of exactly the same length..."
 
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain())
+	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestBuildPlanCarriesObfuscation(t *testing.T) {
 
 func TestBuildPlanRejectsTitleWithNoPicture(t *testing.T) {
 	d := &disc.Disc{Kind: disc.KindBluray, Titles: []disc.Title{{Index: 0, Duration: time.Hour}}}
-	if _, err := BuildPlan(d, disc.Selection{Feature: 0}, config.Defaults().Plain()); err == nil {
+	if _, err := BuildPlan(d, disc.Selection{Feature: 0}, config.Defaults().Plain(), false); err == nil {
 		t.Error("a title with no video stream was accepted")
 	}
 }
@@ -641,7 +641,7 @@ func TestLosslessDetection(t *testing.T) {
 func TestPlanEditionComesFromTheBlueprint(t *testing.T) {
 	d, sel := blurayDisc()
 
-	plain, err := BuildPlan(d, sel, config.Defaults().Plain())
+	plain, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +651,7 @@ func TestPlanEditionComesFromTheBlueprint(t *testing.T) {
 
 	bp := config.Defaults().Plain()
 	bp.Name, bp.Edition = "Small", "Travel"
-	small, err := BuildPlan(d, sel, bp)
+	small, err := BuildPlan(d, sel, bp, false)
 	if err != nil {
 		t.Fatal(err)
 	}

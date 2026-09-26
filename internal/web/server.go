@@ -24,6 +24,7 @@ import (
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
 	"github.com/arfabit/arfabit/internal/doctor"
 	"github.com/arfabit/arfabit/internal/meta"
+	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -57,12 +58,9 @@ type Server struct {
 	drives  driveWatcher
 	started time.Time
 
-	// building guards the film list download, and lab guards the clip
-	// renderer. A button can be clicked twice; the server is where "once" has
-	// to be true.
-	// A button can be clicked twice; the server is where "once" has to be
-	// true. Lab runs need no such guard: they are jobs, and the queue decides
-	// when they run.
+	// building guards the film list download. A button can be clicked twice;
+	// the server is where "once" has to be true. Packages need no such guard:
+	// they are jobs, and the queue decides when they run.
 	building atomic.Bool
 }
 
@@ -141,6 +139,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
 	mux.HandleFunc("GET /api/log", s.handleLog)
+	mux.HandleFunc("GET /api/jobs/{id}/low-confidence/{n}/picture", s.handleLowConfidencePicture)
+	mux.HandleFunc("POST /api/jobs/{id}/low-confidence/{n}", s.handleChooseLowConfidence)
 
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("POST /api/start", s.handleStart)
@@ -211,6 +211,11 @@ type state struct {
 	Drives   []disc.Drive `json:"drives"`
 	NodeName string       `json:"node_name"`
 	Paths    config.Paths `json:"paths"`
+
+	// OCR says whether this computer can read picture subtitles into text
+	// (§10), and OCRNote says so plainly when it cannot.
+	OCR     bool   `json:"ocr"`
+	OCRNote string `json:"ocr_note,omitempty"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -250,6 +255,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Drives:    s.Drives(),
 		NodeName:  s.Config.Node.Name,
 		Paths:     s.Config.Paths,
+		OCR:       s.Runner.OCR != nil,
+	}
+	if !reply.OCR {
+		reply.OCRNote = ocr.NotAvailable
 	}
 	reply.Existing = s.Runner.Existing(current)
 	if busy := s.Runner.DriveIsBusy(); busy != nil {

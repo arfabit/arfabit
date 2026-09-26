@@ -187,6 +187,11 @@ type Settings struct {
 	IncludeFullSubs   bool
 	SubLanguages      []string
 
+	// KeepSubtitlePictures copies a Blu-ray's picture subtitles as they are.
+	// Off, they are read into text (SRT) wherever the computer can (§10),
+	// since showing pictures makes Plex convert the whole picture (§4).
+	KeepSubtitlePictures bool
+
 	// Sound, when set, chooses which sound tracks a transcode keeps, by what
 	// they are rather than where they sit on one particular disc. When it is
 	// not set, the stereo-first choice described in §9 is made instead.
@@ -494,6 +499,7 @@ func applySettings(doc document, section string, p *Settings, noted func(key str
 		{"keep_picture", &p.KeepPicture},
 		{"include_forced_subs", &p.IncludeForcedSubs},
 		{"include_full_subs", &p.IncludeFullSubs},
+		{"keep_subtitle_pictures", &p.KeepSubtitlePictures},
 		{"convert_after_rip", &p.ConvertAfterRip},
 	} {
 		v, ok := doc.lookup(section, b.key)

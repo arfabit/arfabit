@@ -30,8 +30,8 @@ specifies something, follow it exactly — the schemas, the stage names, the ter
 the folder layout. Where it is silent, use judgment and say what you assumed.
 
 **Use the terminology in §2 verbatim.** Node, Drive, Disc, Title, Defaults, Blueprint, Plan,
-Master, Package, Line item, Delivery, Edition, Job, Library. Stage names are `SCAN PLAN RIP EJECT OCR QUEUED
-PACKAGE DELIVER`, plus `LAB` for test clips, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
+Master, Package, Line item, Delivery, Edition, Job, Library. Stage names are `SCAN PLAN RIP EJECT QUEUED
+PACKAGE OCR DELIVER`, plus `LAB` for test clips, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
 not "source" for Master.
 
 **Known shortcut.** `internal/config/toml.go` is a hand-written subset parser,
