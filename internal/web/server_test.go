@@ -17,6 +17,7 @@ import (
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
+	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -25,7 +26,7 @@ func newTestServer(t *testing.T) *Server {
 	t.Helper()
 
 	// Every path points somewhere temporary. A test that wrote to the real
-	// masters folder would be touching somebody's films.
+	// originals folder would be touching somebody's films.
 	root := t.TempDir()
 	cfg := config.Defaults()
 	cfg.Paths.Data = filepath.Join(root, "data")
@@ -545,56 +546,75 @@ func TestEjectAllowedWhileConverting(t *testing.T) {
 	}
 }
 
-// The lab needs to find the copies that already exist, in the folder-per-film
-// layout the rest of ARFABIT uses.
-func TestMastersAreListed(t *testing.T) {
+// Projects need to find the originals that already exist: beside their films
+// in the library, and in the folder originals were kept in before, which is
+// still read.
+func TestOriginalsAreListed(t *testing.T) {
 	s := newTestServer(t)
 
-	film := filepath.Join(s.Config.Paths.Masters, "Crime 101 (2025)")
-	if err := os.MkdirAll(film, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A real master's name, en dash and all.
-	if err := os.WriteFile(filepath.Join(film, "CRIME 101 – BLU-RAY_t04.mkv"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Something that is not a copy, which must not be offered.
-	if err := os.WriteFile(filepath.Join(film, "job.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
+	title := meta.Title{Name: "In the Grey", Year: 2026}
+	beside := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.OriginalName())
+	film := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.VideoName(""))
+	// A real original's name, en dash and all, where originals used to go.
+	earlier := filepath.Join(s.Config.Paths.Masters, "Crime 101 (2025)", "CRIME 101 – BLU-RAY_t04.mkv")
+	for _, path := range []string{beside, film, earlier, filepath.Join(filepath.Dir(earlier), "job.json")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	rec := get(t, s, "/api/masters")
+	rec := get(t, s, "/api/originals")
 
 	var got struct {
-		Masters []struct {
+		Originals []struct {
 			Title string `json:"title"`
 			Path  string `json:"path"`
-		} `json:"masters"`
+		} `json:"originals"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(got.Masters) != 1 {
-		t.Fatalf("got %d masters, want 1: %+v", len(got.Masters), got.Masters)
+	// The film made from an original is not one, and nor is anything that
+	// is not a video.
+	if len(got.Originals) != 2 {
+		t.Fatalf("got %d originals, want 2: %+v", len(got.Originals), got.Originals)
 	}
-	if got.Masters[0].Title != "Crime 101 (2025)" {
-		t.Errorf("Title = %q; the film's folder name is what names it", got.Masters[0].Title)
+	if got.Originals[0].Title != "Crime 101 (2025)" || got.Originals[0].Path != earlier {
+		t.Errorf("first = %+v; the film's folder name is what names it", got.Originals[0])
 	}
-	if !strings.HasSuffix(got.Masters[0].Path, ".mkv") {
-		t.Errorf("Path = %q, want the copy itself", got.Masters[0].Path)
+	if got.Originals[1].Title != "In the Grey (2026)" || got.Originals[1].Path != beside {
+		t.Errorf("second = %+v", got.Originals[1])
 	}
 }
 
-// Nothing ripped yet is an ordinary state, and must come back as an empty list
+// Nothing copied yet is an ordinary state, and must come back as an empty list
 // rather than as nothing at all.
-func TestMastersWithNothingRipped(t *testing.T) {
+func TestOriginalsWithNothingCopied(t *testing.T) {
 	s := newTestServer(t)
 
-	rec := get(t, s, "/api/masters")
-	if !strings.Contains(rec.Body.String(), "masters") {
+	rec := get(t, s, "/api/originals")
+	if !strings.Contains(rec.Body.String(), "originals") {
 		t.Errorf("body = %q", rec.Body.String())
 	}
+}
+
+// anOriginal puts a file where an original goes, for a test that needs one to
+// be listed. It holds nothing a video would.
+func anOriginal(t *testing.T, s *Server) string {
+	t.Helper()
+	title := meta.Title{Name: "x"}
+	path := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.OriginalName())
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // Blueprints can be made, changed and removed without touching the settings file.
@@ -678,61 +698,61 @@ func TestSavingNonsenseIsRefused(t *testing.T) {
 	}
 }
 
-// A package can be started from line items alone, with no blueprint: trying
+// A project can be started from line items alone, with no blueprint: trying
 // something once should not mean naming it and remembering it forever.
-func TestPackageNeedsNoBlueprint(t *testing.T) {
+func TestProjectNeedsNoBlueprint(t *testing.T) {
 	s := newTestServer(t)
 
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/package",
-		strings.NewReader(`{"master":`+strconv.Quote(filepath.Join(s.Config.Paths.Masters, "x", "m.mkv"))+`,"film":"x","package":{"length":30000000000,
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/project",
+		strings.NewReader(`{"original":`+strconv.Quote(anOriginal(t, s))+`,"film":"x","project":{"length":30000000000,
 			"items":[{"kind":"video","action":"convert","to":"hevc","crf":26,"preset":"medium","source":0}]}}`)))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("a package of line items alone was refused: %s", rec.Body)
+		t.Fatalf("a project of line items alone was refused: %s", rec.Body)
 	}
-	// It stops on its own, the master not being there; wait for that, so it
-	// is not still writing when the test's folder goes.
+	// It stops on its own, the original holding no video; wait for that, so
+	// it is not still writing when the test's folder goes.
 	for deadline := time.Now().Add(5 * time.Second); len(s.Runner.Active()) > 0 && time.Now().Before(deadline); {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if len(s.Blueprints.Saved) != 0 {
-		t.Error("a package was saved as a blueprint")
+		t.Error("a project was saved as a blueprint")
 	}
 }
 
-// A package that could not be made is refused with a sentence saying why.
-func TestPackageIsRefusedPlainly(t *testing.T) {
+// A project that could not be made is refused with a sentence saying why.
+func TestProjectIsRefusedPlainly(t *testing.T) {
 	s := newTestServer(t)
 
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/package",
-		strings.NewReader(`{"master":`+strconv.Quote(filepath.Join(s.Config.Paths.Masters, "x", "m.mkv"))+`,"package":{"items":[]}}`)))
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/project",
+		strings.NewReader(`{"original":`+strconv.Quote(anOriginal(t, s))+`,"project":{"items":[]}}`)))
 	if rec.Code == http.StatusOK {
-		t.Fatal("a package with no picture was accepted")
+		t.Fatal("a project with no picture was accepted")
 	}
 	if !strings.Contains(rec.Body.String(), "needs a picture") {
 		t.Errorf("the message does not say what was wrong: %s", rec.Body)
 	}
 }
 
-// Reading a master needs one, and one that is not there says so.
-func TestMasterMustBeReadable(t *testing.T) {
+// Reading an original needs one, and one that cannot be read says so.
+func TestOriginalMustBeReadable(t *testing.T) {
 	s := newTestServer(t)
 
-	if rec := get(t, s, "/api/master"); rec.Code == http.StatusOK {
-		t.Error("tracks were listed for no master at all")
+	if rec := get(t, s, "/api/original"); rec.Code == http.StatusOK {
+		t.Error("tracks were listed for no original at all")
 	}
-	missing := filepath.Join(s.Config.Paths.Masters, "Gone (2020)", "gone.mkv")
-	rec := get(t, s, "/api/master?path="+url.QueryEscape(missing))
+	rec := get(t, s, "/api/original?path="+url.QueryEscape(anOriginal(t, s)))
 	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be read") {
-		t.Errorf("a master that does not exist: %d %s", rec.Code, rec.Body)
+		t.Errorf("an original that is not a video: %d %s", rec.Code, rec.Body)
 	}
 
-	// ARFABIT listens on the whole network, so it reads nothing outside the
-	// masters folder, however the path is dressed up.
-	for _, outside := range []string{"/etc/hosts", filepath.Join(s.Config.Paths.Masters, "..", "config.toml"), s.Config.Paths.Masters} {
-		rec := get(t, s, "/api/master?path="+url.QueryEscape(outside))
-		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not a master") {
+	// ARFABIT listens on the whole network, so it reads nothing but the
+	// originals it lists, however the path is dressed up.
+	missing := filepath.Join(s.Config.Paths.Masters, "Gone (2020)", "gone.mkv")
+	for _, outside := range []string{missing, "/etc/hosts", filepath.Join(s.Config.Paths.Library, "..", "config.toml"), s.Config.Paths.Library} {
+		rec := get(t, s, "/api/original?path="+url.QueryEscape(outside))
+		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not one of your originals") {
 			t.Errorf("%s was read: %d %s", outside, rec.Code, rec.Body)
 		}
 	}
@@ -886,13 +906,13 @@ func TestPlanPackageCanBeChanged(t *testing.T) {
 	s := newTestServer(t)
 	job := &pipeline.Job{Job: &store.Job{
 		ID: "waiting", State: store.StateWaiting, Stage: store.StagePlan,
-		Plan: &store.Plan{Convert: true, Package: &store.Package{Items: []store.Item{
+		Plan: &store.Plan{Convert: true, Project: &store.Project{Items: []store.Item{
 			{Kind: store.KindVideo, Action: store.ActionCopy},
 		}}},
 	}}
 	s.Runner.SetCurrentForTest(job)
 
-	body := `{"package":{"edition":"Lossless","items":[
+	body := `{"project":{"edition":"Lossless","items":[
 		{"kind":"video","action":"convert","to":"hevc","crf":22,"preset":"medium"},
 		{"kind":"audio","action":"convert","source":1,"codec":"truehd","to":"flac"}]}}`
 	rec := httptest.NewRecorder()
@@ -901,7 +921,7 @@ func TestPlanPackageCanBeChanged(t *testing.T) {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
 
-	pkg := job.Plan.Package
+	pkg := job.Plan.Project
 	if len(pkg.Items) != 2 || pkg.Items[1].To != "flac" {
 		t.Errorf("the package is now %+v", pkg.Items)
 	}

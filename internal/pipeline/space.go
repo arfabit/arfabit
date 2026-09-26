@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/arfabit/arfabit/internal/meta"
 )
 
 // Space is the disk check the Plan runs before offering to start.
@@ -12,13 +14,17 @@ import (
 // meter. It speaks up at exactly one moment: when the disc in the drive will
 // not fit (§8).
 type Space struct {
-	Needed    int64
-	Free      int64
-	Masters   int64
+	Needed int64
+	Free   int64
+
+	// Originals is how much the originals take, beside their films and in
+	// the folder masters were kept in before (§6). Library is the rest of
+	// the library: the films.
+	Originals int64
 	Library   int64
-	Fits      bool
-	Tight     bool
-	MastersAt string
+
+	Fits  bool
+	Tight bool
 
 	// Unknown means the check itself did not work. ARFABIT then lets the job
 	// go ahead: refusing to start because a check failed would be ARFABIT
@@ -30,21 +36,24 @@ type Space struct {
 // estimate can run low.
 const tightMargin = 1.10
 
-// CheckSpace compares what a job needs against what is free.
-func CheckSpace(needed int64, mastersDir, libraryDir string) (Space, error) {
-	free, err := freeBytes(mastersDir)
+// CheckSpace compares what a job needs against what is free in the library,
+// where the original and its films are made. earlierMasters is the folder
+// masters were kept in before they moved beside their films; it is only
+// counted.
+func CheckSpace(needed int64, libraryDir, earlierMasters string) (Space, error) {
+	free, err := freeBytes(libraryDir)
 	if err != nil {
 		// Fail open: the job may proceed, and the Plan says the check did not
 		// work rather than pretending there is no room.
-		return Space{Needed: needed, Fits: true, Unknown: true, MastersAt: mastersDir}, err
+		return Space{Needed: needed, Fits: true, Unknown: true}, err
 	}
 
+	originals, films := librarySizes(libraryDir)
 	s := Space{
 		Needed:    needed,
 		Free:      free,
-		Masters:   dirSize(mastersDir),
-		Library:   dirSize(libraryDir),
-		MastersAt: mastersDir,
+		Originals: originals + dirSize(earlierMasters),
+		Library:   films,
 	}
 	s.Fits = free >= needed
 	s.Tight = s.Fits && float64(free) < float64(needed)*tightMargin
@@ -54,9 +63,9 @@ func CheckSpace(needed int64, mastersDir, libraryDir string) (Space, error) {
 
 // Describe states the four numbers and nothing else.
 //
-// The folder sizes are there because they are almost always the answer: the
-// user has masters they no longer need, and this is the moment they would want
-// to know it. ARFABIT offers to open the folder and never to remove anything.
+// The sizes are there because they are almost always the answer: the user
+// has originals they no longer need, and this is the moment they would want
+// to know it. ARFABIT never offers to remove anything.
 func (s Space) Describe() string {
 	if s.Unknown {
 		return "ARFABIT could not check how much room is left, so it will go ahead. Keep an eye on your free space."
@@ -71,11 +80,11 @@ func (s Space) Describe() string {
 	}
 
 	return fmt.Sprintf(
-		"%s\n\nThis rip needs about %s.\nThe drive has %s free.\nYour masters folder holds %s.\nYour library folder holds %s.",
+		"%s\n\nThis disc needs about %s.\nThe drive has %s free.\nYour originals take %s.\nYour films take %s.",
 		lead,
 		HumanBytes(s.Needed),
 		HumanBytes(s.Free),
-		HumanBytes(s.Masters),
+		HumanBytes(s.Originals),
 		HumanBytes(s.Library),
 	)
 }
@@ -92,6 +101,27 @@ func HumanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTP"[exp])
+}
+
+// librarySizes totals the library in two parts: the originals, with their
+// subtitle files, and everything else.
+func librarySizes(dir string) (originals, rest int64) {
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		if meta.IsOriginal(d.Name()) {
+			originals += info.Size()
+		} else {
+			rest += info.Size()
+		}
+		return nil
+	})
+	return originals, rest
 }
 
 // dirSize totals a directory, returning zero when it cannot be read.

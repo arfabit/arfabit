@@ -20,11 +20,11 @@ import (
 // pictures a Blu-ray carries (PGS). subs.ParseSUP reads nothing else.
 const pictureSubtitles = "hdmv_pgs_subtitle"
 
-// sidecarPaths are the SRT files a Package's converted subtitles become, by
-// the Master stream they come from: beside the file made, named after it and
+// sidecarPaths are the SRT files a Project's converted subtitles become, by
+// the Original stream they come from: beside the file made, named after it and
 // the track's language, which is how Plex matches a sidecar to a film (§6).
-// There is one per language; checkPackage refuses a second.
-func sidecarPaths(pkg *store.Package, out string) map[int]string {
+// There is one per language; checkProject refuses a second.
+func sidecarPaths(pkg *store.Project, out string) map[int]string {
 	stem := strings.TrimSuffix(out, filepath.Ext(out))
 	paths := map[int]string{}
 	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
@@ -35,18 +35,18 @@ func sidecarPaths(pkg *store.Package, out string) map[int]string {
 	return paths
 }
 
-// readSubtitles reads a Package's converted subtitle tracks into SRT files
+// readSubtitles reads a Project's converted subtitle tracks into SRT files
 // beside out, as stage OCR, once the file is made. It reads them from input,
-// the file the Package was made from: a clip's piece starts where the clip
+// the file the Project was made from: a clip's piece starts where the clip
 // does, so its subtitles need only trimming to its length. (A copied piece
 // begins at the keyframe before the time asked for, not at it, so shifting
-// the Master's times by that time would put every line early.)
+// the Original's times by that time would put every line early.)
 //
 // The file is made whatever happens here. What goes wrong with one track is
 // said in the log, and in what it returns for the job's note; the rest are
 // still read. Only a stop is returned as an error.
 func (r *Runner) readSubtitles(ctx context.Context, job *Job, input string, index func(int) int, out string) (string, error) {
-	pkg := job.Package
+	pkg := job.Project
 	sidecars := sidecarPaths(pkg, out)
 	var items []store.Item
 	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
@@ -122,8 +122,8 @@ func (r *Runner) readTrack(ctx context.Context, job *Job, it store.Item, input s
 	}
 
 	cues := result.Cues
-	if !job.Package.WholeFilm() {
-		cues = ocr.Trim(cues, job.Package.Length)
+	if !job.Project.WholeFilm() {
+		cues = ocr.Trim(cues, job.Project.Length)
 	}
 	if len(cues) == 0 {
 		job.Log.Printf(store.StageOCR, "No text was read from the %s subtitles, so there is no subtitle file for them.", name)
@@ -137,7 +137,7 @@ func (r *Runner) readTrack(ctx context.Context, job *Job, it store.Item, input s
 
 	found := 0
 	for _, l := range result.LowConfidence {
-		if !job.Package.WholeFilm() && l.Start >= job.Package.Length {
+		if !job.Project.WholeFilm() && l.Start >= job.Project.Length {
 			continue
 		}
 		found++

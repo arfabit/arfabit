@@ -16,15 +16,15 @@ import (
 	"github.com/arfabit/arfabit/internal/store"
 )
 
-// PackageRequest is a Package to make from a Master.
-type PackageRequest struct {
-	Master string
-	Film   string
-	Year   int
+// ProjectRequest is a Project to make from an Original.
+type ProjectRequest struct {
+	Original string
+	Film     string
+	Year     int
 
-	Package store.Package
+	Project store.Project
 
-	// ClipsDir and LibraryDir are where clips and whole masters go.
+	// ClipsDir and LibraryDir are where clips and films go.
 	ClipsDir   string
 	LibraryDir string
 }
@@ -42,10 +42,10 @@ func (r *Runner) configuredDirs() outputDirs {
 // Containers ARFABIT can make today. MP4 is to come.
 var containers = map[string]string{"mkv": meta.VideoExt}
 
-// checkPackage refuses a Package that could not be made, before anything
+// checkProject refuses a Project that could not be made, before anything
 // waits in the line for it. canRead says whether this computer can read
 // subtitles into text (§10).
-func checkPackage(p *store.Package, canRead bool) error {
+func checkProject(p *store.Project, canRead bool) error {
 	if len(p.Containers) == 0 {
 		p.Containers = []string{"mkv"}
 	}
@@ -55,11 +55,16 @@ func checkPackage(p *store.Package, canRead bool) error {
 		}
 	}
 
+	// The original is filed under this edition, beside its films (§6).
+	if p.WholeFilm() && strings.EqualFold(strings.TrimSpace(p.Edition), meta.OriginalEdition) {
+		return fmt.Errorf("%q is the edition the original is kept under; give this film another", meta.OriginalEdition)
+	}
+
 	if n := len(p.ItemsOf(store.KindVideo)); n != 1 {
 		if n == 0 {
-			return errors.New("a package needs a picture: add the video line")
+			return errors.New("a film needs a picture: add it from the original")
 		}
-		return errors.New("a package can hold one picture")
+		return errors.New("a film can hold one picture")
 	}
 
 	converted := map[string]bool{}
@@ -133,20 +138,20 @@ func checkConversion(it store.Item, canRead bool) error {
 	return nil
 }
 
-// StartPackage makes a Package from a Master: one file per container, in the
+// StartProject makes a Project from an Original: one file per container, in the
 // library for a whole film and in the lab for a stretch of one.
-func (r *Runner) StartPackage(parent context.Context, req PackageRequest) (*Job, error) {
-	if req.Master == "" {
-		return nil, errors.New("there is no master to work from")
+func (r *Runner) StartProject(parent context.Context, req ProjectRequest) (*Job, error) {
+	if req.Original == "" {
+		return nil, errors.New("there is no original to work from")
 	}
-	pkg := req.Package
-	if err := checkPackage(&pkg, r.OCR != nil); err != nil {
+	pkg := req.Project
+	if err := checkProject(&pkg, r.OCR != nil); err != nil {
 		return nil, err
 	}
 
 	film := req.Film
 	if film == "" {
-		film = filepath.Base(filepath.Dir(req.Master))
+		film = filepath.Base(filepath.Dir(req.Original))
 	}
 
 	// A film goes into the library under its edition, so one already there
@@ -168,9 +173,9 @@ func (r *Runner) StartPackage(parent context.Context, req PackageRequest) (*Job,
 	if pkg.WholeFilm() {
 		rec.Kind = store.KindConvert
 	}
-	rec.Master = req.Master
+	rec.Original = req.Original
 	rec.Year = req.Year
-	rec.Package = &pkg
+	rec.Project = &pkg
 	rec.Stage = store.StageQueued
 
 	log, err := NewLog(r.Store.LogPath(rec.ID), func(e Entry) {
@@ -200,9 +205,9 @@ func (r *Runner) StartPackage(parent context.Context, req PackageRequest) (*Job,
 	return job, nil
 }
 
-// runPackage waits its turn at the processor, then makes the Package's files.
+// runPackage waits its turn at the processor, then makes the Project's files.
 func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold time.Duration) {
-	pkg := job.Package
+	pkg := job.Project
 
 	if r.Slots != nil {
 		job.Stage = store.StageQueued
@@ -229,9 +234,9 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		job.Stage = store.StagePackage
 	}
 
-	info, err := ffmpeg.Probe(ctx, job.Master)
+	info, err := ffmpeg.Probe(ctx, job.Original)
 	if err != nil {
-		r.stop(job, "ARFABIT could not read the master.", err.Error())
+		r.stop(job, "ARFABIT could not read the original.", err.Error())
 		return
 	}
 
@@ -317,18 +322,18 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 
 // packageName is what a package is called in a clip's edition: its edition,
 // or the blueprint it came from, or simply what it is.
-func packageName(p *store.Package) string {
+func packageName(p *store.Project) string {
 	for _, name := range []string{p.Edition, p.Blueprint} {
 		if name != "" {
 			return name
 		}
 	}
-	return "Package"
+	return "Project"
 }
 
-// packageOutput is where one of a Package's files goes, and what it is called.
+// packageOutput is where one of a Project's files goes, and what it is called.
 func packageOutput(job *Job, title meta.Title, dirs outputDirs, container string, run int) string {
-	pkg := job.Package
+	pkg := job.Project
 	ext := containers[container]
 	if pkg.WholeFilm() {
 		name := strings.TrimSuffix(title.VideoName(pkg.Edition), meta.VideoExt) + ext
@@ -338,9 +343,9 @@ func packageOutput(job *Job, title meta.Title, dirs outputDirs, container string
 	return filepath.Join(dirs.clips, job.Title, name)
 }
 
-// makePackageFile makes one file from the Package's line items.
+// makePackageFile makes one file from the Project's line items.
 //
-// A stretch of the Master is cut first, into a piece with every stream it
+// A stretch of the Original is cut first, into a piece with every stream it
 // needs copied as it is, and the file is made from the piece with no seeking
 // at all. Seeking while copying some streams and converting others moved them
 // against each other: copied sound started at the keyframe before the cut, up
@@ -355,7 +360,7 @@ func packageOutput(job *Job, title meta.Title, dirs outputDirs, container string
 // making the file took, and anything to add to the job's note about the
 // subtitles.
 func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, out string) (time.Duration, string, error) {
-	pkg := job.Package
+	pkg := job.Project
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
 		return 0, "", err
 	}
@@ -369,10 +374,10 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		}
 	}
 
-	input := job.Master
+	input := job.Original
 	duration := time.Duration(info.Duration * float64(time.Second))
 
-	// Where each Master stream is in the file being read.
+	// Where each Original stream is in the file being read.
 	index := func(source int) int { return source }
 
 	if !pkg.WholeFilm() {
@@ -385,7 +390,7 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 
 		piece := filepath.Join(filepath.Dir(out), ".arfabit-piece-"+job.ID+".mkv")
 		args := []string{"-hide_banner", "-y",
-			"-ss", fmt.Sprintf("%.3f", pkg.At.Seconds()), "-i", job.Master,
+			"-ss", fmt.Sprintf("%.3f", pkg.At.Seconds()), "-i", job.Original,
 			"-t", fmt.Sprintf("%.3f", pkg.Length.Seconds())}
 		for _, s := range sources {
 			args = append(args, "-map", fmt.Sprintf("0:%d", s))
@@ -452,28 +457,28 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 }
 
 // encodeRequest turns the line items into what the encoder is asked for.
-// index finds a Master stream in the file being read.
-func encodeRequest(pkg *store.Package, info *ffmpeg.MediaInfo, input, out string, index func(int) int) (ffmpeg.EncodeRequest, error) {
+// index finds an Original stream in the file being read.
+func encodeRequest(pkg *store.Project, info *ffmpeg.MediaInfo, input, out string, index func(int) int) (ffmpeg.EncodeRequest, error) {
 	req := ffmpeg.EncodeRequest{Input: input, Output: out, Chapters: pkg.WholeFilm()}
 
 	video := pkg.ItemsOf(store.KindVideo)[0]
 	source := streamAt(info, video.Source)
 	if source == nil || source.Kind != "video" {
-		return req, fmt.Errorf("the master has no picture at stream %d", video.Source)
+		return req, fmt.Errorf("the original has no picture at stream %d", video.Source)
 	}
 	req.VideoSourceIndex = index(video.Source)
 	if video.Action == store.ActionCopy {
 		req.Video = ffmpeg.VideoPlan{Copy: true}
 	} else {
 		req.Video = ffmpeg.VideoPlan{CRF: video.CRF, Preset: ffmpeg.Preset(video.Preset)}
-		// The HDR metadata is the Master's, whatever is being read (§9).
+		// The HDR metadata is the Original's, whatever is being read (§9).
 		req.HDR = source.HDR
 		req.Color = source.ColorInfo
 	}
 
 	for i, it := range pkg.ItemsOf(store.KindAudio) {
 		if s := streamAt(info, it.Source); s == nil || s.Kind != "audio" {
-			return req, fmt.Errorf("the master has no sound at stream %d", it.Source)
+			return req, fmt.Errorf("the original has no sound at stream %d", it.Source)
 		}
 		track := ffmpeg.AudioTrack{
 			SourceIndex: index(it.Source),
@@ -494,7 +499,7 @@ func encodeRequest(pkg *store.Package, info *ffmpeg.MediaInfo, input, out string
 
 	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
 		if s := streamAt(info, it.Source); s == nil || s.Kind != "subtitle" {
-			return req, fmt.Errorf("the master has no subtitles at stream %d", it.Source)
+			return req, fmt.Errorf("the original has no subtitles at stream %d", it.Source)
 		}
 		// Converted, they become SRT files beside the one made.
 		if it.Action == store.ActionConvert {
@@ -539,9 +544,9 @@ func streamAt(info *ffmpeg.MediaInfo, index int) *ffmpeg.Stream {
 	return nil
 }
 
-// calibrationPlan describes a Package the way the estimator records encodes:
+// calibrationPlan describes a Project the way the estimator records encodes:
 // by picture settings, with the sound's size left out of what it learns.
-func calibrationPlan(pkg *store.Package, info *ffmpeg.MediaInfo) *store.Plan {
+func calibrationPlan(pkg *store.Project, info *ffmpeg.MediaInfo) *store.Plan {
 	video := pkg.ItemsOf(store.KindVideo)[0]
 	plan := &store.Plan{CRF: video.CRF, Preset: video.Preset}
 	for _, it := range pkg.ItemsOf(store.KindAudio) {
@@ -550,14 +555,14 @@ func calibrationPlan(pkg *store.Package, info *ffmpeg.MediaInfo) *store.Plan {
 	return plan
 }
 
-// bindToMaster points a package planned from a disc's scan at the Master's own
+// bindToOriginal points a package planned from a disc's scan at the Original's own
 // tracks, which MakeMKV numbers its own way.
 //
 // A track is found by what it is, in order: the same kind, language, format
 // and width, not yet taken. MakeMKV turns a disc's uncompressed sound into
 // FLAC, so failing an exact match, the same kind, language and width will do.
 // Lines made from one track — kept, and converted — stay on one track.
-func bindToMaster(pkg *store.Package, master []Track) error {
+func bindToOriginal(pkg *store.Project, tracks []Track) error {
 	found := map[string]int{}
 	used := map[int]bool{}
 
@@ -569,12 +574,12 @@ func bindToMaster(pkg *store.Package, master []Track) error {
 			continue
 		}
 
-		m := matchTrack(*it, master, used, true)
+		m := matchTrack(*it, tracks, used, true)
 		if m == nil {
-			m = matchTrack(*it, master, used, false)
+			m = matchTrack(*it, tracks, used, false)
 		}
 		if m == nil {
-			return fmt.Errorf("the master has no %s track", strings.ToLower(it.Label))
+			return fmt.Errorf("the original has no %s track", strings.ToLower(it.Label))
 		}
 		used[m.Index] = true
 		found[key] = m.Index
@@ -583,9 +588,9 @@ func bindToMaster(pkg *store.Package, master []Track) error {
 	return nil
 }
 
-func matchTrack(it store.Item, master []Track, used map[int]bool, exact bool) *Track {
-	for i := range master {
-		m := &master[i]
+func matchTrack(it store.Item, tracks []Track, used map[int]bool, exact bool) *Track {
+	for i := range tracks {
+		m := &tracks[i]
 		if m.Kind != it.Kind || used[m.Index] {
 			continue
 		}

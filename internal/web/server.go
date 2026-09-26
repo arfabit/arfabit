@@ -59,7 +59,7 @@ type Server struct {
 	started time.Time
 
 	// building guards the film list download. A button can be clicked twice;
-	// the server is where "once" has to be true. Packages need no such guard:
+	// the server is where "once" has to be true. Projects need no such guard:
 	// they are jobs, and the queue decides when they run.
 	building atomic.Bool
 }
@@ -127,14 +127,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/drives", s.handleDrives)
 	mux.HandleFunc("GET /api/drive-health", s.handleDriveHealth)
 	mux.HandleFunc("POST /api/drive-free", s.handleFreeDrive)
-	mux.HandleFunc("GET /api/masters", s.handleMasters)
+	mux.HandleFunc("GET /api/originals", s.handleOriginals)
 	mux.HandleFunc("GET /api/blueprints", s.handleBlueprints)
 	mux.HandleFunc("POST /api/blueprints", s.handleSaveBlueprint)
 	mux.HandleFunc("DELETE /api/blueprints/{name}", s.handleDeleteBlueprint)
 	mux.HandleFunc("POST /api/blueprints/default", s.handleDefaultBlueprint)
-	mux.HandleFunc("GET /api/master", s.handleMaster)
-	mux.HandleFunc("POST /api/package/fill", s.handleFillPackage)
-	mux.HandleFunc("POST /api/package", s.handleStartPackage)
+	mux.HandleFunc("GET /api/original", s.handleOriginal)
+	mux.HandleFunc("POST /api/project/fill", s.handleFillProject)
+	mux.HandleFunc("POST /api/project", s.handleStartProject)
 	mux.HandleFunc("POST /api/resume", s.handleResume)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)
@@ -166,7 +166,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		"NodeName": s.Config.Node.Name,
 		"Started":  s.started.Format("3:04 PM"),
 		"Library":  s.Config.Paths.Library,
-		"Masters":  s.Config.Paths.Masters,
 		"Clips":    s.Config.Paths.Clips,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
@@ -396,15 +395,15 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 		Subtitles map[int]bool   `json:"subtitles"`
 		Convert   *bool          `json:"convert"`
 		Edition   *string        `json:"edition"`
-		Package   *store.Package `json:"package"`
+		Project   *store.Project `json:"project"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&change); err != nil {
 		writeError(w, "ARFABIT could not read that change.", err)
 		return
 	}
 
-	if change.Package != nil {
-		if err := s.Runner.UpdatePackage(*change.Package); err != nil {
+	if change.Project != nil {
+		if err := s.Runner.UpdateProject(*change.Project); err != nil {
 			writeError(w, capitalise(err.Error())+".", nil)
 			return
 		}
@@ -414,8 +413,8 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	if change.Edition != nil {
 		job.Plan.Edition = strings.TrimSpace(*change.Edition)
-		if job.Plan.Package != nil {
-			job.Plan.Package.Edition = job.Plan.Edition
+		if job.Plan.Project != nil {
+			job.Plan.Project.Edition = job.Plan.Edition
 		}
 	}
 	s.Runner.Reestimate(job)

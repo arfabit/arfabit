@@ -176,8 +176,7 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	url := friendlyURL(listener.Addr())
 	fmt.Printf("\nARFABIT is running.\n\n  Open %s\n\n", url)
-	fmt.Printf("  Movies go in   %s\n", cfg.Paths.Library)
-	fmt.Printf("  Disc copies in %s\n\n", cfg.Paths.Masters)
+	fmt.Printf("  Originals and films go in %s\n\n", cfg.Paths.Library)
 	fmt.Printf("Press Ctrl+C to stop.\n\n")
 
 	if !noOpen {
@@ -329,7 +328,7 @@ func explainListenFailure(addr string, err error) error {
 // Problems are not fatal: Doctor reports them properly a moment later, and
 // stopping here would mean the page never opens to explain why.
 func prepareFolders(cfg config.Config) {
-	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Masters, cfg.Paths.Library, cfg.Paths.Clips} {
+	for _, dir := range []string{cfg.Paths.Data, cfg.Paths.Library, cfg.Paths.Clips} {
 		if dir != "" {
 			_ = os.MkdirAll(dir, 0o755)
 		}

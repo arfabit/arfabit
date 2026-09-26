@@ -167,7 +167,7 @@ func (r EncodeRequest) Args() ([]string, error) {
 		args = append(args, "-map_chapters", "-1")
 	}
 
-	// MakeMKV writes each track's size, duration and bitrate into the master.
+	// MakeMKV writes each track's size, duration and bitrate into the original.
 	// Carried across, they describe the source rather than what was made — a
 	// converted track claiming the bitrate of the one it came from — so they
 	// are left behind. Language and title are set on each track explicitly.

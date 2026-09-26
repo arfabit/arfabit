@@ -24,7 +24,7 @@ func TestTranscodeWaitsForItsRipAndGoesWithIt(t *testing.T) {
 	rip := &Job{Job: store.NewJob("rip")}
 	rip.State = store.StateWaiting
 	rip.Title, rip.Year = "In the Grey", 2026
-	rip.Plan = &store.Plan{Convert: true, Edition: "Archive", Package: &store.Package{
+	rip.Plan = &store.Plan{Convert: true, Edition: "Archive", Project: &store.Project{
 		Edition: "Archive",
 		Items:   []store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}},
 	}}
@@ -54,14 +54,14 @@ func TestTranscodeWaitsForItsRipAndGoesWithIt(t *testing.T) {
 	if follow == nil {
 		t.Fatal("no package job was made for the rip")
 	}
-	if follow.Kind != store.KindConvert || follow.Package == nil || follow.Package.Edition != "Archive" {
+	if follow.Kind != store.KindConvert || follow.Project == nil || follow.Project.Edition != "Archive" {
 		t.Errorf("the package did not carry the Plan's package: %+v", follow)
 	}
 	if follow.State != store.StateStopped || !strings.Contains(follow.Note, "was not copied") {
 		t.Errorf("the transcode was left as %s: %q", follow.State, follow.Note)
 	}
 	if Resumable(follow) {
-		t.Error("a transcode with no master was offered to start again")
+		t.Error("a transcode with no original was offered to start again")
 	}
 	waitUntilIdle(t, r)
 }

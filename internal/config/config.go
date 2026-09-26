@@ -51,13 +51,17 @@ type Paths struct {
 	// Data holds jobs, logs and the shared configuration. May be on a NAS.
 	Data string
 
-	// Masters holds the untouched rips. Never removed by ARFABIT.
+	// Masters is the folder originals were copied to before they moved
+	// beside their films (§6). What is there is still offered as an original
+	// to make things from. ARFABIT reads it and writes nothing new there,
+	// except the subtitle files it reads from those originals.
 	Masters string
 
-	// Library holds the finished files, laid out the way Plex expects.
+	// Library holds the originals and the films made from them, one folder
+	// per film, laid out the way Plex expects.
 	Library string
 
-	// Clips holds the clips packages make from a stretch of a master. A
+	// Clips holds the clips made from a stretch of an original. A
 	// folder of its own, and a visible one: the clips exist to be carried to
 	// a television and watched.
 	Clips string
@@ -550,8 +554,8 @@ func (c Config) Validate() error {
 		}
 	}
 
-	if c.Paths.Masters == "" || c.Paths.Library == "" {
-		return fmt.Errorf("paths.masters and paths.library are both needed")
+	if c.Paths.Library == "" {
+		return fmt.Errorf("paths.library is needed")
 	}
 	return nil
 }

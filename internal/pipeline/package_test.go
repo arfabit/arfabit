@@ -19,33 +19,33 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 	video := store.Item{Kind: store.KindVideo, Action: store.ActionCopy}
 	for _, tc := range []struct {
 		name string
-		pkg  store.Package
+		pkg  store.Project
 		want string
 	}{
-		{"no picture", store.Package{Items: []store.Item{{Kind: store.KindAudio, Action: store.ActionCopy}}}, "needs a picture"},
-		{"two pictures", store.Package{Items: []store.Item{video, video}}, "one picture"},
-		{"MP4, not yet", store.Package{Containers: []string{"mp4"}, Items: []store.Item{video}}, "MP4"},
-		{"E-AC-3 7.1", store.Package{Items: []store.Item{video,
+		{"no picture", store.Project{Items: []store.Item{{Kind: store.KindAudio, Action: store.ActionCopy}}}, "needs a picture"},
+		{"two pictures", store.Project{Items: []store.Item{video, video}}, "one picture"},
+		{"MP4, not yet", store.Project{Containers: []string{"mp4"}, Items: []store.Item{video}}, "MP4"},
+		{"E-AC-3 7.1", store.Project{Items: []store.Item{video,
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "eac3", Channels: 8}}}, "six channels"},
-		{"E-AC-3 stereo", store.Package{Items: []store.Item{video,
+		{"E-AC-3 stereo", store.Project{Items: []store.Item{video,
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "eac3", Channels: 2}}}, "AAC for stereo"},
-		{"E-AC-3 downmixed to stereo", store.Package{Items: []store.Item{video,
+		{"E-AC-3 downmixed to stereo", store.Project{Items: []store.Item{video,
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "eac3", Channels: 6, OutChannels: 2}}}, "AAC for stereo"},
-		{"more than the track has", store.Package{Items: []store.Item{video,
+		{"more than the track has", store.Project{Items: []store.Item{video,
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "aac", Channels: 2, Bitrate: "768k", SourceBitrate: 192000}}}, "192 kbps"},
-		{"subtitles converted where they cannot be read", store.Package{Items: []store.Item{video,
+		{"subtitles converted where they cannot be read", store.Project{Items: []store.Item{video,
 			{Kind: store.KindSubtitle, Action: store.ActionConvert, To: "srt", Codec: "hdmv_pgs_subtitle"}}}, "cannot be read"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkPackage(&tc.pkg, false)
+			err := checkProject(&tc.pkg, false)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want one mentioning %q", err, tc.want)
 			}
 		})
 	}
 
-	ok := store.Package{Items: []store.Item{video}}
-	if err := checkPackage(&ok, false); err != nil {
+	ok := store.Project{Items: []store.Item{video}}
+	if err := checkProject(&ok, false); err != nil {
 		t.Errorf("a picture copied as it is was refused: %v", err)
 	}
 	if len(ok.Containers) != 1 || ok.Containers[0] != "mkv" {
@@ -53,7 +53,7 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 	}
 }
 
-// A stretch of a master becomes a clip made exactly from its line items, in
+// A stretch of an original becomes a clip made exactly from its line items, in
 // their order, and the piece cut to make it does not stay behind.
 func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -65,7 +65,7 @@ func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 	if err := os.WriteFile(srt, []byte("1\n00:00:00,500 --> 00:00:03,500\nHello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	master := filepath.Join(dir, "master.mkv")
+	original := filepath.Join(dir, "original.mkv")
 	out, err := exec.Command("ffmpeg", "-v", "error",
 		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24:duration=4",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=4:sample_rate=48000",
@@ -74,18 +74,18 @@ func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 		"-map", "0", "-map", "1", "-map", "2", "-map", "3",
 		"-c:v", "libx264", "-c:a:0", "ac3", "-ac:a:0", "6", "-c:a:1", "pcm_s24le", "-c:s", "srt",
 		"-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=eng", "-metadata:s:s:0", "language=eng",
-		master).CombinedOutput()
+		original).CombinedOutput()
 	if err != nil {
-		t.Fatalf("could not make a master: %v\n%s", err, out)
+		t.Fatalf("could not make an original: %v\n%s", err, out)
 	}
 
 	r := runnerWithFolders(t)
 	r.Slots = NewSlots(1)
 
-	job, err := r.StartPackage(context.Background(), PackageRequest{
-		Master: master, Film: "Test Film", Year: 2026,
+	job, err := r.StartProject(context.Background(), ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
 		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Package: store.Package{
+		Project: store.Project{
 			Edition: "Trial",
 			At:      time.Second, Length: 2 * time.Second,
 			Items: []store.Item{
@@ -135,7 +135,7 @@ func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 		t.Errorf("streams = %v, want hevc,flac,ac3,subrip", got)
 	}
 	// Copied streams can only start on a keyframe, so a clip starts at the
-	// last one before the time asked for (here the master's only one, at the
+	// last one before the time asked for (here the original's only one, at the
 	// start). What matters is that it covers the stretch, and that picture
 	// and sound run together.
 	video, sound := streamSeconds(t, clip, "v:0"), streamSeconds(t, clip, "a:1")
@@ -174,19 +174,19 @@ func TestPackageMakesAFilmForTheLibrary(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	master := filepath.Join(dir, "master.mkv")
+	original := filepath.Join(dir, "original.mkv")
 	if out, err := exec.Command("ffmpeg", "-v", "error",
 		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24:duration=2",
 		"-f", "lavfi", "-i", "sine=frequency=440:duration=2:sample_rate=48000",
-		"-c:v", "libx264", "-c:a", "ac3", master).CombinedOutput(); err != nil {
-		t.Fatalf("could not make a master: %v\n%s", err, out)
+		"-c:v", "libx264", "-c:a", "ac3", original).CombinedOutput(); err != nil {
+		t.Fatalf("could not make an original: %v\n%s", err, out)
 	}
 
 	r := runnerWithFolders(t)
-	job, err := r.StartPackage(context.Background(), PackageRequest{
-		Master: master, Film: "Test Film", Year: 2026,
+	job, err := r.StartProject(context.Background(), ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
 		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Package: store.Package{Edition: "Archive", Items: []store.Item{
+		Project: store.Project{Edition: "Archive", Items: []store.Item{
 			{Kind: store.KindVideo, Source: 0, Action: store.ActionCopy},
 			{Kind: store.KindAudio, Source: 1, Action: store.ActionCopy},
 		}},
@@ -215,19 +215,19 @@ func TestPackageMakesAFilmForTheLibrary(t *testing.T) {
 	}
 }
 
-// A package planned from a disc's scan is pointed at the master's own tracks,
+// A package planned from a disc's scan is pointed at the original's own tracks,
 // which MakeMKV numbers its own way, by what each track is. Uncompressed disc
 // sound, which MakeMKV turns into FLAC, is still found, and a track kept and
 // converted stays one track.
 func TestPackageIsBoundToTheMaster(t *testing.T) {
-	pkg := &store.Package{Items: []store.Item{
+	pkg := &store.Project{Items: []store.Item{
 		{Kind: store.KindVideo, Source: 0},
 		{Kind: store.KindAudio, Source: 3, Lang: "eng", Codec: "pcm", Channels: 6},
 		{Kind: store.KindAudio, Source: 3, Lang: "eng", Codec: "pcm", Channels: 6, Action: store.ActionConvert},
 		{Kind: store.KindAudio, Source: 5, Lang: "fra", Codec: "ac3", Channels: 6},
 		{Kind: store.KindSubtitle, Source: 9, Lang: "fra", Codec: "hdmv_pgs_subtitle"},
 	}}
-	master := []Track{
+	original := []Track{
 		{Index: 0, Kind: store.KindVideo, Codec: "h264"},
 		{Index: 1, Kind: store.KindAudio, Lang: "eng", Codec: "flac", Channels: 6},
 		{Index: 2, Kind: store.KindAudio, Lang: "fra", Codec: "ac3", Channels: 6},
@@ -235,7 +235,7 @@ func TestPackageIsBoundToTheMaster(t *testing.T) {
 		{Index: 4, Kind: store.KindSubtitle, Lang: "fra", Codec: "hdmv_pgs_subtitle"},
 	}
 
-	if err := bindToMaster(pkg, master); err != nil {
+	if err := bindToOriginal(pkg, original); err != nil {
 		t.Fatal(err)
 	}
 	var got []int
@@ -246,11 +246,11 @@ func TestPackageIsBoundToTheMaster(t *testing.T) {
 		t.Errorf("bound to %v, want [0 1 1 2 4]", got)
 	}
 	if pkg.Items[1].Codec != "flac" {
-		t.Errorf("the line still says %q; the master holds FLAC", pkg.Items[1].Codec)
+		t.Errorf("the line still says %q; the original holds FLAC", pkg.Items[1].Codec)
 	}
 
-	missing := &store.Package{Items: []store.Item{{Kind: store.KindAudio, Lang: "jpn", Channels: 2, Label: "Japanese · Stereo"}}}
-	if err := bindToMaster(missing, master); err == nil || !strings.Contains(err.Error(), "japanese") {
-		t.Errorf("a track the master lacks was not reported: %v", err)
+	missing := &store.Project{Items: []store.Item{{Kind: store.KindAudio, Lang: "jpn", Channels: 2, Label: "Japanese · Stereo"}}}
+	if err := bindToOriginal(missing, original); err == nil || !strings.Contains(err.Error(), "japanese") {
+		t.Errorf("a track the original lacks was not reported: %v", err)
 	}
 }

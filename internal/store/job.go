@@ -108,13 +108,13 @@ type Job struct {
 	// have none.
 	Transcode *Transcode `json:"transcode,omitempty"`
 
-	// Package is what a package job makes from its Master: the line items,
-	// and the files to make them into.
-	Package *Package `json:"package,omitempty"`
+	// Project is what a package job makes from its Original: the line
+	// items, and the files to make them into.
+	Project *Project `json:"project,omitempty"`
 
-	// From names the rip whose master this job transcodes, when the two were
-	// planned together. The transcode waits for it, and does not start if the
-	// rip does not finish.
+	// From names the copy whose original this job works from, when the two
+	// were planned together. It waits for the copy, and does not start if
+	// the copy does not finish.
 	From string `json:"from,omitempty"`
 
 	// Files produced, in the order they were made.
@@ -122,7 +122,7 @@ type Job struct {
 	// Made lists every file a package made: its film in the library, or
 	// its clip.
 	Made     []string `json:"made,omitempty"`
-	Master   string   `json:"master,omitempty"`
+	Original string   `json:"original,omitempty"`
 	Delivery string   `json:"delivery,omitempty"`
 	Sidecars []string `json:"sidecars,omitempty"`
 
@@ -189,9 +189,10 @@ type Plan struct {
 
 	TitleIndex int `json:"title_index"`
 
-	// MasterName is what MakeMKV said it would call the master, so the page
-	// can name the file while it is still being written.
-	MasterName string `json:"master_name,omitempty"`
+	// RipName is what MakeMKV said it would call its file, so the page can
+	// name it while it is still being written. It is renamed into place as
+	// the Original once the copy is finished (§6).
+	RipName string `json:"rip_name,omitempty"`
 
 	Duration   string `json:"duration"`
 	SourceSize int64  `json:"source_size"`
@@ -207,15 +208,15 @@ type Plan struct {
 	Audio     []PlannedAudio    `json:"audio"`
 	Subtitles []PlannedSubtitle `json:"subtitles"`
 
-	// Tracks are what the disc's title holds, as the Master will hold them:
-	// what the master part of the Plan shows, and what its package is
-	// planned from.
+	// Tracks are what the disc's title holds, as the Original will hold
+	// them: what the original part of the Plan shows, and what its project
+	// is planned from.
 	Tracks []Track `json:"tracks,omitempty"`
 
-	// Package is the file to make from the Master once the disc is copied,
+	// Project is the film to make from the Original once the disc is copied,
 	// when Convert is on. It is a job of its own, planned here because this
 	// is where the disc's contents are known.
-	Package *Package `json:"package,omitempty"`
+	Project *Project `json:"project,omitempty"`
 
 	// Seconds is how long the title runs, and RipTime how long reading it is
 	// expected to take, kept so the estimate can follow the package.
@@ -247,14 +248,15 @@ type Plan struct {
 	Reason     string `json:"reason"`
 }
 
-// Transcode is what a Transcode job makes from a Master.
+// Transcode is what a Transcode job made from an Original, in records from
+// before packages.
 //
 // Each Plan is a copy of one blueprint's settings, taken when the job was made.
 // A blueprint only helps fill in a Plan: changing or removing it afterwards does
 // not reach a job that already has one, and running the job again means
 // running these Plans as they are (§8).
 type Transcode struct {
-	// At and Length say which stretch of the Master. A Length of zero means
+	// At and Length say which stretch of the Original. A Length of zero means
 	// the whole of it, which makes Deliveries rather than lab clips.
 	At     time.Duration `json:"at"`
 	Length time.Duration `json:"length"`
@@ -276,7 +278,7 @@ type PlannedAudio struct {
 	Selected    bool   `json:"selected"`
 
 	// Source says what the track is on the disc, and nothing about what
-	// becomes of it: that is the master's business, not the transcode's.
+	// becomes of it: that is the original's business, not the transcode's.
 	Source string `json:"source,omitempty"`
 
 	// SourceCodec and SourceLabel record what was on the disc, so the Plan can

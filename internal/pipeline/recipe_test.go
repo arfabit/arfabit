@@ -24,7 +24,7 @@ func describe(items []store.Item) string {
 }
 
 // The example this design was agreed on: a blueprint keeps one of English,
-// French or Japanese, and the master has only Japanese. After the blueprint
+// French or Japanese, and the original has only Japanese. After the blueprint
 // is used, Japanese is what is in the package — exactly what adding it by
 // hand would have made.
 func TestRecipeKeepsTheOneLanguageThereIs(t *testing.T) {
@@ -119,9 +119,9 @@ func TestRecipeSubtitles(t *testing.T) {
 	}
 }
 
-// A disc's tracks are named as a master's are, so the same notes apply; the
+// A disc's tracks are named as an original's are, so the same notes apply; the
 // forced captions MakeMKV lists as a track of their own are left out, since
-// the master holds them inside the one track.
+// the original holds them inside the one track.
 func TestDiscTracks(t *testing.T) {
 	tracks := DiscTracks(disc.Title{Streams: []disc.Stream{
 		{Index: 0, Kind: disc.StreamVideo, CodecID: "V_MPEG4/ISO/AVC", Height: 1080},

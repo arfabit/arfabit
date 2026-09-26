@@ -58,8 +58,8 @@ func TestReconcileSettlesJobsLeftRunning(t *testing.T) {
 // what to do instead. Anything working from a copy can be.
 func TestWhatCanBePickedUp(t *testing.T) {
 	dir := t.TempDir()
-	master := filepath.Join(dir, "master.mkv")
-	if err := os.WriteFile(master, []byte("x"), 0o644); err != nil {
+	original := filepath.Join(dir, "original.mkv")
+	if err := os.WriteFile(original, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,9 +71,9 @@ func TestWhatCanBePickedUp(t *testing.T) {
 		t.Errorf("the note does not say what to do: %q", interruptedNote(ripping))
 	}
 
-	planned := &store.Package{Items: []store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}}}
+	planned := &store.Project{Items: []store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}}}
 
-	converting := &store.Job{Kind: store.KindConvert, Stage: store.StagePackage, Master: master, Package: planned}
+	converting := &store.Job{Kind: store.KindConvert, Stage: store.StagePackage, Original: original, Project: planned}
 	if !Resumable(converting) {
 		t.Error("a conversion from a copy that is still there was not offered")
 	}
@@ -82,19 +82,19 @@ func TestWhatCanBePickedUp(t *testing.T) {
 	}
 
 	// A copy that has since been removed cannot be worked from.
-	missing := &store.Job{Kind: store.KindConvert, Master: filepath.Join(dir, "gone.mkv"), Package: planned}
+	missing := &store.Job{Kind: store.KindConvert, Original: filepath.Join(dir, "gone.mkv"), Project: planned}
 	if Resumable(missing) {
 		t.Error("a conversion whose copy is gone was offered as resumable")
 	}
 
 	// Without its line items there is nothing to run again.
-	unplanned := &store.Job{Kind: store.KindConvert, Master: master}
+	unplanned := &store.Job{Kind: store.KindConvert, Original: original}
 	if Resumable(unplanned) {
 		t.Error("a conversion with nothing planned was offered as resumable")
 	}
 
 	// A disc past its copy has its Plan and its copy, which is all it needs.
-	disc := &store.Job{Kind: store.KindDisc, Stage: store.StagePackage, Master: master,
+	disc := &store.Job{Kind: store.KindDisc, Stage: store.StagePackage, Original: original,
 		Plan: &store.Plan{Blueprint: "Archive", Convert: true}}
 	if !Resumable(disc) {
 		t.Error("a disc interrupted while converting was not offered")
@@ -115,8 +115,8 @@ func TestResumeKeepsThePlan(t *testing.T) {
 	cfg.Paths.Library = t.TempDir()
 	r := &Runner{Config: cfg, Store: st, Calibration: NewCalibration(), Slots: NewSlots(1)}
 
-	master := filepath.Join(t.TempDir(), "master.mkv")
-	if err := os.WriteFile(master, []byte("not really a film"), 0o644); err != nil {
+	original := filepath.Join(t.TempDir(), "original.mkv")
+	if err := os.WriteFile(original, []byte("not really a film"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +124,7 @@ func TestResumeKeepsThePlan(t *testing.T) {
 	rec.Title = "Crime 101"
 	rec.State = store.StateStopped
 	rec.Stage = store.StagePackage
-	rec.Master = master
+	rec.Original = original
 	rec.Plan = &store.Plan{Blueprint: "Removed Since", Convert: true, CRF: 17, Preset: "slower"}
 	if err := st.SaveJob(rec); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestReconcileStartsNothing(t *testing.T) {
 
 	job := store.NewJob("interrupted")
 	job.Kind = store.KindConvert
-	job.Master = "/somewhere/master.mkv"
+	job.Original = "/somewhere/original.mkv"
 	if err := st.SaveJob(job); err != nil {
 		t.Fatal(err)
 	}

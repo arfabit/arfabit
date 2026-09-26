@@ -42,7 +42,7 @@ func TestCanCopyVideo(t *testing.T) {
 
 func TestEncodeArgsBasics(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:            "master.mkv",
+		Input:            "original.mkv",
 		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
@@ -51,7 +51,7 @@ func TestEncodeArgsBasics(t *testing.T) {
 	for _, want := range []string{
 		"-c:v libx265", "-crf 20", "-preset slow",
 		"-profile:v main10", "-pix_fmt yuv420p10le",
-		// The master's statistics describe its tracks, not the new ones.
+		// The original's statistics describe its tracks, not the new ones.
 		"-map_metadata -1",
 	} {
 		if !strings.Contains(got, want) {
@@ -79,7 +79,7 @@ func TestEncodeArgsRejectsUnknownPreset(t *testing.T) {
 
 func TestEncodeArgsVideoCopy(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:  "master.mkv",
+		Input:  "original.mkv",
 		Output: "out.mkv",
 		Video:  VideoPlan{Copy: true},
 	})
@@ -97,7 +97,7 @@ func TestEncodeArgsVideoCopy(t *testing.T) {
 // error anywhere.
 func TestEncodeArgsPropagatesHDR(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:            "master.mkv",
+		Input:            "original.mkv",
 		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
@@ -133,7 +133,7 @@ func TestEncodeArgsPropagatesHDR(t *testing.T) {
 // An SDR source must not acquire HDR flags it never had.
 func TestEncodeArgsSDRHasNoHDRParams(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:  "master.mkv",
+		Input:  "original.mkv",
 		Output: "out.mkv",
 		Video:  VideoPlan{CRF: 18, Preset: PresetSlow},
 		Color:  ColorInfo{Primaries: "bt709", Transfer: "bt709", Space: "bt709"},
@@ -148,7 +148,7 @@ func TestEncodeArgsSDRHasNoHDRParams(t *testing.T) {
 
 func TestEncodeArgsAudioCopyAndFallback(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:            "master.mkv",
+		Input:            "original.mkv",
 		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
@@ -175,7 +175,7 @@ func TestEncodeArgsAudioCopyAndFallback(t *testing.T) {
 
 func TestEncodeArgsSubtitles(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:            "master.mkv",
+		Input:            "original.mkv",
 		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
@@ -209,7 +209,7 @@ func TestDispositionClearsInheritedFlags(t *testing.T) {
 // with all its channels intact.
 func TestChannelCountUsesAnAudioStreamSpecifier(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input:            "master.mkv",
+		Input:            "original.mkv",
 		Output:           "out.mkv",
 		VideoSourceIndex: 0,
 		Video:            VideoPlan{CRF: 20, Preset: PresetSlow},
@@ -231,7 +231,7 @@ func TestChannelCountUsesAnAudioStreamSpecifier(t *testing.T) {
 // small for the encoder to begin with. Nothing else does.
 func TestLosslessEncodesGetEvenFrames(t *testing.T) {
 	got := argString(t, EncodeRequest{
-		Input: "master.mkv", Output: "out.mkv",
+		Input: "original.mkv", Output: "out.mkv",
 		Video: VideoPlan{Copy: true},
 		Audio: []AudioTrack{
 			{SourceIndex: 1, Codec: "aac", Bitrate: "256k"},

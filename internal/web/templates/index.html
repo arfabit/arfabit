@@ -59,38 +59,38 @@
 
       <div id="plan-notice" class="notice" hidden></div>
 
-      <!-- The rip: what goes into the master. Nothing here is converted, so
-           nothing here talks about converting. -->
+      <!-- The copy: what goes into the original. Nothing here is converted,
+           so nothing here talks about converting. -->
       <div class="plan-part">
-        <h3>The master</h3>
+        <h3>The original</h3>
         <p class="muted small">Copied from the disc exactly as it is.</p>
         <div class="grid">
           <div>
             <h4>Picture</h4>
-            <p id="master-video" class="muted"></p>
+            <p id="original-video" class="muted"></p>
           </div>
           <div>
             <h4>Sound</h4>
-            <div id="master-audio"></div>
+            <div id="original-audio"></div>
           </div>
           <div>
             <h4>Subtitles</h4>
-            <div id="master-subs"></div>
+            <div id="original-subs"></div>
           </div>
         </div>
       </div>
 
       <label class="track convert-choice">
         <input id="plan-convert" type="checkbox" checked>
-        <span>Plan a package</span>
+        <span>Make a film</span>
       </label>
       <p id="convert-note" class="muted small"></p>
 
-      <!-- The package: a file made from the master afterwards, as a job of
-           its own. The same editor as on the Packages page. -->
-      <div id="plan-transcode" class="plan-part">
-        <h3>The package</h3>
-        <p id="transcode-target" class="muted small"></p>
+      <!-- The film: made from the original afterwards, as a task of its own.
+           The same editor as on the Projects page. -->
+      <div id="plan-film" class="plan-part">
+        <h3>The film</h3>
+        <p id="film-target" class="muted small"></p>
 
         <div class="title-choice">
           <label for="plan-edition">Edition</label>
@@ -100,7 +100,7 @@
           <p id="edition-note" class="muted small"></p>
         </div>
 
-        <div id="plan-package"></div>
+        <div id="plan-project"></div>
       </div>
 
       <p id="plan-estimate" class="estimate"></p>
@@ -137,23 +137,23 @@
 
     <section class="card">
       <h2>Recent tasks</h2>
-      <p class="muted small">Packages go in {{.Library}}, clips in {{.Clips}}.</p>
+      <p class="muted small">Originals and films go in {{.Library}}, clips in {{.Clips}}.</p>
       <div id="recent"></div>
     </section>
 
   </div>
 
-  <!-- Packages: making a file from a master, track by track. -->
-  <div class="view" data-view="packages" hidden>
+  <!-- Projects: making a film or a clip from an original, track by track. -->
+  <div class="view" data-view="projects" hidden>
 
     <section class="card">
-      <h2>Package</h2>
-      <p class="muted small">Make a file from a master you already have. Everything in the master is listed; choose what to keep as it is, and what to change.</p>
+      <h2>Project</h2>
+      <p class="muted small">Make a film or a clip from an original you already have. Everything in the original is listed; choose what to keep as it is, and what to change.</p>
 
       <div class="lab-controls">
         <label>
-          <span>Master</span>
-          <select id="lab-master"></select>
+          <span>Original</span>
+          <select id="project-original"></select>
         </label>
         <label>
           <span>From</span>
@@ -174,30 +174,30 @@
         </label>
       </div>
 
-      <div class="package-start">
-        <label for="package-blueprint" class="muted small">Start from</label>
-        <select id="package-blueprint"></select>
-        <button id="package-fill" type="button">Use</button>
+      <div class="project-start">
+        <label for="project-blueprint" class="muted small">Start from</label>
+        <select id="project-blueprint"></select>
+        <button id="project-fill" type="button">Use</button>
       </div>
 
-      <div id="package-editor"></div>
+      <div id="project-editor"></div>
 
       <div class="title-choice">
-        <label for="package-edition">Edition</label>
+        <label for="project-edition">Edition</label>
         <div class="title-row">
-          <input id="package-edition" type="text" autocomplete="off" placeholder="None">
+          <input id="project-edition" type="text" autocomplete="off" placeholder="None">
         </div>
       </div>
 
-      <div class="package-containers">
+      <div class="project-containers">
         <span class="muted small">Make</span>
         <label class="chip"><input type="checkbox" checked disabled> MKV</label>
         <label class="chip muted" title="Not yet"><input type="checkbox" disabled> MP4, not yet</label>
       </div>
 
-      <p id="package-destination" class="muted small"></p>
-      <button id="package-run" class="primary">Start</button>
-      <p id="package-status" class="muted small"></p>
+      <p id="project-destination" class="muted small"></p>
+      <button id="project-run" class="primary">Start</button>
+      <p id="project-status" class="muted small"></p>
       <div id="lab-results"></div>
     </section>
 
@@ -207,7 +207,7 @@
 
     <section class="card">
       <h2>Blueprints</h2>
-      <p class="muted small">Starter templates for planning a job to rip or transcode.</p>
+      <p class="muted small">Recipes for what to make from a disc or an original.</p>
 
       <div id="blueprint-manager"></div>
 
@@ -261,9 +261,9 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>
     <span>Tasks</span>
   </a>
-  <a href="#packages" data-tab="packages">
+  <a href="#projects" data-tab="projects">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/></svg>
-    <span>Packages</span>
+    <span>Projects</span>
   </a>
   <a href="#blueprints" data-tab="blueprints">
     <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>

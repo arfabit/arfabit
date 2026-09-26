@@ -12,11 +12,11 @@ import (
 	"github.com/arfabit/arfabit/internal/store"
 )
 
-// Track is one track a Master or a disc holds (store.Track).
+// Track is one track an Original or a disc holds (store.Track).
 type Track = store.Track
 
-// MasterTracks lists what a Master holds.
-func MasterTracks(info *ffmpeg.MediaInfo) []Track {
+// OriginalTracks lists what an Original holds.
+func OriginalTracks(info *ffmpeg.MediaInfo) []Track {
 	var tracks []Track
 	for _, s := range info.Streams {
 		t := Track{Index: s.Index, Codec: s.Codec, Lang: s.Lang, Channels: s.Channels, Height: s.Height, Bitrate: s.BitRate}
@@ -78,11 +78,11 @@ func trackText(t Track, profile string) string {
 }
 
 // DiscTracks lists what a disc's title holds, from the scan, described as a
-// Master's tracks are so the same package can be planned before the Master
+// Original's tracks are so the same package can be planned before the Original
 // exists.
 //
 // MakeMKV lists a subtitle track's forced captions as a track of their own,
-// but the Master holds them inside the one track, so they are left out here.
+// but the Original holds them inside the one track, so they are left out here.
 func DiscTracks(title disc.Title) []Track {
 	var tracks []Track
 	for _, s := range title.Streams {
@@ -146,9 +146,9 @@ func heightName(h int) string {
 	return "SD"
 }
 
-// Recipe fills a Package in from a blueprint, against what the tracks are.
+// Recipe fills a Project in from a blueprint, against what the tracks are.
 //
-// It is only where a Package starts. The line items it makes are the same
+// It is only where a Project starts. The line items it makes are the same
 // the user would add by hand, and they can be changed like any other. A
 // blueprint asking for something the tracks do not have adds nothing for it,
 // and a blueprint whose rules fit nothing at all adds no sound: the user adds
@@ -158,8 +158,8 @@ func heightName(h int) string {
 // Blu-ray's picture subtitles are converted to text where it can, unless the
 // blueprint keeps them as pictures: the first track of each language, since
 // each becomes a file named by its language. Any others are copied.
-func Recipe(tracks []Track, b config.Blueprint, canRead bool) store.Package {
-	pkg := store.Package{
+func Recipe(tracks []Track, b config.Blueprint, canRead bool) store.Project {
+	pkg := store.Project{
 		Containers: []string{"mkv"},
 		Edition:    b.Edition,
 		Blueprint:  b.Name,

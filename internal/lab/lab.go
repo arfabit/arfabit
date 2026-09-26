@@ -1,7 +1,7 @@
 // Package lab renders short clips under different settings, so that choosing
 // a quality is a matter of watching rather than guessing.
 //
-// The clips are made from a Master, which already exists, so trying five
+// The clips are made from an Original, which already exists, so trying five
 // settings costs minutes rather than the hours a full encode takes.
 package lab
 
@@ -18,7 +18,7 @@ import (
 	"github.com/arfabit/arfabit/internal/meta"
 )
 
-// Clip is one setting rendered from the master.
+// Clip is one setting rendered from the original.
 type Clip struct {
 	// Name identifies the setting, and names the file.
 	Name string `json:"name"`
@@ -63,14 +63,14 @@ type AudioSetting struct {
 	// Channels of 0 keeps the source layout.
 	Channels int `json:"channels,omitempty"`
 
-	// SourceIndex is which track of the master to use.
+	// SourceIndex is which track of the original to use.
 	SourceIndex int `json:"source_index"`
 }
 
 // Request is one run of the lab.
 type Request struct {
-	// Master is the file to take the clip from.
-	Master string
+	// Original is the file to take the clip from.
+	Original string
 
 	// At is where in the film to take it from.
 	At time.Duration
@@ -128,12 +128,12 @@ var Durations = []time.Duration{
 // A setting that fails does not stop the others: the point of the lab is
 // comparison, and four results out of five is still a comparison.
 func Run(ctx context.Context, req Request) ([]Clip, error) {
-	if req.Master == "" {
-		return nil, fmt.Errorf("the lab needs a master file to take a clip from")
+	if req.Original == "" {
+		return nil, fmt.Errorf("the lab needs an original to take a clip from")
 	}
 
 	if req.Film == "" {
-		req.Film = strings.TrimSuffix(filepath.Base(req.Master), filepath.Ext(req.Master))
+		req.Film = strings.TrimSuffix(filepath.Base(req.Original), filepath.Ext(req.Original))
 	}
 
 	// A whole film goes where films go, under the name films have. A clip
@@ -151,14 +151,14 @@ func Run(ctx context.Context, req Request) ([]Clip, error) {
 		req.Run = NextRun(filmDir)
 	}
 
-	info, err := ffmpeg.Probe(ctx, req.Master)
+	info, err := ffmpeg.Probe(ctx, req.Original)
 	if err != nil {
-		return nil, fmt.Errorf("the master file could not be read: %w", err)
+		return nil, fmt.Errorf("the original could not be read: %w", err)
 	}
 
 	video := info.VideoStream()
 	if video == nil {
-		return nil, fmt.Errorf("the master file has no picture")
+		return nil, fmt.Errorf("the original has no picture")
 	}
 
 	results := make([]Clip, 0, len(req.Settings))
@@ -213,7 +213,7 @@ func clipArgs(req Request, setting Clip, video *ffmpeg.Stream) []string {
 	if req.At > 0 {
 		args = append(args, "-ss", fmt.Sprintf("%.3f", req.At.Seconds()))
 	}
-	args = append(args, "-i", req.Master)
+	args = append(args, "-i", req.Original)
 
 	// No length means run to the end. A length longer than what remains does
 	// the same thing, which is why nothing here has to check.

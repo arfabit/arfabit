@@ -55,10 +55,10 @@ func interruptedNote(job *store.Job) string {
 	case job.Kind == store.KindDisc && (job.Stage == store.StageScan || job.Stage == store.StagePlan):
 		return "ARFABIT was restarted while this disc was being read. Nothing was copied, so read it again when you like."
 
-	case job.From != "" && job.Master == "":
+	case job.From != "" && job.Original == "":
 		return "ARFABIT was restarted before this disc was copied, so its transcode never started. Read the disc again to plan it."
 
-	case job.Master != "":
+	case job.Original != "":
 		// Everything after the disc works from the copy, and the copy is
 		// still there.
 		return "ARFABIT was restarted while this was being converted. The copy is untouched, so it can be started again."
@@ -75,12 +75,12 @@ func interruptedNote(job *store.Job) string {
 // Transcode has its Plans. A disc still being copied cannot, because its copy
 // stopped mid-file.
 func Resumable(job *store.Job) bool {
-	if job.Master == "" {
+	if job.Original == "" {
 		return false
 	}
 
 	switch {
-	case job.Package != nil:
+	case job.Project != nil:
 		// A package has its line items, which is all it needs.
 	case job.Kind == store.KindDisc:
 		// Disc jobs from before a rip and its transcode were separate jobs
@@ -104,7 +104,7 @@ func Resumable(job *store.Job) bool {
 		}
 	}
 
-	_, err := os.Stat(job.Master)
+	_, err := os.Stat(job.Original)
 	return err == nil
 }
 
@@ -153,7 +153,7 @@ func (r *Runner) ResumeJob(id string) (*Job, error) {
 		defer cancel()
 		defer r.finish(job)
 
-		if rec.Package != nil {
+		if rec.Project != nil {
 			// Started again now, with nothing to hold back for: whoever
 			// pressed Start again meant it.
 			r.runPackage(ctx, job, r.configuredDirs(), 0)

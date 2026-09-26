@@ -11,7 +11,7 @@ type language struct {
 	name string
 }
 
-// languages maps the ISO 639-2 codes a master uses, in both the bibliographic
+// languages maps the ISO 639-2 codes an original uses, in both the bibliographic
 // and terminology forms where they differ. A code not here is read with the
 // reader's own default language.
 var languages = map[string]language{

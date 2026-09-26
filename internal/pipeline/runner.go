@@ -343,11 +343,11 @@ func (r *Runner) Start(parent context.Context) error {
 		return err
 	}
 	if job.Plan != nil && job.Plan.Convert {
-		if job.Plan.Package == nil {
-			return errors.New("there is no package planned; turn off Plan a transcode to copy the disc only")
+		if job.Plan.Project == nil {
+			return errors.New("there is no film planned; turn off Make a film to copy the disc only")
 		}
-		check := *job.Plan.Package
-		if err := checkPackage(&check, r.OCR != nil); err != nil {
+		check := *job.Plan.Project
+		if err := checkProject(&check, r.OCR != nil); err != nil {
 			return err
 		}
 	}
@@ -375,23 +375,23 @@ func (r *Runner) Start(parent context.Context) error {
 }
 
 // followRip makes the package planned with a disc into a job of its own,
-// which waits for the rip to finish and then makes its file from the master.
+// which waits for the rip to finish and then makes its file from the original.
 //
 // It is two jobs because it is two pieces of work, needing different things:
 // the rip needs the drive, the package needs the processor. Planning both at
 // once is only convenient, since the Plan is where the disc's contents are
 // known. The package is copied from the Plan as it stood when started.
 func (r *Runner) followRip(parent context.Context, rip *Job) {
-	pkg := *rip.Plan.Package
-	pkg.Items = slices.Clone(rip.Plan.Package.Items)
-	pkg.Containers = slices.Clone(rip.Plan.Package.Containers)
+	pkg := *rip.Plan.Project
+	pkg.Items = slices.Clone(rip.Plan.Project.Items)
+	pkg.Containers = slices.Clone(rip.Plan.Project.Containers)
 
-	rec := store.NewJob(store.NewJobID(time.Now(), rip.Title+" package"))
+	rec := store.NewJob(store.NewJobID(time.Now(), rip.Title+" film"))
 	rec.Kind = store.KindConvert
 	rec.From = rip.ID
 	rec.Title, rec.Year = rip.Title, rip.Year
 	rec.DiscName, rec.DiscLabel, rec.DiscKind = rip.DiscName, rip.DiscLabel, rip.DiscKind
-	rec.Package = &pkg
+	rec.Project = &pkg
 	rec.Stage = store.StageQueued
 
 	log, err := NewLog(r.Store.LogPath(rec.ID), func(e Entry) {
@@ -400,16 +400,16 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 		}
 	})
 	if err != nil {
-		rip.Log.Printf(store.StagePlan, "The package could not be set up, so only the master will be made: %v", err)
+		rip.Log.Printf(store.StagePlan, "The film could not be set up, so only the original will be made: %v", err)
 		return
 	}
 	log.Describe(rec.ID, rec.Title)
-	log.Printf(store.StageQueued, "Waiting for the master of %s. This starts once the disc is copied.", rip.Title)
+	log.Printf(store.StageQueued, "Waiting for the original of %s. This starts once the disc is copied.", rip.Title)
 
 	ctx, cancel := context.WithCancel(parent)
 	job := &Job{Job: rec, Log: log, cancel: cancel}
 	job.File = meta.Title{Name: rec.Title, Year: rec.Year}.VideoName(pkg.Edition)
-	job.Progress = Progress{Since: time.Now(), Operation: "Waiting for its master"}
+	job.Progress = Progress{Since: time.Now(), Operation: "Waiting for its original"}
 
 	r.begin(job)
 	r.save(job)
@@ -427,24 +427,24 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 
 		// A rip that was stopped or did not finish leaves nothing to work
 		// from, so this goes too, and says why.
-		if rip.State != store.StateDone || rip.Master == "" {
+		if rip.State != store.StateDone || rip.Original == "" {
 			r.stop(job, fmt.Sprintf("Not started, because %s was not copied.", rip.Title), "")
 			return
 		}
-		job.Master = rip.Master
+		job.Original = rip.Original
 
-		// The package was planned from the scan; the master numbers its
+		// The package was planned from the scan; the original numbers its
 		// tracks its own way.
-		info, err := ffmpeg.Probe(ctx, job.Master)
+		info, err := ffmpeg.Probe(ctx, job.Original)
 		if err != nil {
-			r.stop(job, "ARFABIT could not read the master.", err.Error())
+			r.stop(job, "ARFABIT could not read the original.", err.Error())
 			return
 		}
-		if err := bindToMaster(job.Package, MasterTracks(info)); err != nil {
-			r.stop(job, sentence(err.Error())+". Nothing was made. The master is kept, so a package can be made from it in Packages.", "")
+		if err := bindToOriginal(job.Project, OriginalTracks(info)); err != nil {
+			r.stop(job, sentence(err.Error())+". Nothing was made. The original is kept, so a film can be made from it in Projects.", "")
 			return
 		}
-		job.Log.Printf(store.StageQueued, "The master is ready.")
+		job.Log.Printf(store.StageQueued, "The original is ready.")
 		r.runPackage(ctx, job, r.configuredDirs(), 0)
 	}()
 }
@@ -518,7 +518,9 @@ func (r *Runner) stopJob(job *Job) {
 func (r *Runner) run(ctx context.Context, job *Job) error {
 	title := meta.Title{Name: job.Title, Year: job.Year}
 
-	masterDir := title.MasterDir(r.Config.Paths.Masters)
+	// The copy is made in the film's own folder, where the original stays
+	// beside the films made from it (§6).
+	folder := title.LibraryDir(r.Config.Paths.Library)
 	ripStart := time.Now()
 
 	job.Stage = store.StageRip
@@ -532,7 +534,7 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 		job.Progress.Expected)
 	r.save(job)
 
-	job.File = job.Plan.MasterName
+	job.File = job.Plan.RipName
 
 	var ripRate rateTracker
 	speed := speedSampler{job: job}
@@ -541,7 +543,7 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	res, err := r.Backend.Rip(ctx, makemkv.RipRequest{
 		DriveIndex: 0,
 		Titles:     []int{job.Plan.TitleIndex},
-		OutputDir:  masterDir,
+		OutputDir:  folder,
 		OnProgress: func(p makemkv.Progress) {
 			// Overall progress starts at zero and stays there while MakeMKV
 			// works out what it is doing, so the current step stands in until
@@ -577,13 +579,16 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 		},
 	})
 	if err != nil {
-		return r.stop(job, "ARFABIT did not finish copying this disc.", detailOf(err))
+		note := "ARFABIT did not finish copying this disc."
+		if _, statErr := os.Stat(filepath.Join(folder, job.Plan.RipName)); job.Plan.RipName != "" && statErr == nil {
+			note += fmt.Sprintf(" The unfinished copy is in %s, as %s. Nothing was removed.", folder, job.Plan.RipName)
+		}
+		return r.stop(job, note, detailOf(err))
 	}
 
-	job.Master = res.Files[0]
-	job.File = filepath.Base(job.Master)
 	r.Calibration.ObserveRip(DriveKey(job.DriveName, job.Drive), disc.Kind(job.DiscKind), job.Plan.SourceSize, time.Since(ripStart))
-	job.Log.Printf(store.StageRip, "Copied to %s.", filepath.Base(job.Master))
+	job.Original = r.nameOriginal(job, res.Files[0], filepath.Join(folder, title.OriginalName()))
+	job.File = filepath.Base(job.Original)
 
 	// The disc has nothing left to give: everything from here happens on the
 	// copy. Ejecting now rather than at the end frees the drive for hours,
@@ -595,17 +600,35 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	ejected := eject.Eject(ctx, job.Drive)
 	job.Log.Printf(store.StageEject, "%s", ejected.Describe(true))
 
-	// The rip is finished once the master exists and the disc is out. A
+	// The rip is finished once the original exists and the disc is out. A
 	// transcode planned with it is a job of its own, waiting on this one.
 	job.State = store.StateDone
 	job.Progress = Progress{Percent: 100}
 	job.Note = fmt.Sprintf("%s is copied.", job.Title)
 	if !job.Plan.Convert {
-		job.Note += " Transcode it whenever you like, from Labs."
+		job.Note += " Make a film from it whenever you like, in Projects."
 	}
 	job.Log.Printf(store.StageEject, "%s", job.Note)
 	r.save(job)
 	return nil
+}
+
+// nameOriginal renames the file MakeMKV made to the original's own name, beside
+// the films made from it, and returns where it is. A rename, never a
+// removal: if something already has that name, the copy keeps MakeMKV's.
+func (r *Runner) nameOriginal(job *Job, copied, original string) string {
+	if err := refuseToReplace(original); err != nil {
+		job.Log.Printf(store.StageRip, "Copied to %s. %s is already there, so the copy keeps the name MakeMKV gave it.",
+			filepath.Base(copied), filepath.Base(original))
+		return copied
+	}
+	if err := os.Rename(copied, original); err != nil {
+		job.Log.Detail(store.StageRip, fmt.Sprintf("Copied to %s. ARFABIT could not rename it to %s, so it keeps the name MakeMKV gave it.",
+			filepath.Base(copied), filepath.Base(original)), err.Error())
+		return copied
+	}
+	job.Log.Printf(store.StageRip, "Copied to %s.", filepath.Base(original))
+	return original
 }
 
 // Reestimate works a waiting Plan's estimate out again after it changes: the
@@ -616,8 +639,8 @@ func (r *Runner) Reestimate(job *Job) {
 		return
 	}
 
-	if plan.Package != nil {
-		if videos := plan.Package.ItemsOf(store.KindVideo); len(videos) == 1 {
+	if plan.Project != nil {
+		if videos := plan.Project.ItemsOf(store.KindVideo); len(videos) == 1 {
 			plan.VideoCopy = videos[0].Action == store.ActionCopy
 			if !plan.VideoCopy {
 				plan.CRF, plan.Preset = videos[0].CRF, videos[0].Preset
@@ -632,13 +655,13 @@ func (r *Runner) Reestimate(job *Job) {
 	plan.EstimatedSize = packEst.Size
 	plan.EstimatedTime = plan.RipTime + packEst.Time
 
-	// The master and the package's file both exist at once, so both must fit.
-	job.Space, _ = CheckSpace(plan.SourceSize+packEst.Size, r.Config.Paths.Masters, r.Config.Paths.Library)
+	// The original and the film both exist at once, so both must fit.
+	job.Space, _ = CheckSpace(plan.SourceSize+packEst.Size, r.Config.Paths.Library, r.Config.Paths.Masters)
 }
 
-// UpdatePackage replaces the waiting Plan's package with one the user has
+// UpdateProject replaces the waiting Plan's package with one the user has
 // changed.
-func (r *Runner) UpdatePackage(pkg store.Package) error {
+func (r *Runner) UpdateProject(pkg store.Project) error {
 	r.mu.Lock()
 	job := r.pending
 	r.mu.Unlock()
@@ -646,7 +669,7 @@ func (r *Runner) UpdatePackage(pkg store.Package) error {
 		return errors.New("there is no disc waiting")
 	}
 
-	job.Plan.Package = &pkg
+	job.Plan.Project = &pkg
 	job.Plan.Edition = pkg.Edition
 	r.Reestimate(job)
 	r.save(job)
@@ -695,7 +718,7 @@ func (s *speedSampler) observe(into time.Duration, read int64) {
 	s.since, s.read = into, read
 }
 
-// convert takes a copied disc from the Master to a Delivery, following the
+// convert takes a copied disc from the Original to a Delivery, following the
 // job's Plan. It is also where an interrupted job picks up again.
 func (r *Runner) convert(ctx context.Context, job *Job, title meta.Title) error {
 	// OCR belongs here. Until it exists, the delivery carries no subtitles and
@@ -703,7 +726,7 @@ func (r *Runner) convert(ctx context.Context, job *Job, title meta.Title) error 
 	job.Stage = store.StageOCR
 	if r.hasSelectedSubtitles(job) {
 		job.Log.Printf(store.StageOCR,
-			"This disc has subtitles, but ARFABIT cannot read them into text yet, so the movie will not have any. They are still in the master copy.")
+			"This disc has subtitles, but ARFABIT cannot read them into text yet, so the movie will not have any. They are still in the original.")
 	}
 
 	// Wait for a turn at the processor. Ripping is over by now and the drive
@@ -731,11 +754,11 @@ func (r *Runner) convert(ctx context.Context, job *Job, title meta.Title) error 
 		"Making the movie file for your Apple TV. Converting the picture is slow; there is nothing to do but wait.")
 	r.save(job)
 
-	delivery, err := r.packageMaster(ctx, job, title)
+	delivery, err := r.packageOriginal(ctx, job, title)
 	var replace *ReplaceError
 	if errors.As(err, &replace) {
 		return r.stop(job, fmt.Sprintf(
-			"%s is already in your library, so ARFABIT stopped rather than replace it. Nothing was removed, and the master is kept. Give this one a different edition, or move that file, and start it again.",
+			"%s is already in your library, so ARFABIT stopped rather than replace it. Nothing was removed, and the original is kept. Give this one a different edition, or move that file, and start it again.",
 			filepath.Base(replace.Path)), replace.Path)
 	}
 	if err != nil {
@@ -756,9 +779,9 @@ func (r *Runner) convert(ctx context.Context, job *Job, title meta.Title) error 
 	return nil
 }
 
-// packageMaster encodes or copies the master into the delivery file.
-func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) (string, error) {
-	info, err := ffmpeg.Probe(ctx, job.Master)
+// packageOriginal encodes or copies the original into the delivery file.
+func (r *Runner) packageOriginal(ctx context.Context, job *Job, title meta.Title) (string, error) {
+	info, err := ffmpeg.Probe(ctx, job.Original)
 	if err != nil {
 		return "", err
 	}
@@ -778,7 +801,7 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 	}
 
 	req := ffmpeg.EncodeRequest{
-		Input:            job.Master,
+		Input:            job.Original,
 		Output:           out,
 		VideoSourceIndex: video.Index,
 		Video: ffmpeg.VideoPlan{
@@ -837,11 +860,11 @@ func (r *Runner) packageMaster(ctx context.Context, job *Job, title meta.Title) 
 
 // audioTracks turns the Plan's audio choices into encoder tracks.
 //
-// The Plan records the disc's own stream numbers, which are not the master's:
+// The Plan records the disc's own stream numbers, which are not the original's:
 // MakeMKV keeps only some streams and renumbers what it keeps. So each planned
-// track is matched back to a real stream in the master by what it is, and the
-// decision about copying is taken from the master rather than from the Plan —
-// the master is what gets muxed, and trusting the Plan here once copied a track
+// track is matched back to a real stream in the original by what it is, and the
+// decision about copying is taken from the original rather than from the Plan —
+// the original is what gets muxed, and trusting the Plan here once copied a track
 // that could not play as it was.
 func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTrack {
 	sources := info.StreamsOfKind("audio")
@@ -876,7 +899,7 @@ func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTra
 			used[source.Index] = true
 		}
 
-		// Copying is decided from what the master actually holds. A track
+		// Copying is decided from what the original actually holds. A track
 		// that does not play directly is converted whatever the Plan said.
 		canCopy := ffmpeg.CanCopyAudio(source.Codec) && !planned.Stereo
 		if planned.Copy && !canCopy {
@@ -916,7 +939,7 @@ func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTra
 	return tracks
 }
 
-// matchStream finds the stream in the master that a planned track refers to.
+// matchStream finds the stream in the original that a planned track refers to.
 //
 // Language and channel count together identify a track well enough in
 // practice; the codec breaks ties between, say, the DTS and Dolby versions of

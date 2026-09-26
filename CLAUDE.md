@@ -30,9 +30,9 @@ specifies something, follow it exactly — the schemas, the stage names, the ter
 the folder layout. Where it is silent, use judgment and say what you assumed.
 
 **Use the terminology in §2 verbatim.** Node, Drive, Disc, Title, Defaults, Blueprint, Plan,
-Master, Package, Line item, Delivery, Edition, Job, Library. Stage names are `SCAN PLAN RIP EJECT QUEUED
+Original, Project, Line item, Delivery, Edition, Task (a job, in code), Library. Stage names are `SCAN PLAN RIP EJECT QUEUED
 PACKAGE OCR DELIVER`, plus `LAB` for test clips, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
-not "source" for Master.
+not "master" or "source" for Original.
 
 **Known shortcut.** `internal/config/toml.go` is a hand-written subset parser,
 written only because the machine this was built on could not reach the Go module
@@ -82,7 +82,7 @@ table informs; it never decides. Changing a track because of a device is the
 user's choice, and the page only says what each choice costs.
 
 **Never remove user files.** No cleanup, no retention timers, no temp-file reaping
-that could catch a Master. If disk space is short, say so and stop.
+that could catch an Original. If disk space is short, say so and stop.
 
 **Never invent an error explanation (§15).** Plain-language messages appear only on a
 tested signature match. Everything else shows raw output verbatim. A wrong explanation
@@ -113,8 +113,8 @@ knowledge, it is a bug.
 
 ## Scope discipline
 
-Phase 1 is **one node, movies only**. A master is always a copy of the disc as it is.
-A Package — what to make from it — starts from the defaults or from a blueprint, a
+Phase 1 is **one node, movies only**. An original is always a copy of the disc as it is.
+A Project — what to make from it — starts from the defaults or from a blueprint, a
 recipe that makes line items the user can then change; the job never looks it up
 again (§8). The architecture accommodates more (blueprint matchers, multichannel
 audio, music CDs, Dolby Vision, a NAS controller), and

@@ -50,8 +50,8 @@ for (const match of fs.readFileSync(process.argv[3], "utf8").matchAll(/id="([a-z
   byId.set(match[1], element(match[1]));
 }
 
-// A master is chosen, so the package editor is drawn rather than skipped.
-byId.get("lab-master").value = "/masters/Crime 101 (2025)/x.mkv";
+// An original is chosen, so the project editor is drawn rather than skipped.
+byId.get("project-original").value = "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv";
 
 global.document = {
   getElementById: (id) => byId.get(id) || null,
@@ -106,7 +106,7 @@ const plan = {
     { index: 3, kind: "audio", codec: "ac3", lang: "eng", channels: 2, label: "English · Stereo · Dolby Digital · lossy" },
     { index: 7, kind: "subtitle", codec: "hdmv_pgs_subtitle", lang: "eng", label: "English · pictures", note: "Plex has to convert the whole picture to show these on Apple TV." },
   ],
-  package: {
+  project: {
     containers: ["mkv"], edition: "Archive", blueprint: "Archive",
     items: [
       { kind: "video", action: "convert", source: 0, codec: "h264", to: "hevc", crf: 20, preset: "slow", label: "H.264 · 1080p" },
@@ -138,7 +138,7 @@ const answers = {
       year: 2025,
       disc_name: "CRIME_101",
       plan,
-      space: { Needed: 45000000000, Free: 400000000000, Masters: 40000000000, Library: 11000000000, Fits: true },
+      space: { Needed: 45000000000, Free: 400000000000, Originals: 40000000000, Library: 11000000000, Fits: true },
       matches: [{ title: { Name: "Crime 101", Year: 2025 }, Why: "the name is close and the length matches" }],
     },
     active: [{
@@ -169,7 +169,7 @@ const answers = {
     recent: [
       { id: "p", kind: "convert", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982,
         made: ["/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Archive}.mkv"], started: new Date().toISOString() },
-      { id: "a", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982, master: "/m/Blade Runner (1982)/t00.mkv", started: new Date().toISOString(),
+      { id: "a", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982, original: "/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Original}.mkv", started: new Date().toISOString(),
         read_speed: [{ seconds: 30, mb_per_second: 6.1 }, { seconds: 60, mb_per_second: 22.4 }, { seconds: 90, mb_per_second: 18 }] },
       { id: "b", state: "stopped", stage: "RIP", title: "Alien", note: "Not started.", started: "2026-09-20T10:00:00Z" },
       { id: "c", state: "waiting", stage: "PLAN", disc_label: "SOME_DISC", started: "2026-09-23T10:00:00Z" },
@@ -188,8 +188,8 @@ const answers = {
   },
   "/api/autostart": { enabled: true, mechanism: "launchd user agent", path: "/tmp/x.plist" },
   "/api/index": { state: "ready", count: 272565, path: "/tmp/titles.json", built: new Date().toISOString() },
-  "/api/masters": { masters: [{ title: "Crime 101 (2025)", path: "/masters/Crime 101 (2025)/x.mkv", size: 40700000000 }] },
-  "/api/master": {
+  "/api/originals": { originals: [{ title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv", size: 40700000000 }] },
+  "/api/original": {
     duration: 5825,
     tracks: [
       { index: 0, kind: "video", codec: "h264", height: 1080, label: "H.264 · 1080p" },
@@ -201,8 +201,8 @@ const answers = {
         note: "Plex has to convert the whole picture to show these on Apple TV." },
     ],
   },
-  "/api/package/fill": {
-    package: {
+  "/api/project/fill": {
+    project: {
       containers: ["mkv"], edition: "Archive", blueprint: "Archive",
       items: [
         { kind: "video", action: "convert", source: 0, codec: "h264", to: "hevc", crf: 20, preset: "slow", label: "H.264 · 1080p" },

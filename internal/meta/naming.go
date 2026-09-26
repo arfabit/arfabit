@@ -78,14 +78,25 @@ func (t Title) SubtitleName(edition, lang string, forced, sdh bool) string {
 	return t.BaseName(edition) + suffix.String() + ".srt"
 }
 
-// LibraryDir is where a title's finished files go.
+// LibraryDir is the folder a title's files go in: its original and every
+// film made from it.
 func (t Title) LibraryDir(root string) string {
 	return filepath.Join(root, t.FolderName())
 }
 
-// MasterDir is where a title's untouched rip goes.
-func (t Title) MasterDir(root string) string {
-	return filepath.Join(root, t.FolderName())
+// OriginalEdition is the edition an original is filed under, beside the
+// films made from it: to Plex, one more version of the film (§6).
+const OriginalEdition = "Original"
+
+// OriginalName is the name an original is given once it is copied.
+func (t Title) OriginalName() string {
+	return t.VideoName(OriginalEdition)
+}
+
+// IsOriginal reports whether a file in the library is an original, or one of
+// the subtitle files beside it.
+func IsOriginal(name string) bool {
+	return strings.Contains(name, "{edition-"+OriginalEdition+"}")
 }
 
 // Characters no common filesystem accepts, split by what reading them aloud

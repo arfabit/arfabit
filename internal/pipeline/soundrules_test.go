@@ -140,7 +140,7 @@ func TestSoundRuleThatFindsNothingIsReported(t *testing.T) {
 	}
 }
 
-// A master's lossless tracks are recognised as lossless. They were not: the
+// An original's lossless tracks are recognised as lossless. They were not: the
 // check was handed the codec where it expected a disc's codec id, so even
 // TrueHD read as lossy.
 func TestMasterTracksKnowTheyAreLossless(t *testing.T) {

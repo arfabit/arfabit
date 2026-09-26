@@ -40,16 +40,18 @@ func refuseToReplace(path string) error {
 }
 
 // Existing lists the files a disc's Plan would replace if it were started now:
-// the master, and the finished film if the Plan makes one.
+// the original, the file MakeMKV makes on the way to it, and the finished film
+// if the Plan makes one.
 func (r *Runner) Existing(job *Job) []string {
 	if job == nil || job.Plan == nil {
 		return nil
 	}
 	title := meta.Title{Name: job.Title, Year: job.Year}
+	folder := title.LibraryDir(r.Config.Paths.Library)
 
-	var found []string
-	if job.Plan.MasterName != "" {
-		found = append(found, existingAt(filepath.Join(title.MasterDir(r.Config.Paths.Masters), job.Plan.MasterName))...)
+	found := existingAt(filepath.Join(folder, title.OriginalName()))
+	if job.Plan.RipName != "" {
+		found = append(found, existingAt(filepath.Join(folder, job.Plan.RipName))...)
 	}
 	if job.Plan.Convert {
 		found = append(found, existingFilm(title.LibraryDir(r.Config.Paths.Library), title, job.Plan.Edition)...)

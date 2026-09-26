@@ -13,9 +13,9 @@ import (
 )
 
 // Only the operating system's own reader says how well subtitles read, so
-// this runs it on a real master's track when one is named:
+// this runs it on a real original's track when one is named:
 //
-//	ARFABIT_OCR_MASTER=/path/to/master.mkv ARFABIT_OCR_STREAM=3 \
+//	ARFABIT_OCR_ORIGINAL=/path/to/original.mkv ARFABIT_OCR_STREAM=3 \
 //	  go test ./internal/ocr -run Live -v
 //
 // ARFABIT_OCR_LANG sets the language (default "eng"). Every line read is
@@ -23,9 +23,9 @@ import (
 // picture as it was given to the reader to the folder ARFABIT_OCR_PICTURES,
 // if set, named by when it shows (01-18-37.129.png).
 func TestLiveRead(t *testing.T) {
-	master := os.Getenv("ARFABIT_OCR_MASTER")
-	if master == "" {
-		t.Skip("set ARFABIT_OCR_MASTER and ARFABIT_OCR_STREAM to read a real track")
+	original := os.Getenv("ARFABIT_OCR_ORIGINAL")
+	if original == "" {
+		t.Skip("set ARFABIT_OCR_ORIGINAL and ARFABIT_OCR_STREAM to read a real track")
 	}
 	stream, err := strconv.Atoi(os.Getenv("ARFABIT_OCR_STREAM"))
 	if err != nil {
@@ -41,7 +41,7 @@ func TestLiveRead(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	subtitles, err := subs.ReadTrack(ctx, master, stream)
+	subtitles, err := subs.ReadTrack(ctx, original, stream)
 	if err != nil {
 		t.Fatal(err)
 	}

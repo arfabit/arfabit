@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/arfabit/arfabit/internal/config"
 	"github.com/arfabit/arfabit/internal/drive"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
+	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -123,50 +125,58 @@ func (s *Server) handleFreeDrive(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleMasters lists the copies available to experiment on.
-func (s *Server) handleMasters(w http.ResponseWriter, r *http.Request) {
-	type master struct {
-		Title    string  `json:"title"`
-		Path     string  `json:"path"`
-		Size     int64   `json:"size"`
-		Duration float64 `json:"duration"`
+// original is one original a project can be made from.
+type original struct {
+	Title string `json:"title"`
+	Path  string `json:"path"`
+	Size  int64  `json:"size"`
+}
+
+// originals lists every original: beside its films in the library, and in the
+// folder masters were kept in before (§6), which is only read.
+func (s *Server) originals() []original {
+	var found []original
+	add := func(title, path string) {
+		if info, err := os.Stat(path); err == nil {
+			found = append(found, original{Title: title, Path: path, Size: info.Size()})
+		}
 	}
 
-	var masters []master
-
-	entries, err := os.ReadDir(s.Config.Paths.Masters)
-	if err != nil {
-		writeJSON(w, map[string]any{"masters": masters})
-		return
-	}
-
-	for _, e := range entries {
-		if !e.IsDir() {
+	folders, _ := os.ReadDir(s.Config.Paths.Library)
+	for _, folder := range folders {
+		if !folder.IsDir() {
 			continue
 		}
-		dir := filepath.Join(s.Config.Paths.Masters, e.Name())
-
-		files, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
+		files, _ := os.ReadDir(filepath.Join(s.Config.Paths.Library, folder.Name()))
 		for _, f := range files {
-			if filepath.Ext(f.Name()) != ".mkv" {
-				continue
+			if filepath.Ext(f.Name()) == meta.VideoExt && meta.IsOriginal(f.Name()) {
+				add(folder.Name(), filepath.Join(s.Config.Paths.Library, folder.Name(), f.Name()))
 			}
-			info, err := f.Info()
-			if err != nil {
-				continue
-			}
-			masters = append(masters, master{
-				Title: e.Name(),
-				Path:  filepath.Join(dir, f.Name()),
-				Size:  info.Size(),
-			})
 		}
 	}
 
-	writeJSON(w, map[string]any{"masters": masters})
+	if s.Config.Paths.Masters != "" {
+		folders, _ := os.ReadDir(s.Config.Paths.Masters)
+		for _, folder := range folders {
+			if !folder.IsDir() {
+				continue
+			}
+			files, _ := os.ReadDir(filepath.Join(s.Config.Paths.Masters, folder.Name()))
+			for _, f := range files {
+				if filepath.Ext(f.Name()) == meta.VideoExt {
+					add(folder.Name(), filepath.Join(s.Config.Paths.Masters, folder.Name(), f.Name()))
+				}
+			}
+		}
+	}
+
+	sort.Slice(found, func(a, b int) bool { return found[a].Title < found[b].Title })
+	return found
+}
+
+// handleOriginals lists the originals there are to make things from.
+func (s *Server) handleOriginals(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"originals": s.originals()})
 }
 
 // handleBlueprints lists the named settings available to choose between.
@@ -471,27 +481,31 @@ func capitalise(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// insideMasters reports whether a path is a file in the masters folder, which
-// is all these endpoints read. ARFABIT listens on the whole network, so a
-// path is not taken on trust.
-func (s *Server) insideMasters(path string) bool {
-	if path == "" || s.Config.Paths.Masters == "" {
+// isOriginal reports whether a path is one of the originals listed, which is
+// all these endpoints read. ARFABIT listens on the whole network, so a path is
+// not taken on trust.
+func (s *Server) isOriginal(path string) bool {
+	if path == "" {
 		return false
 	}
-	rel, err := filepath.Rel(filepath.Clean(s.Config.Paths.Masters), filepath.Clean(path))
-	return err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
+	for _, o := range s.originals() {
+		if filepath.Clean(o.Path) == filepath.Clean(path) {
+			return true
+		}
+	}
+	return false
 }
 
-// handleMaster says what a master holds, track by track, and what each would
-// cost on the television (§4), so a package can be planned from it.
-func (s *Server) handleMaster(w http.ResponseWriter, r *http.Request) {
+// handleOriginal says what an original holds, track by track, and what each
+// would cost on the television (§4), so a project can be planned from it.
+func (s *Server) handleOriginal(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeError(w, "No master was given.", nil)
+		writeError(w, "No original was given.", nil)
 		return
 	}
-	if !s.insideMasters(path) {
-		writeError(w, "That is not a master in your masters folder.", nil)
+	if !s.isOriginal(path) {
+		writeError(w, "That is not one of your originals.", nil)
 		return
 	}
 
@@ -500,30 +514,30 @@ func (s *Server) handleMaster(w http.ResponseWriter, r *http.Request) {
 
 	info, err := ffmpeg.Probe(ctx, path)
 	if err != nil {
-		writeError(w, "That master could not be read.", err)
+		writeError(w, "That original could not be read.", err)
 		return
 	}
 
 	writeJSON(w, map[string]any{
-		"tracks":   pipeline.MasterTracks(info),
+		"tracks":   pipeline.OriginalTracks(info),
 		"duration": info.Duration,
 	})
 }
 
-// handleFillPackage fills a package in from a blueprint, or from the
-// defaults, against what a master holds. Nothing is started: the line items
+// handleFillProject fills a project in from a blueprint, or from the
+// defaults, against what an original holds. Nothing is started: the line items
 // come back to be looked at and changed.
-func (s *Server) handleFillPackage(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFillProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Master    string `json:"master"`
+		Original  string `json:"original"`
 		Blueprint string `json:"blueprint"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
-	if !s.insideMasters(req.Master) {
-		writeError(w, "That is not a master in your masters folder.", nil)
+	if !s.isOriginal(req.Original) {
+		writeError(w, "That is not one of your originals.", nil)
 		return
 	}
 
@@ -539,35 +553,35 @@ func (s *Server) handleFillPackage(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	info, err := ffmpeg.Probe(ctx, req.Master)
+	info, err := ffmpeg.Probe(ctx, req.Original)
 	if err != nil {
-		writeError(w, "That master could not be read.", err)
+		writeError(w, "That original could not be read.", err)
 		return
 	}
 
-	writeJSON(w, map[string]any{"package": pipeline.Recipe(pipeline.MasterTracks(info), blueprint, s.Runner.OCR != nil)})
+	writeJSON(w, map[string]any{"project": pipeline.Recipe(pipeline.OriginalTracks(info), blueprint, s.Runner.OCR != nil)})
 }
 
-// handleStartPackage makes a package from a master.
-func (s *Server) handleStartPackage(w http.ResponseWriter, r *http.Request) {
+// handleStartProject makes a project from an original.
+func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Master  string        `json:"master"`
-		Film    string        `json:"film"`
-		Package store.Package `json:"package"`
+		Original string        `json:"original"`
+		Film     string        `json:"film"`
+		Project  store.Project `json:"project"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
-	if !s.insideMasters(req.Master) {
-		writeError(w, "That is not a master in your masters folder.", nil)
+	if !s.isOriginal(req.Original) {
+		writeError(w, "That is not one of your originals.", nil)
 		return
 	}
 
-	job, err := s.Runner.StartPackage(context.Background(), pipeline.PackageRequest{
-		Master:     req.Master,
+	job, err := s.Runner.StartProject(context.Background(), pipeline.ProjectRequest{
+		Original:   req.Original,
 		Film:       req.Film,
-		Package:    req.Package,
+		Project:    req.Project,
 		ClipsDir:   s.Config.Paths.Clips,
 		LibraryDir: s.Config.Paths.Library,
 	})

@@ -234,13 +234,13 @@ func TestSeveralJobsCanBeActive(t *testing.T) {
 	}
 }
 
-// The Plan records the disc's stream numbers, which are not the master's:
+// The Plan records the disc's stream numbers, which are not the original's:
 // MakeMKV keeps only some streams and renumbers what it keeps. Matching by
 // language alone resolved every English track to the same stream, so a track
 // marked "copy" copied a different track than the one planned.
 func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
-	// The master, as ffprobe reports it.
-	master := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
+	// The original, as ffprobe reports it.
+	original := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
 		{Index: 0, Kind: "video", Codec: "h264"},
 		{Index: 1, Kind: "audio", Codec: "dts", Channels: 8, Lang: "eng"},
 		{Index: 2, Kind: "audio", Codec: "dts", Channels: 6, Lang: "eng"},
@@ -255,7 +255,7 @@ func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
 	}}
 
 	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
-	tracks := r.audioTracks(job, master)
+	tracks := r.audioTracks(job, original)
 
 	if len(tracks) != 2 {
 		t.Fatalf("got %d tracks, want 2", len(tracks))
@@ -283,10 +283,10 @@ func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
 	}
 }
 
-// Copying is decided from what the master holds, not from what the Plan said:
-// the master is what gets muxed.
+// Copying is decided from what the original holds, not from what the Plan said:
+// the original is what gets muxed.
 func TestTrueHDIsKeptWhenThePlanKeepsIt(t *testing.T) {
-	master := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
+	original := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
 		{Index: 0, Kind: "video"},
 		{Index: 1, Kind: "audio", Codec: "truehd", Channels: 8, Lang: "eng"},
 	}}
@@ -298,7 +298,7 @@ func TestTrueHDIsKeptWhenThePlanKeepsIt(t *testing.T) {
 	}}
 
 	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
-	tracks := r.audioTracks(job, master)
+	tracks := r.audioTracks(job, original)
 
 	if len(tracks) != 1 {
 		t.Fatalf("got %d tracks, want 1", len(tracks))
@@ -312,7 +312,7 @@ func TestTrueHDIsKeptWhenThePlanKeepsIt(t *testing.T) {
 // A stereo downmix shares its source with the track it came from, and must
 // actually be downmixed.
 func TestStereoDownmixAsksForTwoChannels(t *testing.T) {
-	master := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
+	original := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
 		{Index: 0, Kind: "video"},
 		{Index: 1, Kind: "audio", Codec: "dts", Channels: 8, Lang: "eng"},
 	}}
@@ -324,7 +324,7 @@ func TestStereoDownmixAsksForTwoChannels(t *testing.T) {
 	}}
 
 	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
-	tracks := r.audioTracks(job, master)
+	tracks := r.audioTracks(job, original)
 
 	if len(tracks) != 2 {
 		t.Fatalf("got %d tracks, want 2", len(tracks))

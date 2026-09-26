@@ -189,7 +189,7 @@ button.done { border-color: var(--ok); }
   font: inherit; padding: 0.4rem 0.55rem; border-radius: 6px;
   border: 1px solid var(--line); background: var(--bg); color: var(--ink);
 }
-.lab-controls #lab-master { max-width: 22rem; }
+.lab-controls #project-original { max-width: 22rem; }
 
 table.results { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.9rem; }
 table.results th, table.results td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); }
@@ -209,8 +209,6 @@ table.results tr.best td { font-weight: 600; }
 .job-card.focused { border-color: var(--accent); }
 
 .convert-choice { margin: 0.75rem 0 0.25rem; }
-#master-list .row { align-items: center; }
-#master-list button { font-size: 0.85rem; padding: 0.3rem 0.7rem; }
 
 /* A form for filling in a blueprint, whether saved or one-off. */
 .blueprint-form {
@@ -318,7 +316,7 @@ button.link[aria-pressed="true"] { color: var(--ink); text-decoration: none; fon
 .grip svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .job-card.dragging { border-color: var(--accent); box-shadow: 0 8px 24px rgb(0 0 0 / 0.15); position: relative; z-index: 1; }
 
-/* The two parts of a Plan: the master, then the transcode made from it. */
+/* The two parts of a Plan: the original, then the film made from it. */
 .plan-part {
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -345,31 +343,31 @@ label.chip {
 label.chip:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .rule-outcome { margin-bottom: 0.25rem; }
 
-/* A package: its sections, each a list of line items, with what else the
-   master holds underneath. */
-.package-start { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
-.package-start select, .package-item select, .package-item input[type=number] {
+/* A project: its sections, each a list of line items, with what else the
+   original holds underneath. */
+.project-start { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.5rem 0 1rem; }
+.project-start select, .project-item select, .project-item input[type=number] {
   font: inherit; padding: 0.3rem 0.45rem; border-radius: 6px;
   border: 1px solid var(--line); background: var(--bg); color: var(--ink);
 }
-.package-item input[type=number] { width: 4.5rem; }
-.package-section { border-top: 1px solid var(--line); padding: 0.75rem 0; }
-.package-section h3 { margin-bottom: 0.5rem; }
-.package-item { padding: 0.35rem 0; border-radius: 8px; background: var(--card); }
-.package-item.dragging { outline: 1px solid var(--accent); box-shadow: 0 6px 18px rgb(0 0 0 / 0.12); position: relative; z-index: 1; }
-.package-line { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
-.package-line .grip { margin-left: 0; }
-.package-line .grip[hidden] { display: none; }
-.package-label { flex: 1 1 14rem; }
-.package-line button { font-size: 0.85rem; padding: 0.25rem 0.6rem; }
-.package-note { margin: 0.2rem 0 0 2rem; color: var(--warn); }
+.project-item input[type=number] { width: 4.5rem; }
+.project-section { border-top: 1px solid var(--line); padding: 0.75rem 0; }
+.project-section h3 { margin-bottom: 0.5rem; }
+.project-item { padding: 0.35rem 0; border-radius: 8px; background: var(--card); }
+.project-item.dragging { outline: 1px solid var(--accent); box-shadow: 0 6px 18px rgb(0 0 0 / 0.12); position: relative; z-index: 1; }
+.project-line { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+.project-line .grip { margin-left: 0; }
+.project-line .grip[hidden] { display: none; }
+.project-label { flex: 1 1 14rem; }
+.project-line button { font-size: 0.85rem; padding: 0.25rem 0.6rem; }
+.project-note { margin: 0.2rem 0 0 2rem; color: var(--warn); }
 .tag { font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
-.package-spare { margin-top: 0.6rem; }
-.package-spare { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; }
+.project-spare { margin-top: 0.6rem; }
+.project-spare { display: flex; flex-direction: column; align-items: flex-start; gap: 0.35rem; }
 button.spare { font-size: 0.9rem; padding: 0.3rem 0.7rem; border-style: dashed; text-align: left; }
 .convert-pill[hidden] { display: none; }
 .section-hint { margin-left: 0.6rem; font-size: 0.75rem; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--muted); }
-.package-containers { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.75rem 0; }
+.project-containers { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.75rem 0; }
 
 /* While something is being dragged, the page's text is not selected by the
    same movement. */

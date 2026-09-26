@@ -30,7 +30,7 @@ func (r *readsInOrder) Read(_ context.Context, pictures []string, _ string) ([]o
 	return lines, nil
 }
 
-// pgsMaster makes a master with a picture, keyframes every second, and a
+// pgsMaster makes an original with a picture, keyframes every second, and a
 // Blu-ray subtitle track of two lines: 1.0–2.0s and 3.5–4.5s.
 func pgsMaster(t *testing.T) string {
 	t.Helper()
@@ -70,22 +70,22 @@ func pgsMaster(t *testing.T) string {
 	if err := os.WriteFile(supPath, sup.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	master := filepath.Join(dir, "master.mkv")
+	original := filepath.Join(dir, "original.mkv")
 	// -copyts keeps the lines where they are: otherwise ffmpeg starts the
-	// track at its first line, as no master from a disc would.
+	// track at its first line, as no original from a disc would.
 	if out, err := exec.Command("ffmpeg", "-v", "error",
 		"-f", "lavfi", "-i", "testsrc2=size=320x240:rate=24:duration=6",
 		"-copyts", "-i", supPath,
 		"-map", "0", "-map", "1", "-c:v", "libx264", "-g", "24", "-c:s", "copy",
-		"-metadata:s:s:0", "language=eng", master).CombinedOutput(); err != nil {
-		t.Fatalf("could not make a master: %v\n%s", err, out)
+		"-metadata:s:s:0", "language=eng", original).CombinedOutput(); err != nil {
+		t.Fatalf("could not make an original: %v\n%s", err, out)
 	}
-	return master
+	return original
 }
 
-func runPackageToEnd(t *testing.T, r *Runner, req PackageRequest) *Job {
+func runPackageToEnd(t *testing.T, r *Runner, req ProjectRequest) *Job {
 	t.Helper()
-	job, err := r.StartPackage(context.Background(), req)
+	job, err := r.StartProject(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +108,14 @@ var convertSubtitles = []store.Item{
 // beside it as a sidecar named as Plex reads it. They are not put in the
 // file. Nothing ARFABIT made along the way stays behind.
 func TestFilmSubtitlesAreReadIntoText(t *testing.T) {
-	master := pgsMaster(t)
+	original := pgsMaster(t)
 	r := runnerWithFolders(t)
 	r.OCR = &readsInOrder{}
 
-	job := runPackageToEnd(t, r, PackageRequest{
-		Master: master, Film: "Test Film", Year: 2026,
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
 		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Package: store.Package{Edition: "Text", Items: convertSubtitles},
+		Project: store.Project{Edition: "Text", Items: convertSubtitles},
 	})
 
 	folder := filepath.Dir(job.Delivery)
@@ -152,16 +152,16 @@ func TestFilmSubtitlesAreReadIntoText(t *testing.T) {
 // A clip's subtitles are read from the piece it is made from, so they keep
 // time with its picture. The piece starts at the keyframe before the time
 // asked for — here 3.0s for 3.2s — so the line at 3.5s is 0.5s in; shifting
-// the master's times by 3.2s would have put it at 0.3s.
+// the original's times by 3.2s would have put it at 0.3s.
 func TestClipSubtitlesKeepTimeWithThePicture(t *testing.T) {
-	master := pgsMaster(t)
+	original := pgsMaster(t)
 	r := runnerWithFolders(t)
 	r.OCR = &readsInOrder{}
 
-	job := runPackageToEnd(t, r, PackageRequest{
-		Master: master, Film: "Test Film", Year: 2026,
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
 		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Package: store.Package{At: 3200 * time.Millisecond, Length: 2 * time.Second, Items: convertSubtitles},
+		Project: store.Project{At: 3200 * time.Millisecond, Length: 2 * time.Second, Items: convertSubtitles},
 	})
 
 	clip := job.Made[0]
@@ -194,14 +194,14 @@ func (r *disagrees) Read(ctx context.Context, pictures []string, lang string) ([
 // A subtitle of low confidence is listed on the job with both readings and
 // its picture; the sidecar keeps the first reading.
 func TestLowConfidenceIsListedOnTheJob(t *testing.T) {
-	master := pgsMaster(t)
+	original := pgsMaster(t)
 	r := runnerWithFolders(t)
 	r.OCR = &disagrees{}
 
-	job := runPackageToEnd(t, r, PackageRequest{
-		Master: master, Film: "Test Film", Year: 2026,
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
 		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Package: store.Package{Items: convertSubtitles},
+		Project: store.Project{Items: convertSubtitles},
 	})
 
 	if len(job.LowConfidence) != 1 {
@@ -226,17 +226,17 @@ func TestLowConfidenceIsListedOnTheJob(t *testing.T) {
 // Subtitles that cannot be read do not cost the film: it is made and
 // delivered, and the note says plainly why there is no subtitle file.
 func TestUnreadableSubtitlesDoNotStopTheFilm(t *testing.T) {
-	master := pgsMaster(t)
+	original := pgsMaster(t)
 	r := runnerWithFolders(t)
 	message := "This Mac cannot read English text, so English subtitles can only be copied as they are."
 	r.OCR = readerFunc(func(context.Context, []string, string) ([]ocr.Line, error) {
 		return nil, &ocr.LanguageError{Lang: "eng", Message: message}
 	})
 
-	job := runPackageToEnd(t, r, PackageRequest{
-		Master: master, Film: "Test Film", Year: 2026,
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
 		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Package: store.Package{Items: convertSubtitles},
+		Project: store.Project{Items: convertSubtitles},
 	})
 	if !strings.Contains(job.Note, message) {
 		t.Errorf("note = %q", job.Note)
@@ -262,32 +262,32 @@ func TestSubtitleConversionIsChecked(t *testing.T) {
 	video := store.Item{Kind: store.KindVideo, Action: store.ActionCopy}
 	sub := store.Item{Kind: store.KindSubtitle, Action: store.ActionConvert, To: "srt", Codec: "hdmv_pgs_subtitle", Lang: "eng"}
 
-	p := store.Package{Items: []store.Item{video, sub}}
-	if err := checkPackage(&p, false); err == nil || !strings.Contains(err.Error(), "cannot be read into text on this computer") {
+	p := store.Project{Items: []store.Item{video, sub}}
+	if err := checkProject(&p, false); err == nil || !strings.Contains(err.Error(), "cannot be read into text on this computer") {
 		t.Errorf("no reader: err = %v", err)
 	}
-	if err := checkPackage(&p, true); err != nil {
+	if err := checkProject(&p, true); err != nil {
 		t.Errorf("with a reader: %v", err)
 	}
 
 	dvd := sub
 	dvd.Codec = "dvd_subtitle"
-	p = store.Package{Items: []store.Item{video, dvd}}
-	if err := checkPackage(&p, true); err == nil || !strings.Contains(err.Error(), "Blu-ray") {
+	p = store.Project{Items: []store.Item{video, dvd}}
+	if err := checkProject(&p, true); err == nil || !strings.Contains(err.Error(), "Blu-ray") {
 		t.Errorf("DVD subtitles: err = %v", err)
 	}
 
 	second := sub
 	second.Source = 9
-	p = store.Package{Items: []store.Item{video, sub, second}}
-	if err := checkPackage(&p, true); err == nil || !strings.Contains(err.Error(), "only one English") {
+	p = store.Project{Items: []store.Item{video, sub, second}}
+	if err := checkProject(&p, true); err == nil || !strings.Contains(err.Error(), "only one English") {
 		t.Errorf("two English: err = %v", err)
 	}
 }
 
 // Sidecars are named after the file they belong to and their language.
 func TestSidecarPaths(t *testing.T) {
-	pkg := &store.Package{Items: []store.Item{
+	pkg := &store.Project{Items: []store.Item{
 		{Kind: store.KindSubtitle, Source: 3, Action: store.ActionConvert, Lang: "eng"},
 		{Kind: store.KindSubtitle, Source: 5, Action: store.ActionConvert, Lang: "fre"},
 		{Kind: store.KindSubtitle, Source: 6, Action: store.ActionCopy, Lang: "ger"},

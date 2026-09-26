@@ -26,7 +26,7 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 		Edition:    blueprint.Edition,
 		Convert:    blueprint.ConvertAfterRip,
 		TitleIndex: title.Index,
-		MasterName: title.OutputName,
+		RipName:    title.OutputName,
 		Duration:   formatDuration(title.Duration),
 		SourceSize: title.SizeBytes,
 		Obfuscated: sel.Obfuscated,
@@ -44,10 +44,10 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 	plan.Audio = planAudio(title, blueprint)
 	applyBlueprintSound(plan, blueprint)
 
-	// What the Master will hold, and the package the blueprint makes of it.
+	// What the Original will hold, and the package the blueprint makes of it.
 	plan.Tracks = DiscTracks(title)
 	pkg := Recipe(plan.Tracks, blueprint, canRead)
-	plan.Package = &pkg
+	plan.Project = &pkg
 	plan.Seconds = int(title.Duration.Seconds())
 	plan.Subtitles = planSubtitles(title, blueprint)
 

@@ -1,4 +1,4 @@
-// Package subs reads a disc's picture subtitles out of a master, and writes
+// Package subs reads a disc's picture subtitles out of an original, and writes
 // subtitles as text.
 //
 // Blu-ray and DVD subtitles are not text: they are little images, one per

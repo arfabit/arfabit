@@ -11,15 +11,15 @@ import (
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 )
 
-// ReadTrack pulls one subtitle track out of a master, as it is, and decodes
-// its pictures. stream is the track's index in the master. Nothing is written
+// ReadTrack pulls one subtitle track out of an original, as it is, and decodes
+// its pictures. stream is the track's index in the original. Nothing is written
 // to disk.
-func ReadTrack(ctx context.Context, master string, stream int) ([]Subtitle, error) {
+func ReadTrack(ctx context.Context, original string, stream int) ([]Subtitle, error) {
 	bin, err := ffmpeg.Locate()
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, bin, "-v", "error", "-i", master,
+	cmd := exec.CommandContext(ctx, bin, "-v", "error", "-i", original,
 		"-map", fmt.Sprintf("0:%d", stream), "-c", "copy", "-f", "sup", "pipe:1")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

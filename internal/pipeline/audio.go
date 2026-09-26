@@ -58,7 +58,7 @@ var losslessCodecs = map[string]bool{
 	"pcm":    true,
 }
 
-// streamLossless reports whether a track in a master carries the audio without
+// streamLossless reports whether a track in an original carries the audio without
 // loss. ffprobe names DTS-HD Master Audio "dts", like ordinary DTS, and tells
 // them apart only by profile. Uncompressed audio comes in several "pcm_"
 // codecs, one per sample format.

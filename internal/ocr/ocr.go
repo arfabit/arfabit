@@ -40,7 +40,7 @@ type Line struct {
 // Reader reads the text in pictures.
 type Reader interface {
 	// Read reads each PNG in pictures, and returns one Line for each, in
-	// the same order. lang is the track's language as the master names it
+	// the same order. lang is the track's language as the original names it
 	// (ISO 639-2, such as "eng"), or empty when it is not known.
 	Read(ctx context.Context, pictures []string, lang string) ([]Line, error)
 }

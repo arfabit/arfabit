@@ -293,10 +293,10 @@ func TestHumanBytes(t *testing.T) {
 // The space message states four numbers and suggests nothing be removed.
 func TestSpaceDescribe(t *testing.T) {
 	s := Space{
-		Needed:  50_000_000_000,
-		Free:    10_000_000_000,
-		Masters: 400_000_000_000,
-		Library: 80_000_000_000,
+		Needed:    50_000_000_000,
+		Free:      10_000_000_000,
+		Originals: 400_000_000_000,
+		Library:   80_000_000_000,
 	}
 	got := s.Describe()
 

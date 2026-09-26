@@ -19,9 +19,9 @@ func testVideo() *ffmpeg.Stream {
 // and taking as long as the film.
 func TestSeekComesBeforeTheInput(t *testing.T) {
 	args := clipArgs(Request{
-		Master: "master.mkv",
-		At:     45 * time.Minute,
-		Length: 30 * time.Second,
+		Original: "original.mkv",
+		At:       45 * time.Minute,
+		Length:   30 * time.Second,
 	}, Clip{Name: "test", Video: VideoSetting{CRF: 20, Preset: "slow"}}, testVideo())
 
 	joined := strings.Join(args, " ")
@@ -40,7 +40,7 @@ func TestSeekComesBeforeTheInput(t *testing.T) {
 }
 
 func TestClipArgsVideoSettings(t *testing.T) {
-	args := strings.Join(clipArgs(Request{Master: "m.mkv", Length: time.Minute},
+	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: time.Minute},
 		Clip{Name: "crf18", Video: VideoSetting{CRF: 18, Preset: "medium"}}, testVideo()), " ")
 
 	for _, want := range []string{"-c:v libx265", "-crf 18", "-preset medium", "-profile:v main10"} {
@@ -52,7 +52,7 @@ func TestClipArgsVideoSettings(t *testing.T) {
 
 // A copy is the honest baseline every other setting is judged against.
 func TestClipArgsCopyBaseline(t *testing.T) {
-	args := strings.Join(clipArgs(Request{Master: "m.mkv", Length: time.Minute},
+	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: time.Minute},
 		Clip{Name: "untouched", Video: VideoSetting{Copy: true}, Audio: AudioSetting{Copy: true}}, testVideo()), " ")
 
 	if !strings.Contains(args, "-c:v copy") || !strings.Contains(args, "-c:a copy") {
@@ -65,7 +65,7 @@ func TestClipArgsCopyBaseline(t *testing.T) {
 
 // Sound can be judged on its own, with the picture left untouched beneath it.
 func TestClipArgsAudioOnly(t *testing.T) {
-	args := strings.Join(clipArgs(Request{Master: "m.mkv", Length: 2 * time.Minute},
+	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: 2 * time.Minute},
 		Clip{
 			Name:  "eac3-768",
 			Video: VideoSetting{Copy: true},
@@ -94,7 +94,7 @@ func TestClipKeepsHDR(t *testing.T) {
 		MaxLuminance: 10000000, MinLuminance: 50, MaxCLL: 1000, MaxFALL: 400,
 	}
 
-	args := strings.Join(clipArgs(Request{Master: "m.mkv", Length: time.Minute},
+	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: time.Minute},
 		Clip{Name: "uhd", Video: VideoSetting{CRF: 20, Preset: "slow"}}, video), " ")
 
 	for _, want := range []string{"master-display=", "max-cll=1000,400", "hdr10=1", "-color_trc smpte2084"} {

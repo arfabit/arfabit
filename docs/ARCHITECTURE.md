@@ -18,7 +18,7 @@ Do not re-litigate them, work around them, or "improve" them without being asked
 3. **`os/exec` directly against `makemkvcon` and `ffmpeg`.** No wrapper libraries.
 4. **State is plain files.** No database. Any index is a disposable cache.
 5. **HDR metadata must be re-injected on every HDR re-encode.** MakeMKV preserves it
-   in the Master (it only remuxes), and ffmpeg forwards the basic color tags — but
+   in the Original (it only remuxes), and ffmpeg forwards the basic color tags — but
    mastering-display and MaxCLL are **not** carried to x265 automatically, and those
    are the two that drive tone mapping. Missing them produces a grey, washed-out file
    that does not error. Copy paths are unaffected. See §9.
@@ -75,16 +75,16 @@ These words are used consistently in code, UI, and logs. No synonyms.
 | **Disc**      | The physical thing. Has a type (dvd/bluray/uhd) and a volume label.      |
 | **Title**     | One playable item MakeMKV found on the disc.                             |
 | **Defaults**  | The settings every Plan starts from when no blueprint is used.           |
-| **Blueprint** | A recipe that fills a Package in against what a Master holds: named settings that override the defaults. Once used, only its line items remain; never part of a Job. |
+| **Blueprint** | A recipe that fills a Project in against what an Original holds: named settings that override the defaults. Once used, only its line items remain; never part of a Job. |
 | **Plan**      | What is about to happen, for _this_ job. Auto-built, user-editable.      |
-| **Master**    | The raw, untouched `.mkv` MakeMKV produced.                              |
-| **Package**   | What to make from a Master: line items, and the containers to make them into, one file each. |
-| **Line item** | One track of the Master in a Package, and what to do with it: copy as is, or convert. |
+| **Original**  | The disc as it is: every track, subtitles still inside, as MakeMKV copies it. Kept beside its films as the edition `Original` (§6). Always kept; only the user removes one (§0.6). |
+| **Project**   | What you set up to be done: an original, and what to make from it — line items, and the containers to make them into, one file each. Starting it makes tasks. |
+| **Line item** | One track of the Original in a Project, and what to do with it: copy as is, or convert. |
 | **Delivery**  | The finished `.mkv` plus its sidecar subtitles.                          |
 | **Low confidence** | A subtitle OCR may have read wrong: nothing was read, what was read holds a mark known to be a misreading, or a second reading says other words. ARFABIT's own measure; no reader's score goes into it (§10). |
 | **Edition**   | A Plan's version name, written as `{edition-...}` in the Delivery's filename. Plex's word. Blank means none. |
-| **Job**       | One piece of work: a rip, copying a disc to its Master, or a Package made from a Master. A Package planned with its disc is a job of its own that waits for the rip. |
-| **Library**   | Where Deliveries land, in Plex layout.                                   |
+| **Task**      | One step a project becomes, in the queue: a copy of a disc to its Original, or a package (a film) or a clip made from an Original. A film planned with its disc is a task of its own that waits for the copy. In code, and in the files on disk, a **job**. |
+| **Library**   | Where originals and Deliveries land, one folder per film, in Plex layout (§6). |
 
 ### What waits on what
 
@@ -116,10 +116,10 @@ Stage names appear verbatim in the logs and on the page.
 which takes a minute or two for a film. A problem reading them never costs the
 film: it is still delivered, and the job says what happened (§10).
 
-**A disc is two jobs.** The rip makes the Master and ends when the disc is out.
+**A disc is two jobs.** The rip makes the Original and ends when the disc is out.
 If the Plan asked for a transcode, pressing Start also makes a second job, which
-waits in QUEUED ("Waiting for its master") until the rip finishes, then makes
-the Delivery from the Master. They are planned together only because the Plan
+waits in QUEUED ("Waiting for its original") until the rip finishes, then makes
+the Delivery from the Original. They are planned together only because the Plan
 is where the disc's contents are known; they need different things (the drive,
 the processor) and are stopped separately. The transcode records its rip as
 `from`. A rip that is stopped or does not finish takes its waiting transcode
@@ -129,14 +129,14 @@ off the queue, saying why.
 waiting and working otherwise look the same. A job that gets a slot straight away
 passes through it without stopping. Whatever waits, waits in a line that can be
 rearranged from the page, and only the front of the line is given a slot, so the
-order shown is the order things start in. A Package joins the line held for ten
+order shown is the order things start in. A Project joins the line held for ten
 seconds before it may start, so one added by mistake or in the wrong place can be
 stopped or moved before anything has been done; the page calls this "Getting
-things ready". **LAB** is the stage a Package job making
+things ready". **LAB** is the stage a package job making
 test clips runs in (§14); it is not part of a disc's trip and takes a slot the
 same way PACKAGE does.
 
-**EJECT comes straight after RIP**, not at the end. Once the Master exists the
+**EJECT comes straight after RIP**, not at the end. Once the Original exists the
 disc has nothing left to give, and everything after it happens on the copy.
 Packaging takes hours; holding the disc through that keeps it for no reason and
 keeps the drive spinning.
@@ -170,7 +170,7 @@ same rule as §15. Other devices are added as they are tested, never from a spec
 
 ### Plex app on Apple TV 4K
 
-Tested 2026-09-25 with one-minute clips cut from real masters, read off Plex's
+Tested 2026-09-25 with one-minute clips cut from real originals, read off Plex's
 Dashboard while playing, with the server's video transcoding turned off.
 
 | | Result |
@@ -209,9 +209,9 @@ arfabit/
     pipeline/                  stage runner, job lifecycle
       runner.go                SCAN → DELIVER for a disc
       plan.go  audio.go        Plan construction, audio track rules
-      package.go               Package jobs: clips and whole-Master Deliveries, from line items
+      package.go               package jobs: clips and whole-Original Deliveries, from line items
       subtitles.go             OCR stage: subtitle line items read into SRT, sidecars
-      recipe.go                blueprints as recipes; a Master's or a disc's tracks
+      recipe.go                blueprints as recipes; an Original's or a disc's tracks
     playback/                  what was tested to play where (§4), as notes
       slots.go                 processor slots (QUEUED)
       estimate.go  rate.go     calibration model (§12), read speed
@@ -224,7 +224,7 @@ arfabit/
       probe.go  run.go         ffprobe, subprocess + progress
     lab/                       clip rendering and the comparison table
     blueprints/                blueprints made on the page (blueprints.json)
-    subs/                      PGS decode, a track read from a master, SRT writing
+    subs/                      PGS decode, a track read from an original, SRT writing
     ocr/                       the computer's own text reader (§10): Vision, Windows, Tesseract
     meta/
       index.go                 offline IMDb index build + lookup
@@ -281,30 +281,48 @@ A node renders the global view by reading every `nodes/*/` directory.
 
 ### Media layout
 
-Masters are kept separate so they are one folder to manage.
-
-**ARFABIT never removes a file it did not just create, and never removes a Master at
-all.** Masters accumulate under `masters/`. When you want the space back, you delete
-that folder yourself, in Finder or Explorer. There is no retention timer, no cleanup
-job, and no "are you sure" dialog, because the program simply does not have that power.
+Originals and films share one folder per film, named for Plex. The original is
+an edition of its own, `Original`, so to Plex it is one more version of the film:
 
 ```
 ~/Downloads/arfabit/
-  masters/
+  library/
     Blade Runner (1982)/
-      <name MakeMKV chose>.mkv
+      Blade Runner (1982) {edition-Original}.mkv      # the original
+      Blade Runner (1982).mkv                         # a film, no edition
+      Blade Runner (1982).en.srt                      # subtitles read into text (§10)
+      Blade Runner (1982) {edition-Small}.mkv         # a film, edition "Small"
   clips/
     Blade Runner (1982)/
       Blade Runner (1982) {edition-Lab 001 - Defaults - 1h15m20s}.mkv
       Blade Runner (1982) {edition-Lab 001 - Small - 1h15m20s}.mkv
-  library/
-    Blade Runner (1982)/
-      Blade Runner (1982).mkv                         # no edition
-      Blade Runner (1982).en.srt                      # subtitles read into text (§10)
-      Blade Runner (1982) {edition-Small}.mkv         # edition "Small"
 ```
 
-The job record and log live in the data directory (above), not beside the Master.
+MakeMKV names its file its own way, in the film's folder; once the copy is
+finished ARFABIT renames it to the original's name. A rename, never a removal:
+if something already has that name, the copy keeps MakeMKV's, and the log says
+so. A copy that is stopped part way stays under MakeMKV's name, and the task
+says where. No film can take the edition `Original`.
+
+The original keeps every track, its picture subtitles included. Plex plays it
+without converting the picture unless those are switched on; its Dolby TrueHD
+sound, where it has some, Plex converts on every play (§4). Choosing it is the
+user's business.
+
+**ARFABIT never removes a file it did not just create, and never removes an
+Original at all.** When you want the space back, you remove an original
+yourself, in Finder or Explorer. There is no retention timer, no cleanup job,
+and no "are you sure" dialog, because the program simply does not have that
+power.
+
+**Originals copied before this layout** stay where they were, in the folder
+named by `paths.masters` (`~/Downloads/arfabit/masters/` by default), under
+MakeMKV's names. ARFABIT moves nothing: it lists them as originals beside the
+ones in the library, makes films and clips from them, and writes nothing new
+there.
+
+The job record and log live in the data directory (above), not beside the
+Original.
 
 A Delivery carries its Plan's edition as a tag. "Edition" is Plex's word, and the
 tag is how Plex keeps several versions of one film side by side as selectable
@@ -404,7 +422,7 @@ edition alone.
   their comments and their layout. Changing a file-defined blueprint on the page
   saves a version in `blueprints.json` that takes precedence. Removing one hides
   it there, and the line in the file stays and does nothing.
-- **By hand.** A Package's line items changed directly, for that Package only,
+- **By hand.** A Project's line items changed directly, for that Project only,
   and not kept. Trying something once should not mean naming it and remembering
   it forever.
 
@@ -432,20 +450,20 @@ edition = "Small"        # the name unless given; "" for none
 The defaults and blueprints hold only what goes into a Plan. Settings that belong
 to the machine, the drive or MakeMKV live in their own sections (§7).
 
-### Packages
+### Projects
 
-A **Package** is what to make from a Master. It is planned against what the Master
+A **Project** is what to make from an Original. It is planned against what the Original
 holds, track by track, in three sections — picture, sound, subtitles — as **line
-items**. Each line item is one of the Master's tracks and what to do with it: **copy
+items**. Each line item is one of the Original's tracks and what to do with it: **copy
 as is**, or **convert** (the picture to HEVC at a quality and speed; sound to FLAC,
 AAC or E-AC-3 — E-AC-3 only for surround of up to six channels, since for stereo
 AAC does the same job everywhere). Lossy sound is never converted to a higher
 bitrate than it has, which would only make a bigger file of the same sound: the
-bitrate comes from MakeMKV (the scan's `SINFO` attribute 13, and the Master's
+bitrate comes from MakeMKV (the scan's `SINFO` attribute 13, and the Original's
 `BPS` tags), is shown beside each lossy track, and caps what is offered and
 accepted. Converting lossy sound is noted as losing a little more. Every line starts copied as is; a **Convert** pill on the line turns converting on
-and shows what to convert it to. "Add from master", under each section, lists
-everything the Master holds, one line each, and adds a track as it is. Keeping a
+and shows what to convert it to. "Add from original", under each section, lists
+everything the Original holds, one line each, and adds a track as it is. Keeping a
 track and a converted one beside it is two lines. Two lines exactly the same
 are pointed out, since the file would hold the same track twice. A Blu-ray's
 picture subtitles can be converted to text (SRT) where the computer can read them
@@ -459,18 +477,19 @@ television, from what was tested (§4) — never a decision, only a note, such a
 Plex converts TrueHD every time it plays on an Apple TV and FLAC of the same width
 would not.
 
-**A blueprint is a recipe.** Used on a Master, it makes line items — the same ones
+**A blueprint is a recipe.** Used on an Original, it makes line items — the same ones
 the user would add by hand — and is then out of the picture: the line items can be
 changed like any others, and nothing reads the blueprint again. A blueprint that
-keeps one of English, French or Japanese, used on a Master holding only Japanese,
-leaves Japanese in the package, exactly as adding it by hand would. A blueprint
-asking for something the Master lacks adds nothing for it; one whose sound rules fit
+keeps one of English, French or Japanese, used on an Original holding only Japanese,
+leaves Japanese in the project, exactly as adding it by hand would. A blueprint
+asking for something the Original lacks adds nothing for it; one whose sound rules fit
 nothing adds no sound, and the user adds what they want. The defaults are a recipe
 too.
 
-One Package makes one file per container — MKV today; MP4 is to come, and the
-containers will then decide which line items a file can carry. A **whole** Master
-becomes a film in the library (stage PACKAGE), named with the Package's edition. A
+One Project makes one file per container — MKV today; MP4 is to come, and the
+containers will then decide which line items a file can carry. A **whole** Original
+becomes a film in the library, beside it (stage PACKAGE), named with the Project's
+edition. A
 **stretch** becomes a clip in the clips folder (stage LAB). A stretch is cut first,
 with every stream it needs copied together into a temporary piece of ARFABIT's own,
 removed after, and the file is made from the piece without seeking: seeking while
@@ -479,13 +498,13 @@ copying some streams and converting others moved them against each other by up t
 last one before the time asked for, usually under a second before.
 
 A disc's Plan uses the same editor, fed with the disc's tracks from the scan. Its
-package is copied into its own job at Start (§2) and pointed at the Master's tracks
-once the Master exists, matching each by kind, language, format and width, since
-MakeMKV numbers the Master's tracks its own way and turns uncompressed disc sound
+project is copied into its own job at Start (§2) and pointed at the Original's tracks
+once the Original exists, matching each by kind, language, format and width, since
+MakeMKV numbers the Original's tracks its own way and turns uncompressed disc sound
 into FLAC.
 
-Not built: several containers from one Package sharing one encode of the picture;
-making a Package's files while its Master is still being copied.
+Not built: several containers from one Project sharing one encode of the picture;
+making a Project's files while its Original is still being copied.
 
 ### Sound rules
 
@@ -503,12 +522,12 @@ they are, since one blueprint meets many discs:
 A choice the disc cannot meet is passed over. If nothing at all fits, nothing is
 guessed: no sound line items are made, and the Plan says so. A stereo track ARFABIT
 would make itself counts as lossy, and comes after the disc's own. Rules apply to
-packages only; the master always keeps every track.
+projects only; the original always keeps every track.
 
 A blueprint also says whether to keep the picture exactly as it is
 (`keep_picture`), and what to do with Dolby TrueHD (`truehd = "keep" | "flac" |
 "both"`; keep by default). Changing TrueHD is the user's choice, made here once or
-per package, never ARFABIT's.
+per project, never ARFABIT's.
 
 Rules live in `blueprints.json`. The settings file cannot hold them, because its
 reader is the small stand-in of §16 and is not to be extended.
@@ -529,7 +548,7 @@ scenes. The Plan will offer it with the savings shown.
 ### Space check
 
 The Plan will not start a job it cannot finish. Before offering a Plan, compare the
-estimated total (Master + Delivery, from §12) against free space on the target volume.
+estimated total (Original + Delivery, from §12) against free space in the library.
 
 ARFABIT does not monitor disk space in the background and shows no space meter during
 normal use. It speaks up at exactly one moment: when the disc in the drive will not
@@ -537,11 +556,12 @@ fit. That message states four numbers and nothing else:
 
 - what this rip is estimated to need
 - how much room is left on the drive
-- how large `masters/` currently is
-- how large `library/` currently is
+- how much the originals take, in the library and in the folder masters were kept
+  in before
+- how much the films in the library take
 
 Those last two are there because they are almost always the answer — the user has
-Masters they no longer need, and this is the moment they would want to know it.
+originals they no longer need, and this is the moment they would want to know it.
 It does not offer to remove anything (§0.6). Not built: a button to open the
 folder.
 
@@ -583,7 +603,7 @@ Copy size is exact from the scan. Encode size comes from the estimator (§12).
 without its color metadata produces a valid file that plays back washed-out and
 grey. It does not error. It just looks wrong.
 
-MakeMKV does not cause this problem — it remuxes, so the Master's HEVC bitstream still
+MakeMKV does not cause this problem — it remuxes, so the Original's HEVC bitstream still
 carries its HDR10 SEI messages intact. The loss happens at **our** re-encode: once frames
 are decoded and handed to x265, the metadata survives only as ffmpeg stream side-data.
 ffmpeg forwards `color_primaries` / `color_trc` / `colorspace` to libx265 on its own, but
@@ -626,7 +646,7 @@ looks excellent. The Plan says so plainly when it applies.
 
 **Copy by default; changing a track is the user's choice.** Matroska carries every
 sound format a disc has, so each track is kept bit for bit at no cost unless a
-package or blueprint says otherwise. ARFABIT does not decide to convert anything
+project or blueprint says otherwise. ARFABIT does not decide to convert anything
 because of a device. It says what a choice costs, from what was tested (§4): beside
 a TrueHD track, that Plex converts it every time it plays on an Apple TV, and that
 converting it to FLAC of the same width keeps it lossless and plays directly.
@@ -734,7 +754,7 @@ six times ("wondertul", "torce", "shitt"), a dropped "I" three times, "out" for
 been run on real subtitles yet.
 
 **When.** Subtitle line items set to convert (to `srt`) are read as stage OCR, in
-their Package job, once the file is made (§2). If they cannot be read — a
+their package job, once the file is made (§2). If they cannot be read — a
 language the reader does not have, or anything else — the film is delivered all
 the same, and the job's note and log say so. Only one track per language can be
 converted, since each becomes a file named by its language.
@@ -774,8 +794,8 @@ converted, since each becomes a file named by its language.
    with that name is not replaced: that is checked before anything is made.
 
 **Clips.** A clip's subtitles are read from the piece cut for it, not from the
-Master, and trimmed to its length. A piece copied from the Master starts at the
-keyframe before the time asked for, so shifting the Master's times by that time
+Original, and trimmed to its length. A piece copied from the Original starts at the
+keyframe before the time asked for, so shifting the Original's times by that time
 would put every line early by up to the gap between keyframes. The piece is on
 the same clock as the clip.
 
@@ -908,7 +928,7 @@ section keeps running whichever is showing, so switching loses nothing.
 | Section | Holds |
 |---|---|
 | **Tasks** | Doctor, the drive, the Plan, the queue, logs, recent tasks |
-| **Packages** | Making a file from a Master: line items, from a blueprint or by hand |
+| **Projects** | Making a film or a clip from an Original: line items, from a blueprint or by hand |
 | **Blueprints** | Making and changing blueprints |
 | **Settings** | Autostart, restart and stop, the film list |
 
@@ -917,22 +937,22 @@ the drive is doing is written underneath.
 
 ### The Plan
 
-A disc's Plan is two parts. **The master** says what is on the disc and goes
-into the master — picture, and each sound track with whether it is lossless —
+A disc's Plan is two parts. **The original** says what is on the disc and goes
+into the original — picture, and each sound track with whether it is lossless —
 and nothing else: nothing in it is converted, so it never talks about
-converting. **Plan a package** turns on the second part, **the package**: the
-same line-item editor as the Packages page, fed with the disc's tracks, started
-from the default blueprint or the defaults (§8, Packages).
+converting. **Make a film** turns on the second part, **the film**: the
+same line-item editor as the Projects page, fed with the disc's tracks, started
+from the default blueprint or the defaults (§8, Projects).
 
-The Plan will not start a job that would replace a file already there — a
-master, or a film in the library under the same edition — and says which file
+The Plan will not start a job that would replace a file already there — an
+original, or a film in the library under the same edition — and says which file
 is in the way (§0.6). ffmpeg is run with `-y`, so this is looked for again just
 before each file is written, since a job can wait in the line for hours.
 
 ### Recent tasks
 
-The last twenty jobs of every kind, labelled Rip, Package or Clip, with what each
-became, when, and the names of the files it made: a rip's master, a package's film
+The last twenty tasks of every kind, labelled Copy, Package or Clip, with what each
+became, when, and the names of the files it made: a copy's original, a package's film
 or clip. Anything that can be started again says so. The folders are the record of
 what exists; this is the record of what was done.
 
@@ -944,8 +964,8 @@ what exists; this is the record of what was done.
 - Clocks are kept by the page, started from the stage's start time and
   corrected for any difference between the two computers' clocks. The figures
   under a bar sit in fixed-width cells so the line does not shift as they change.
-- Each job is headed with the file it is making, named exactly: the master's
-  `.mkv` during RIP (MakeMKV's own name), the Delivery's or clip's `.mkv` with its
+- Each job is headed with the file it is making, named exactly: the copy's
+  `.mkv` during RIP (MakeMKV's own name, until it is renamed), the Delivery's or clip's `.mkv` with its
   edition after.
 - Anything that could throw away ten minutes or more with one stray click asks
   first, saying how much work would be lost: stopping a job that is working, and
@@ -982,17 +1002,17 @@ MakeMKV beta keys expire about every 60 days. Doctor looks for a key in MakeMKV'
 settings and warns within a week of expiry. Not built: fetching a fresh beta key
 automatically, and the Settings links to the purchase page, the forum and r/makemkv.
 
-### Packages page
+### Projects page
 
-Operates on an existing Master. Pick a stretch — a start (`01:23:45`) and a length
+Operates on an existing Original. Pick a stretch — a start (`01:23:45`) and a length
 (5 s to 10 min), or the whole film — and a starting point (the defaults or a
-blueprint), then change the line items (§8, Packages). A stretch becomes a clip in
-`clips/<master>/`, named as an edition (§6). Clips are **files you watch on your own
+blueprint), then change the line items (§8, Projects). A stretch becomes a clip in
+`clips/<film>/`, named as an edition (§6). Clips are **files you watch on your own
 TV** — ARFABIT does not pick a winner and does not change your settings. Judging is
-yours. Comparing two settings is two packages from the same Master.
+yours. Comparing two settings is two projects from the same Original.
 
 Alongside each clip, what the whole film would come to, extrapolated from clip
-length to the whole Master. Size and time are normalised so the best entry reads 100%:
+length to the whole Original. Size and time are normalised so the best entry reads 100%:
 
 | Column | Basis for 100% |
 |---|---|
@@ -1021,7 +1041,7 @@ real error, and users burn hours chasing the guess. So:
 - The verbatim output is always one click away under "Technical details", always complete.
 - Anything unmatched gets an honest generic: _"ARFABIT did not finish this disc.
   Here is exactly what the ripper reported:"_ followed by raw output. No invented cause.
-- Every message says what ARFABIT **did**: _"The master file is still in your cache.
+- Every message says what ARFABIT **did**: _"The original is still in your library.
   Nothing was removed."_
 
 The signature list stays small and every entry earns its place. A wrong explanation
@@ -1045,7 +1065,7 @@ nothing in the UI presents a scary choice. Word substitutions:
 
 **Working today.** SCAN, PLAN, RIP, EJECT, OCR, PACKAGE, DELIVER, running end to end
 from the web page on one machine, with a queue for the processor, optional
-blueprints as recipes, and Packages (lab clips and whole-Master Deliveries).
+blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
 
 | Piece | State |
 |---|---|
@@ -1062,7 +1082,7 @@ blueprints as recipes, and Packages (lab clips and whole-Master Deliveries).
 | Web page, log view, server-sent events | built, tested |
 | Defaults and blueprints: settings file, made on the page, one-off, optional default blueprint | built, tested |
 | Processor slots and QUEUED | built, tested |
-| Packages: line items copied or converted, blueprints as recipes, lab clips and whole-Master Deliveries | built, tested (no VMAF) |
+| Projects: line items copied or converted, blueprints as recipes, lab clips and whole-Original Deliveries | built, tested (no VMAF) |
 | Offline IMDb index: download, lookup, suggestions on the Plan | built, tested |
 | Jobs left behind by a restart; running a stopped job again from its own Plans | built, tested |
 | Doctor | built |
@@ -1070,9 +1090,9 @@ blueprints as recipes, and Packages (lab clips and whole-Master Deliveries).
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as sidecars, with low confidence listed (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 
-**Subtitles.** A Package converts a Blu-ray's picture subtitles to SRT on macOS,
+**Subtitles.** A Project converts a Blu-ray's picture subtitles to SRT on macOS,
 on Windows, and wherever Tesseract is installed (§10), once the file is made.
-A disc's Plan made before Packages still logs that its subtitles are not read.
+A disc's Plan made before projects still logs that its subtitles are not read.
 
 **Known shortcuts.**
 
@@ -1127,26 +1147,17 @@ Two workflows matter, and everything on the page exists to serve them:
 - **Manual.** Clips to find the settings, and packaging an original again later.
 
 OCR is never perfect, so both must leave a way to fix subtitles **after the
-fact**, however long ago the film was made. Today OCR runs inside a Package, so
+fact**, however long ago the film was made. Today OCR runs inside a package task, so
 reading subtitles means making a film, and fixes live under a task that scrolls
 out of Recent tasks. Both are what this changes.
 
-### Words (replaces parts of §2)
-
-| Term | Meaning |
-|---|---|
-| **Original** | Was *Master*. The disc as it is, every track, subtitles still inside, as MakeMKV copies it. Always kept; only the user removes one (§0.6 unchanged). |
-| **Project** | Was *Package*, and wider. What you set up to be done: a source, and what to make from it. Starting it makes tasks. |
-| **Task** | One step a project becomes, in the queue: copy, OCR, package, clip. (In code, a job.) |
-| **Low confidence** | Unchanged (§10). |
+Built so far, and folded into the sections they belong to: the words Original,
+Project and Task (§2), and originals kept beside their films (§6).
 
 Stage names are unchanged: `SCAN PLAN RIP EJECT QUEUED PACKAGE OCR DELIVER`, plus
-`LAB`. OCR moves (below).
+`LAB`. OCR moves (below). The task list grows an OCR task.
 
-### Files (replaces the media layout in §6)
-
-Originals and films share one folder per film, named for Plex. The original is
-an edition of its own:
+### Subtitle files
 
 ```
 Blade Runner (1982)/
@@ -1156,11 +1167,6 @@ Blade Runner (1982)/
     Blade Runner (1982).en.srt                      ← a copy
 ```
 
-- MakeMKV names its file its own way; ARFABIT renames it into place once the copy
-  is finished. A rename, never a removal.
-- The original keeps its picture subtitles. Plex plays it without converting the
-  picture unless those are switched on; its Dolby TrueHD sound, where it has
-  some, Plex converts on every play (§4). Choosing it is the user's business.
 - **The SRT beside the original is the SRT.** OCR writes it there, fixes are made
   to it, and every film made from that original gets a copy. Before removing an
   original, the user makes sure its SRTs are where they want them: once it is
