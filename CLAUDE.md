@@ -15,7 +15,7 @@ stop and say so rather than working around it.
 |---|---|
 | Language | Go. One static binary. No Python, Node, Docker, or runtime deps. |
 | External tools | `makemkvcon` and `ffmpeg`, driven with `os/exec`. No wrapper libs. |
-| Output | MKV · picture and sound copied or converted as the user chooses · SRT sidecars + embedded SRT |
+| Output | MKV (MP4 only when a project asks, untested) · picture and sound copied or converted as the user chooses · SRT sidecars + embedded SRT |
 | State | Plain JSON/JSONL files. No database. |
 | UI | One HTML page, plain JavaScript over a JSON API, SSE for live updates. No npm, no framework, no build step. |
 | Platforms | macOS and Windows are the real targets. Linux is supported. |

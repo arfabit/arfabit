@@ -39,8 +39,9 @@ func (r *Runner) configuredDirs() outputDirs {
 	return outputDirs{clips: r.Config.Paths.Clips, library: r.Config.Paths.Library}
 }
 
-// Containers ARFABIT can make today. MP4 is to come.
-var containers = map[string]string{"mkv": meta.VideoExt}
+// Containers ARFABIT can make. MKV is what §4 tested; MP4 is made when asked
+// for, and nothing about how it plays is assumed.
+var containers = map[string]string{"mkv": meta.VideoExt, "mp4": ".mp4"}
 
 // checkProject refuses a Project that could not be made, before anything
 // waits in the line for it. canRead says whether this computer can read
@@ -67,6 +68,12 @@ func checkProject(p *store.Project, canRead bool) error {
 		return errors.New("a film can hold one picture")
 	}
 
+	if slices.Contains(p.Containers, "mp4") {
+		if err := checkMP4(p); err != nil {
+			return err
+		}
+	}
+
 	converted := map[string]bool{}
 	for _, it := range p.Items {
 		// Each becomes a file named by its language (§6), so two would need
@@ -86,6 +93,25 @@ func checkProject(p *store.Project, canRead bool) error {
 			}
 		default:
 			return fmt.Errorf("%q is not something a line item can do", it.Action)
+		}
+	}
+	return nil
+}
+
+// checkMP4 refuses line items an MP4 cannot hold as they are, found with
+// ffmpeg 9.0.2: picture subtitles, which MP4 has no place for, and Dolby
+// TrueHD, which ffmpeg calls experimental in MP4 and will not write without
+// being told to. Text subtitles copied go in as MP4's own text format.
+func checkMP4(p *store.Project) error {
+	for _, it := range p.Items {
+		if it.Action != store.ActionCopy {
+			continue
+		}
+		switch {
+		case it.Kind == store.KindSubtitle && (it.Codec == pictureSubtitles || it.Codec == "dvd_subtitle"):
+			return errors.New("an MP4 cannot hold picture subtitles; read them into text, leave them out, or make an MKV")
+		case it.Kind == store.KindAudio && it.Codec == "truehd":
+			return errors.New("ffmpeg calls Dolby TrueHD in an MP4 experimental, so ARFABIT does not put it there as it is; convert it, or make an MKV")
 		}
 	}
 	return nil
@@ -428,6 +454,7 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 	if err != nil {
 		return 0, "", err
 	}
+	req.MP4 = strings.EqualFold(filepath.Ext(out), ".mp4")
 	args, err := req.Args()
 	if err != nil {
 		return 0, "", err
@@ -487,6 +514,7 @@ func encodeRequest(pkg *store.Project, info *ffmpeg.MediaInfo, input, out string
 		return req, fmt.Errorf("the original has no picture at stream %d", video.Source)
 	}
 	req.VideoSourceIndex = index(video.Source)
+	req.HEVC = video.Action == store.ActionConvert || source.Codec == "hevc"
 	if video.Action == store.ActionCopy {
 		req.Video = ffmpeg.VideoPlan{Copy: true}
 	} else {

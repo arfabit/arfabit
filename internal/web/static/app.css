@@ -411,6 +411,8 @@ body.dragging-something { user-select: none; -webkit-user-select: none; cursor: 
 .recent-detail .speed-wrap { width: 100%; }
 .low-confidence { width: 100%; }
 .copies p { margin: 0.25rem 0; }
+.to-check { margin: 0.5rem 0 0.75rem; padding: 0.5rem 0.75rem; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.make-choice { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.75rem 0; }
 .low-confidence > summary { cursor: pointer; }
 .low-confidence-row { display: grid; gap: 0.35rem; padding: 0.7rem 0; border-top: 1px solid var(--line); }
 .low-confidence-row img { max-width: 100%; height: auto; justify-self: start; background: #fff; border: 1px solid var(--line); }

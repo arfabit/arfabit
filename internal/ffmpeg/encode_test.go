@@ -245,3 +245,29 @@ func TestLosslessEncodesGetEvenFrames(t *testing.T) {
 		t.Errorf("the AAC track was filtered for no reason\ngot: %s", got)
 	}
 }
+
+// An MP4 labels HEVC as hvc1 and carries text subtitles in its own format;
+// Matroska gets neither.
+func TestMP4Args(t *testing.T) {
+	req := EncodeRequest{
+		Input: "in.mkv", Output: "out.mp4", Video: VideoPlan{Copy: true}, HEVC: true, MP4: true,
+		Subtitles: []SubtitleTrack{{SourceIndex: 3, Lang: "eng"}},
+	}
+	args, err := req.Args()
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Join(args, " ")
+	for _, want := range []string{"-tag:v hvc1", "-c:s:0 mov_text"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("missing %q: %s", want, line)
+		}
+	}
+
+	req.MP4, req.Output = false, "out.mkv"
+	args, _ = req.Args()
+	line = strings.Join(args, " ")
+	if strings.Contains(line, "hvc1") || strings.Contains(line, "mov_text") {
+		t.Errorf("Matroska was given MP4's labels: %s", line)
+	}
+}

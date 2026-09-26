@@ -304,6 +304,7 @@ function renderDrives(list) {
   $("drive-name").textContent = (drive && drive.Name) || "Disc drive";
   scan.textContent = "Plan";
   renderDriveWhen(drive);
+  renderDiscSource();
 
   const status = (text, canRead, canEject) => {
     $("drive-status").textContent = text;
@@ -367,6 +368,23 @@ async function saveDriveWhen() {
   if (result) {
     driveSettings[drive.Name] = result;
     renderDriveWhen(drive);
+  }
+}
+
+// readDisc reads the disc in the drive, for its Plan. The scan outlives the
+// request that starts it, so the button stays put until a job appears and the
+// drive says it is busy.
+async function readDisc(button) {
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Waking the drive\u2026";
+
+  const result = await post("/api/scan");
+  if (result) {
+    button.textContent = "Reading the disc\u2026";
+  } else {
+    button.disabled = false;
+    button.textContent = label;
   }
 }
 
@@ -1135,16 +1153,26 @@ function humanMs(ms) {
   return rest === 0 ? `${hours} hours` : `${hours}h ${rest}m`;
 }
 
+// The disc's Plan as last sent, so it can be drawn again when the disc is
+// chosen in Projects.
+let lastJob = null;
+let lastExisting = [];
+
 function renderJob(job, existing) {
+  lastJob = job;
+  lastExisting = existing || [];
+  renderDiscSource();
+  renderDrivePlan(job);
   if (!job) {
     show("plan", false);
     show("done", false);
     return;
   }
 
-  // A disc's Plan stays up after Start while any of it can still change.
+  // A disc's Plan stays up after Start while any of it can still change. It
+  // is in Projects, with the disc chosen to start from.
   const waiting = job.state === "waiting" || Boolean(editing && editing.started);
-  show("plan", waiting);
+  show("plan", waiting && $("project-source").value === "disc");
   show("done", !waiting && (job.state === "done" || job.state === "stopped"));
 
   if (waiting) renderPlan(job, existing);
@@ -1153,6 +1181,21 @@ function renderJob(job, existing) {
     $("done-title").textContent = job.state === "done" ? "Ready" : "Stopped";
     $("done-detail").textContent = job.note || "";
   }
+}
+
+// renderDrivePlan says, under the drive, where the disc's Plan is: in
+// Projects, one click away.
+function renderDrivePlan(job) {
+  const line = $("drive-plan");
+  const open = job && (job.state === "waiting" || (editing && editing.started));
+  line.hidden = !open;
+  if (!open) return;
+  const link = document.createElement("a");
+  link.href = "#projects";
+  link.textContent = "in Projects";
+  link.addEventListener("click", chooseDisc);
+  const where = job.state === "waiting" ? "waiting to be started" : "still open to change";
+  line.replaceChildren(document.createTextNode(`The Plan for ${filmName(job)} is ${where}, `), link, document.createTextNode("."));
 }
 
 // jobOutcome says what became of a disc, in words rather than state names.
@@ -1330,6 +1373,10 @@ function renderRecent(jobs) {
   const drawn = JSON.stringify([jobs, resumable, copies, copiesOf, new Date().toDateString()]);
   if (drawn === recentDrawn) return;
   recentDrawn = drawn;
+  renderToCheck(jobs || []);
+
+  // A task that has finished may have made a file to start a project from.
+  loadSources();
 
   if (!jobs || jobs.length === 0) {
     box.textContent = "Nothing yet.";
@@ -1341,6 +1388,7 @@ function renderRecent(jobs) {
   box.replaceChildren(...jobs.map((job) => {
     const item = document.createElement("details");
     item.className = "recent-item";
+    item.dataset.job = job.id;
     item.open = openRecent.has(job.id);
     item.addEventListener("toggle", () => {
       if (item.open) openRecent.add(job.id);
@@ -1366,6 +1414,31 @@ function renderRecent(jobs) {
     item.append(line, recentDetail(job));
     return item;
   }));
+}
+
+// renderToCheck names, above Recent tasks, every OCR task whose subtitles are
+// still to be checked, however far down the list it is. Each opens its task.
+function renderToCheck(jobs) {
+  const waiting = jobs.filter(toCheck);
+  const box = $("to-check");
+  box.hidden = waiting.length === 0;
+  if (!waiting.length) return;
+  const links = waiting.map((job) => {
+    const link = document.createElement("button");
+    link.className = "link";
+    link.textContent = `${filmName(job)}, ${languageName(job.reading && job.reading.lang)}`;
+    link.addEventListener("click", () => {
+      openRecent.add(job.id);
+      openLowConfidence.add(job.id);
+      recentDrawn = "";
+      renderRecent(jobs);
+      const item = $("recent").querySelector(`[data-job="${CSS.escape(job.id)}"]`);
+      if (item) item.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    return link;
+  });
+  box.replaceChildren(document.createTextNode("Subtitles to check: "),
+    ...links.flatMap((l, i) => (i === 0 ? [l] : [document.createTextNode(" · "), l])));
 }
 
 // recentDetail is everything about a task beyond its line: how it ended, what
@@ -1778,22 +1851,80 @@ async function loadDriveHealth() {
   }));
 }
 
-// --- the lab --------------------------------------------------------------
+// --- what a project starts from -----------------------------------------
 
-async function loadOriginals() {
-  const { originals } = await fetch("/api/originals").then((r) => r.json());
-  const select = $("project-original");
+// Every file a project can start from: originals, films and clips.
+let sources = [];
 
-  if (!originals || originals.length === 0) {
-    select.replaceChildren(new Option("No originals yet — copy a disc first", ""));
-    return;
+// loadSources lists what a project can start from: the disc in the drive,
+// and every file ARFABIT made, grouped by what it is.
+async function loadSources() {
+  const reply = await fetch("/api/sources").then((r) => r.json());
+  sources = reply.sources || [];
+  renderSources();
+}
+
+function renderSources() {
+  const select = $("project-source");
+  const was = select.value;
+  const drive = drives[0];
+
+  const groups = [["disc", "Disc"], ["original", "Originals"], ["film", "Films"], ["clip", "Clips"]];
+  const children = [];
+  for (const [kind, label] of groups) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    if (kind === "disc") {
+      group.append(new Option(drive && drive.Name ? `The disc in ${drive.Name}` : "The disc in the drive", "disc"));
+    } else {
+      for (const source of sources.filter((f) => f.kind === kind)) {
+        const option = new Option(`${source.title} — ${source.path.split(/[\\/]/).pop()} (${bytes(source.size)})`, source.path);
+        option.dataset.film = source.title;
+        group.append(option);
+      }
+    }
+    if (group.children.length) children.push(group);
   }
+  select.replaceChildren(...children);
 
-  select.replaceChildren(...originals.map((m) => {
-    const option = new Option(`${m.title} (${bytes(m.size)})`, m.path);
-    option.dataset.film = m.title;
-    return option;
-  }));
+  const values = [...select.querySelectorAll("option")].map((o) => o.value);
+  const fallback = sources.find((f) => f.kind === "original");
+  select.value = values.includes(was) ? was : fallback ? fallback.path : "disc";
+  if (select.value !== was) sourceChanged();
+}
+
+// chooseDisc makes the disc what the project starts from, as the drive's Plan
+// button does.
+function chooseDisc() {
+  $("project-source").value = "disc";
+  sourceChanged();
+}
+
+// sourceChanged shows the part of the page for what was chosen: the disc's
+// Plan, or what to make from a file.
+function sourceChanged() {
+  const disc = $("project-source").value === "disc";
+  show("project-disc", disc);
+  show("project-file", !disc);
+  renderJob(lastJob, lastExisting);
+  if (!disc) loadSource();
+}
+
+// renderDiscSource says where the disc has got to, with a button to read it
+// when there is no Plan yet.
+function renderDiscSource() {
+  const drive = drives[0];
+  const loaded = drives.find((d) => d.Loaded);
+  const planned = Boolean(lastJob);
+  let text = "";
+  if (planned) text = "";
+  else if (driveBusy) text = `The drive is busy with ${driveBusy}.`;
+  else if (!drive) text = "No disc drive found. Plug one in and ARFABIT will notice.";
+  else if (!loaded) text = "There is no disc in the drive. Put one in to plan what to make from it.";
+  else text = `${loaded.Label || "A disc"} is in the drive. Read it to see what is on it and plan what to make.`;
+  $("project-disc-status").textContent = text;
+  show("project-disc-status", Boolean(text));
+  show("project-read-disc", !planned && Boolean(loaded) && !driveBusy);
 }
 
 // Remembering the stretch a clip was last taken from, between visits.
@@ -1828,12 +1959,15 @@ function recallStretch() {
 
 // --- projects -------------------------------------------------------------
 
-// What the chosen original holds, and the project being planned from it.
-let originalInfo = { tracks: [], duration: 0 };
+// What the chosen file holds, and the project being planned from it.
+let sourceInfo = { tracks: [], duration: 0 };
 
 // Whether this computer can read picture subtitles into text (§10).
 let subtitleReading = { ocr: false, note: "" };
 let pkg = null;
+
+// The subtitle tracks ticked to read, when only subtitles are made.
+let readChoice = new Set();
 
 // The defaults' values, for a line that starts being converted by hand.
 let defaultValues = { crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, preset: "slow", audio_bitrate: "256k" };
@@ -1842,52 +1976,116 @@ const PRESETS = ["superfast", "medium", "slow", "slower", "veryslow"];
 const BITRATES = ["128k", "192k", "256k", "320k", "448k", "640k", "768k"];
 const SECTIONS = [["video", "Picture"], ["audio", "Sound"], ["subtitle", "Subtitles"]];
 
-// loadOriginal reads what the chosen original holds, then fills the project in
+// makeKind is what the project makes from a file: "read", "film" or "clip".
+function makeKind() {
+  const chosen = document.querySelector('input[name="project-make"]:checked');
+  return chosen ? chosen.value : "film";
+}
+
+function containerChoice() {
+  const chosen = document.querySelector('input[name="project-container"]:checked');
+  return chosen ? chosen.value : "mkv";
+}
+
+// loadSource reads what the chosen file holds, then fills the project in
 // from whatever "Start from" shows, as a Plan starts from the defaults.
-async function loadOriginal() {
-  const path = $("project-original").value;
-  originalInfo = { tracks: [], duration: 0 };
+async function loadSource() {
+  const path = $("project-source").value;
+  sourceInfo = { tracks: [], duration: 0 };
   pkg = null;
-  renderProject();
-  if (!path) return;
+  readChoice = new Set();
+  renderMake();
+  if (!path || path === "disc") return;
 
   let reply;
   try {
-    reply = await fetch(`/api/original?path=${encodeURIComponent(path)}`).then((r) => r.json());
+    reply = await fetch(`/api/source?path=${encodeURIComponent(path)}`).then((r) => r.json());
   } catch (err) {
     $("project-editor").textContent = String(err);
     return;
   }
   if (!reply.tracks) {
-    $("project-editor").textContent = reply.message || "That original could not be read.";
+    $("project-editor").textContent = reply.message || "That file could not be read.";
     return;
   }
-  originalInfo = reply;
+  sourceInfo = reply;
   await fillProject();
 }
 
 // fillProject starts the project again from a blueprint, or from the defaults.
+// The subtitles it would read into text start ticked, for reading only them.
 async function fillProject() {
-  if (!$("project-original").value) return;
+  const path = $("project-source").value;
+  if (!path || path === "disc") return;
   const reply = await post("/api/project/fill", {
-    original: $("project-original").value,
+    source: path,
     blueprint: $("project-blueprint").value,
   });
   if (!reply) return;
   pkg = reply.project;
   pkg.items = pkg.items || [];
-  renderProject();
+  readChoice = new Set(pkg.items.filter((it) => it.kind === "subtitle" && it.action === "convert").map((it) => it.source));
+  renderMake();
+}
+
+// renderMake shows what is asked for by what is being made.
+function renderMake() {
+  const make = makeKind();
+  show("project-read", make === "read");
+  show("project-make", make !== "read");
+  show("project-stretch", make === "clip");
+  show("project-containers", make === "film");
+  $("project-container-note").hidden = make !== "film" || containerChoice() !== "mp4";
+  $("project-container-note").textContent =
+    "How an MP4 plays on the Apple TV has not been tried yet. An MP4 cannot hold picture subtitles, or Dolby TrueHD as it is.";
+  if (make === "read") renderReadList();
+  else renderProject();
+  describeProject();
+}
+
+// renderReadList lists the picture subtitle tracks of the chosen file, to
+// tick those to read into text.
+function renderReadList() {
+  const box = $("project-read");
+  const pictures = sourceInfo.tracks.filter((t) => t.kind === "subtitle" && t.codec === "hdmv_pgs_subtitle");
+  if (!subtitleReading.ocr) {
+    box.textContent = subtitleReading.note;
+    return;
+  }
+  if (pictures.length === 0) {
+    box.textContent = "This file has no picture subtitles to read.";
+    return;
+  }
+  box.replaceChildren(...pictures.map((track) => {
+    const label = document.createElement("label");
+    label.className = "track";
+    const tick = document.createElement("input");
+    tick.type = "checkbox";
+    tick.checked = readChoice.has(track.index);
+    tick.addEventListener("change", () => {
+      if (tick.checked) readChoice.add(track.index);
+      else readChoice.delete(track.index);
+      describeProject();
+    });
+    const text = document.createElement("span");
+    text.textContent = track.label;
+    label.append(tick, text);
+    return label;
+  }));
 }
 
 function renderProject() {
   const box = $("project-editor");
-  if (pkg) pkg.length = Number($("lab-length").value) * 1e9;
+  if (pkg) {
+    pkg.length = makeKind() === "clip" ? Number($("lab-length").value) * 1e9 : 0;
+    pkg.containers = makeKind() === "film" ? [containerChoice()] : ["mkv"];
+  }
   if (!pkg) {
     box.replaceChildren();
     describeProject();
     return;
   }
-  renderProjectEditor(box, originalInfo.tracks, pkg, () => {
+  renderProjectEditor(box, sourceInfo.tracks, pkg, () => {
     renderProject();
   });
   if (document.activeElement !== $("project-edition")) {
@@ -1898,23 +2096,32 @@ function renderProject() {
 
 // describeProject says what pressing Start will make, and where it goes.
 function describeProject() {
-  const whole = Number($("lab-length").value) === 0;
-  const pictures = pkg ? pkg.items.filter((it) => it.kind === "video").length : 0;
+  const make = makeKind();
+  const say = (text, ready) => {
+    $("project-destination").textContent = text;
+    $("project-run").disabled = !ready;
+  };
 
-  $("project-run").disabled = !pkg || pictures !== 1;
+  if (make === "read") {
+    const n = readChoice.size;
+    say(n === 0
+      ? "Tick the subtitles to read."
+      : `${n === 1 ? "One subtitle track" : `${n} subtitle tracks`}, each read into text as a task of its own and kept beside the file as an SRT.`,
+      n > 0 && subtitleReading.ocr);
+    return;
+  }
   if (!pkg) {
-    $("project-destination").textContent = "";
+    say("", false);
     return;
   }
+  const pictures = pkg.items.filter((it) => it.kind === "video").length;
   if (pictures !== 1) {
-    $("project-destination").textContent = pictures === 0
-      ? "A film needs a picture. Add it from the original, above."
-      : "A film can hold one picture.";
+    say(pictures === 0 ? "A film needs a picture. Add it from the file, above." : "A film can hold one picture.", false);
     return;
   }
-  $("project-destination").textContent = whole
-    ? "One MKV file of all of the original, saved to your library beside it."
-    : "One MKV clip, saved to the clips folder to watch and compare.";
+  say(make === "film"
+    ? `One ${containerChoice().toUpperCase()} file of all of it, saved to your library, in the film's folder.`
+    : "One MKV clip, saved to the clips folder to watch and compare.", true);
 }
 
 // renderProjectEditor lays out a project's line items, section by section,
@@ -2672,6 +2879,7 @@ function parseTimestamp(text) {
 
 function renderLabResults(comparison) {
   const rows = (comparison && comparison.clips) || [];
+  show("lab-card", rows.length > 0);
   if (rows.length === 0) {
     $("lab-results").replaceChildren();
     return;
@@ -2919,19 +3127,11 @@ function on(id, event, handler) {
 }
 
 function wireButtons() {
-  // The scan outlives the request that starts it, so the button stays put
-  // until a job appears and the drive says it is busy.
-  on("scan", "click", async (e) => {
-    e.target.disabled = true;
-    e.target.textContent = "Waking the drive…";
-
-    const result = await post("/api/scan");
-    if (result) {
-      e.target.textContent = "Reading the disc…";
-    } else {
-      e.target.disabled = false;
-      e.target.textContent = "Plan";
-    }
+  // Plan reads the disc and opens its Plan, which is in Projects.
+  on("scan", "click", (e) => {
+    location.hash = "#projects";
+    chooseDisc();
+    readDisc(e.target);
   });
 
   on("start", "click", (e) =>
@@ -3035,7 +3235,11 @@ function wireButtons() {
   });
 
   on("lab-at", "input", rememberStretch);
-  on("project-original", "change", loadOriginal);
+  on("project-source", "change", sourceChanged);
+  for (const radio of document.querySelectorAll('input[name="project-make"], input[name="project-container"]')) {
+    radio.addEventListener("change", renderMake);
+  }
+  on("project-read-disc", "click", (e) => readDisc(e.target));
   on("project-fill", "click", fillProject);
   on("project-edition", "input", (e) => {
     if (pkg) pkg.edition = e.target.value.trim();
@@ -3044,21 +3248,24 @@ function wireButtons() {
   on("blueprint-new", "click", () => openBlueprintEditor({ name: "" }));
 
   on("project-run", "click", async (e) => {
-    if (!pkg) return;
-    const chosen = $("project-original").selectedOptions[0];
+    const make = makeKind();
+    if (make !== "read" && !pkg) return;
+    const chosen = $("project-source").selectedOptions[0];
     const seconds = (n) => Math.round(n * 1e9);
 
-    const result = await busy(e.target, "Adding\u2026", "Added to the queue", () =>
-      post("/api/project", {
-        original: $("project-original").value,
-        film: chosen ? chosen.dataset.film : "",
-        project: {
-          ...pkg,
-          edition: $("project-edition").value.trim(),
-          at: seconds(parseTimestamp($("lab-at").value)),
-          length: seconds(Number($("lab-length").value)),
-        },
-      }));
+    const body = { source: $("project-source").value, film: chosen ? chosen.dataset.film : "", make };
+    if (make === "read") {
+      body.read = [...readChoice];
+    } else {
+      body.project = {
+        ...pkg,
+        edition: $("project-edition").value.trim(),
+        containers: make === "film" ? [containerChoice()] : ["mkv"],
+        at: make === "clip" ? seconds(parseTimestamp($("lab-at").value)) : 0,
+        length: make === "clip" ? seconds(Number($("lab-length").value)) : 0,
+      };
+    }
+    const result = await busy(e.target, "Adding\u2026", "Added to the queue", () => post("/api/project", body));
 
     if (result) {
       // The queue is on another page, so say which one and make it one click.
@@ -3091,7 +3298,7 @@ function start() {
   loadConversionLimit();
   recallStretch();
   // The blueprints first: "Start from" has to be there to fill a project in.
-  loadBlueprints().then(() => loadOriginals()).then(loadOriginal);
+  loadBlueprints().then(loadSources);
   loadDriveHealth();
 }
 

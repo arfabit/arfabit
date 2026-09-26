@@ -93,6 +93,13 @@ type EncodeRequest struct {
 
 	// Chapters copies chapter markers into the output.
 	Chapters bool
+
+	// MP4 makes an MP4 rather than Matroska. §4 has nothing tested for MP4;
+	// what differs here is only what ffmpeg needs to write one at all.
+	MP4 bool
+
+	// HEVC says the picture is HEVC, copied or made, which MP4 labels.
+	HEVC bool
 }
 
 // carriedAudioCodecs are the sound formats Matroska carries as they are,
@@ -173,8 +180,13 @@ func (r EncodeRequest) Args() ([]string, error) {
 	// are left behind. Language and title are set on each track explicitly.
 	args = append(args, "-map_metadata", "-1")
 
-	// Matroska (§0.2). Unlike MP4 it needs no codec tag and no index moved to
-	// the front, and it carries every sound format that plays directly.
+	// Matroska (§0.2) needs nothing more. For MP4, ffmpeg labels HEVC
+	// "hev1" unless asked; "hvc1" is the label under which the picture's
+	// parameter sets travel outside the picture, which is what ARFABIT asks
+	// for. Which of the two an Apple TV plays is untested (§4).
+	if r.MP4 && r.HEVC {
+		args = append(args, "-tag:v", "hvc1")
+	}
 	args = append(args, r.Output)
 
 	return args, nil
@@ -319,8 +331,13 @@ func (r EncodeRequest) subtitleArgs() []string {
 		out := strconv.Itoa(i)
 		// A copied track stays as it is, whatever it is; Matroska carries
 		// picture subtitles too, though showing them costs a player more
-		// (§4).
-		args = append(args, "-c:s:"+out, "copy")
+		// (§4). MP4 holds text only in its own format: ffmpeg 9.0.2 refused
+		// SRT copied into one, and wrote it as mov_text when asked.
+		if r.MP4 {
+			args = append(args, "-c:s:"+out, "mov_text")
+		} else {
+			args = append(args, "-c:s:"+out, "copy")
+		}
 		if s.Lang != "" {
 			args = append(args, "-metadata:s:s:"+out, "language="+s.Lang)
 		}

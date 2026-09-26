@@ -14,7 +14,8 @@ Do not re-litigate them, work around them, or "improve" them without being asked
 1. **Go. One static binary.** No Python, no Node, no Docker, no runtime dependency.
 2. **Output is MKV / HEVC main10 / sound that plays directly / SRT.** Direct play in
    the Plex app on an Apple TV 4K is the target that matters, as tested (§4). MP4 is
-   not made; it may be offered later, for players that cannot open MKV.
+   made only when a project asks for one, for players that cannot open MKV, and
+   nothing about how it plays is assumed (§4, §8).
 3. **`os/exec` directly against `makemkvcon` and `ffmpeg`.** No wrapper libraries.
 4. **State is plain files.** No database. Any index is a disposable cache.
 5. **HDR metadata must be re-injected on every HDR re-encode.** MakeMKV preserves it
@@ -39,7 +40,6 @@ Do not re-litigate them, work around them, or "improve" them without being asked
 | Naming / metadata       | §6, §11             |
 | Web UI                  | §14, §15            |
 | Files, config, state    | §6, §7              |
-| **What comes next**     | **§18 — agreed, not built; it changes §2, §6, §10 and §14** |
 
 ### Highest-consequence code
 
@@ -206,7 +206,8 @@ Dashboard while playing, with the server's video transcoding turned off.
 | **Subtitles** PGS | plays only if the server converts the picture, to burn them in |
 
 Not yet tested: MPEG-2 and VC-1 pictures (DVDs and some older Blu-rays), which
-are re-encoded regardless; HDR; Dolby Atmos; MP4 with its own subtitle format. Not
+are re-encoded regardless; HDR; Dolby Atmos; MP4 at all, with its own subtitle
+format or with SRT beside it; a sidecar SRT beside an MKV (SRT inside MKV is). Not
 knowable from the Dashboard: whether the Apple TV plays DTS-HD MA in full or only
 the lossy core every DTS-HD MA track carries inside it.
 
@@ -529,8 +530,18 @@ asking for something the Original lacks adds nothing for it; one whose sound rul
 nothing adds no sound, and the user adds what they want. The defaults are a recipe
 too.
 
-One Project makes one file per container — MKV today; MP4 is to come, and the
-containers will then decide which line items a file can carry. A **whole** Original
+One Project makes one file per container, MKV or MP4, and the container decides
+which line items a file can carry. What MP4 can carry was found with ffmpeg
+9.0.2 and nothing else: every sound format a disc has goes in as it is except
+Dolby TrueHD, which ffmpeg calls experimental in MP4 and refuses, so a project
+copying TrueHD into MP4 is refused and says so; picture subtitles have no place
+in MP4 and are refused likewise; text subtitles copied go in as MP4's own text
+format (`mov_text`), since ffmpeg refused SRT as it is; subtitles read into
+text go beside it as SRT, as for MKV. ffmpeg labels HEVC in MP4 `hev1` unless
+asked, and ARFABIT asks for `hvc1`, the label under which the picture's
+parameter sets travel outside the picture. How any of it plays is untested
+(§4). A film in MP4 counts as the same edition as one in MKV when ARFABIT looks
+for a file already there, so making both of one film needs two editions. A **whole** Original
 becomes a film in the library, beside it (stage PACKAGE), named with the Project's
 edition. A
 **stretch** becomes a clip in the clips folder (stage LAB). A stretch is cut first,
@@ -992,15 +1003,22 @@ in Settings. Not built: live status such as "Running, started 3 days ago".
 ### Sections
 
 Still one HTML page. A bar fixed to the bottom of the window switches between
-four sections, and the address remembers which (`#tasks`, `#labs`, …). Every
+four sections, and the address remembers which (`#tasks`, `#projects`, …). Every
 section keeps running whichever is showing, so switching loses nothing.
 
 | Section | Holds |
 |---|---|
-| **Tasks** | Doctor, the drive, the Plan, the queue, logs, recent tasks |
-| **Projects** | Making a film or a clip from an Original: line items, from a blueprint or by hand |
-| **Blueprints** | Making and changing blueprints |
+| **Tasks** | Watching: Doctor, each drive, the queue, logs, clips compared, recent tasks |
+| **Projects** | Creating: what to start from, and what to make. Nothing finished is shown here; that is Tasks |
+| **Blueprints** | Recipes, applied from the start by a drive or by hand |
 | **Settings** | Autostart, restart and stop, the film list |
+
+Two workflows matter, and the page exists to serve them: **automatic**, where
+a disc goes in and, with nothing clicked, the film comes out with its
+subtitles read into text (a drive set to *Blueprint*); and **manual**, clips to
+find the settings and making films from an original again later. OCR is never
+perfect, so both leave a way to fix subtitles after the fact, however long ago
+(§10).
 
 The drive's box is headed with the drive's own name, which never changes; what
 the drive is doing is written underneath.
@@ -1019,7 +1037,8 @@ in, and is left alone.
 
 ### The Plan
 
-A disc's Plan is two parts. **The original** says what is on the disc and goes
+A disc's Plan is on the Projects page, with the disc chosen to start from. It
+is two parts. **The original** says what is on the disc and goes
 into the original — picture, and each sound track with whether it is lossless —
 and nothing else: nothing in it is converted, so it never talks about
 converting. **Make a film** turns on the second part, **the film**: the
@@ -1036,7 +1055,8 @@ before each file is written, since a job can wait in the line for hours.
 
 ### Recent tasks
 
-The last twenty tasks of every kind, labelled Copy, OCR, Package or Clip, with
+Subtitles still to be checked are named at the top, each opening its task.
+Below them, the last twenty tasks of every kind, labelled Copy, OCR, Package or Clip, with
 what each became, when, and the names of the files it made: a copy's original,
 an OCR task's SRT, a package's film or clip. The label's colour says how it
 ended, and an OCR task's says whether its subtitles are still to be checked
@@ -1092,12 +1112,28 @@ automatically, and the Settings links to the purchase page, the forum and r/make
 
 ### Projects page
 
-Operates on an existing Original. Pick a stretch — a start (`01:23:45`) and a length
-(5 s to 10 min), or the whole film — and a starting point (the defaults or a
-blueprint), then change the line items (§8, Projects). A stretch becomes a clip in
-`clips/<film>/`, named as an edition (§6). Clips are **files you watch on your own
-TV** — ARFABIT does not pick a winner and does not change your settings. Judging is
-yours. Comparing two settings is two projects from the same Original.
+Setting something up to be made. **Start from** lists the disc in the drive,
+every original (beside its films, and in the folder masters were kept in
+before), every film in the library, and every clip. The user is trusted to
+know what they are making.
+
+- **The disc** shows its Plan (§14, The Plan) once it has been read, with a
+  button to read it until then. The drive's Plan button on Tasks reads the disc
+  and comes here. Tasks says, under the drive, when a disc's Plan is here
+  waiting or still open to change.
+- **A file** makes one of three things. **Subtitles only**: its picture
+  subtitle tracks, ticked, each read into text as an OCR task of its own into
+  the SRT beside the file (§10); no picture or sound is made. **A film**: all of
+  it, converted or remuxed as its line items say, as MKV or MP4 (§8), into the
+  library in the film's folder. **A clip**: a stretch — a start (`01:23:45`) and a
+  length, 5 s to 10 min — into `clips/<film>/`, named as an edition (§6). A film
+  or a clip starts from the defaults or a blueprint, and its line items can
+  then be changed (§8, Projects).
+
+Starting a project adds its tasks to the queue, and the page says they are on
+Tasks. Clips are **files you watch on your own TV** — ARFABIT does not pick a
+winner and does not change your settings. Judging is yours. Comparing two
+settings is two projects from the same Original.
 
 Alongside each clip, what the whole film would come to, extrapolated from clip
 length to the whole Original. Size and time are normalised so the best entry reads 100%:
@@ -1171,6 +1207,7 @@ blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
 | Defaults and blueprints: settings file, made on the page, one-off, optional default blueprint | built, tested |
 | Processor slots and QUEUED | built, tested |
 | A disc's Plan open to change until each step starts; what a drive does when a disc goes in | built, tested (starting on its own not yet tried with a real drive) |
+| Projects from any file ARFABIT made: subtitles only, a film as MKV or MP4, a clip | built, tested (MP4 made and read back; not played anywhere) |
 | Projects: line items copied or converted, blueprints as recipes, lab clips and whole-Original Deliveries | built, tested (no VMAF) |
 | Offline IMDb index: download, lookup, suggestions on the Plan | built, tested |
 | Jobs left behind by a restart; running a stopped job again from its own Plans | built, tested |
@@ -1202,7 +1239,7 @@ A disc's Plan made before projects still logs that its subtitles are not read.
 ## 17. Roadmap
 
 **Next**
-Originals, projects and subtitles that belong to the original (§18) · measuring OCR
+Measuring OCR
 on more discs, on Windows and with Tesseract · the encoder's own observed frame
 rate rather than an assumed 24 · VMAF in the lab.
 
@@ -1218,57 +1255,6 @@ this way, and it helps everywhere a disc's own subtitles are missing or poor.
 Music CDs (a separate backend — MakeMKV cannot read CDDA; needs libcdio and
 MusicBrainz) · Dolby Vision (P7 to P8.1 via `dovi_tool`) · HDR10+ ·
 `arfabit-control` for NAS targets · a context pass over what OCR read.
-
----
-
-## 18. Next: originals, projects, and subtitles that belong to the original
-
-**Agreed, not built.** This was settled in discussion and replaces parts of §2,
-§5, §6, §8, §10 and §14. Where they disagree, this section is the plan and they
-describe what exists. As each piece is built, fold it into the section it
-belongs to and remove it from here.
-
-### Why
-
-Two workflows matter, and everything on the page exists to serve them:
-
-- **Automatic.** A disc goes in and, with nothing clicked, the film for the Apple
-  TV comes out, with its subtitles read into text.
-- **Manual.** Clips to find the settings, and packaging an original again later.
-
-OCR is never perfect, so both must leave a way to fix subtitles **after the
-fact**, however long ago the film was made. Today OCR runs inside a package task, so
-reading subtitles means making a film, and fixes live under a task that scrolls
-out of Recent tasks. Both are what this changes.
-
-Built so far, and folded into the sections they belong to: the words Original,
-Project and Task (§2); originals kept beside their films, and their SRTs (§6);
-OCR as tasks of their own after the copy, films taking the SRTs at DELIVER,
-tags on OCR tasks, and copies brought up to date after a fix (§2, §10, §14);
-each step open to change until it starts, and what a drive does when a disc
-goes in (§2, §14).
-
-### The page (replaces §14's sections)
-
-- **Tasks** — watching. Each drive (with its "When a disc goes in", built) and
-  a Plan button that opens the disc's project. The queue, logs, and recent
-  tasks.
-- **Projects** — creating. Pick a source: a disc in a drive, an original, or any
-  file ARFABIT made (a converted MKV can be remuxed to MP4 with other subtitles,
-  say). Pick what to make: copy; read subtitles (OCR only, no picture or sound
-  made); a film, converted or remuxed, MKV or MP4; a clip. Starting it adds its
-  tasks to the queue. Projects shows nothing finished; that is Tasks.
-- **Blueprints** — recipes, applied from the start by a drive or by hand.
-- **Settings** — the rest.
-
-The user is trusted to know what they are making in Projects.
-
-### Not settled by this, and untested
-
-- **MP4:** in §0.2 as "may be offered later". §4 has no tested result for MP4 or
-  its own subtitle format; nothing about it is assumed.
-- **Sidecar SRT on the Apple TV:** SRT inside MKV is tested to play directly
-  (§4); a sidecar SRT is not yet.
 
 ---
 

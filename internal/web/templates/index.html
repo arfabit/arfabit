@@ -44,8 +44,128 @@
         <select id="drive-when" disabled></select>
       </div>
       <p id="drive-when-note" class="muted small"></p>
+      <p id="drive-plan" class="small" hidden></p>
       <p id="eject-detail" class="muted small"></p>
       <div id="drive-health" class="muted small"></div>
+    </section>
+
+    <section id="queue" class="card" hidden>
+      <h2>Queue</h2>
+      <p id="queue-summary" class="queue-summary muted small"></p>
+      <div id="working-list"></div>
+    </section>
+
+    <section id="done" class="card" hidden>
+      <h2 id="done-title">Ready</h2>
+      <p id="done-detail" class="muted"></p>
+    </section>
+
+    <section id="log-card" class="card" hidden>
+      <div class="log-head">
+        <h2>Logs</h2>
+        <div class="log-controls">
+          <span id="log-scope" class="muted small"></span>
+          <input id="log-filter" type="search" placeholder="Filter" autocomplete="off">
+          <label class="follow"><input id="log-follow" type="checkbox" checked> Follow</label>
+        </div>
+      </div>
+      <div id="log" class="log"></div>
+      <button id="log-jump" class="jump" hidden>Jump to live</button>
+    </section>
+
+    <section id="lab-card" class="card" hidden>
+      <h2>Clips compared</h2>
+      <div id="lab-results"></div>
+    </section>
+
+    <section class="card">
+      <h2>Recent tasks</h2>
+      <p class="muted small">Originals and films go in {{.Library}}, clips in {{.Clips}}.</p>
+      <div id="to-check" class="to-check" hidden></div>
+      <div id="recent"></div>
+    </section>
+
+  </div>
+
+  <!-- Projects: setting up what to make. Nothing finished is shown here; that
+       is Tasks. -->
+  <div class="view" data-view="projects" hidden>
+
+    <section class="card">
+      <h2>Project</h2>
+      <p class="muted small">Choose what to start from and what to make. Starting it adds its tasks to the queue, on Tasks.</p>
+
+      <div class="lab-controls">
+        <label>
+          <span>Start from</span>
+          <select id="project-source"></select>
+        </label>
+      </div>
+
+      <!-- A disc: its Plan, below, once it has been read. -->
+      <div id="project-disc" hidden>
+        <p id="project-disc-status" class="muted"></p>
+        <button id="project-read-disc" class="primary">Read the disc</button>
+      </div>
+
+      <!-- A file ARFABIT made: an original, a film or a clip. -->
+      <div id="project-file" hidden>
+        <div class="make-choice" role="radiogroup" aria-label="Make">
+          <span class="muted small">Make</span>
+          <label class="chip"><input type="radio" name="project-make" value="read"> Subtitles only</label>
+          <label class="chip"><input type="radio" name="project-make" value="film" checked> A film</label>
+          <label class="chip"><input type="radio" name="project-make" value="clip"> A clip</label>
+        </div>
+
+        <div id="project-read" hidden></div>
+
+        <div id="project-make">
+          <div id="project-stretch" class="lab-controls" hidden>
+            <label>
+              <span>From</span>
+              <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
+            </label>
+            <label>
+              <span>Length</span>
+              <select id="lab-length">
+                <option value="5">5 seconds</option>
+                <option value="10">10 seconds</option>
+                <option value="15">15 seconds</option>
+                <option value="30">30 seconds</option>
+                <option value="60" selected>1 minute</option>
+                <option value="300">5 minutes</option>
+                <option value="600">10 minutes</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="project-start">
+            <label for="project-blueprint" class="muted small">Start from</label>
+            <select id="project-blueprint"></select>
+            <button id="project-fill" type="button">Use</button>
+          </div>
+
+          <div id="project-editor"></div>
+
+          <div class="title-choice">
+            <label for="project-edition">Edition</label>
+            <div class="title-row">
+              <input id="project-edition" type="text" autocomplete="off" placeholder="None">
+            </div>
+          </div>
+
+          <div id="project-containers" class="project-containers" role="radiogroup" aria-label="Container">
+            <span class="muted small">As</span>
+            <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
+            <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
+          </div>
+          <p id="project-container-note" class="muted small"></p>
+        </div>
+
+        <p id="project-destination" class="muted small"></p>
+        <button id="project-run" class="primary">Start</button>
+        <p id="project-status" class="muted small"></p>
+      </div>
     </section>
 
     <section id="plan" class="card" hidden>
@@ -115,96 +235,6 @@
         <span id="plan-blocked" class="muted"></span>
       </div>
       <p id="plan-started" class="muted small" hidden></p>
-    </section>
-
-    <section id="queue" class="card" hidden>
-      <h2>Queue</h2>
-      <p id="queue-summary" class="queue-summary muted small"></p>
-      <div id="working-list"></div>
-    </section>
-
-    <section id="done" class="card" hidden>
-      <h2 id="done-title">Ready</h2>
-      <p id="done-detail" class="muted"></p>
-    </section>
-
-    <section id="log-card" class="card" hidden>
-      <div class="log-head">
-        <h2>Logs</h2>
-        <div class="log-controls">
-          <span id="log-scope" class="muted small"></span>
-          <input id="log-filter" type="search" placeholder="Filter" autocomplete="off">
-          <label class="follow"><input id="log-follow" type="checkbox" checked> Follow</label>
-        </div>
-      </div>
-      <div id="log" class="log"></div>
-      <button id="log-jump" class="jump" hidden>Jump to live</button>
-    </section>
-
-    <section class="card">
-      <h2>Recent tasks</h2>
-      <p class="muted small">Originals and films go in {{.Library}}, clips in {{.Clips}}.</p>
-      <div id="recent"></div>
-    </section>
-
-  </div>
-
-  <!-- Projects: making a film or a clip from an original, track by track. -->
-  <div class="view" data-view="projects" hidden>
-
-    <section class="card">
-      <h2>Project</h2>
-      <p class="muted small">Make a film or a clip from an original you already have. Everything in the original is listed; choose what to keep as it is, and what to change.</p>
-
-      <div class="lab-controls">
-        <label>
-          <span>Original</span>
-          <select id="project-original"></select>
-        </label>
-        <label>
-          <span>From</span>
-          <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
-        </label>
-        <label>
-          <span>Length</span>
-          <select id="lab-length">
-            <option value="5">5 seconds</option>
-            <option value="10">10 seconds</option>
-            <option value="15">15 seconds</option>
-            <option value="30">30 seconds</option>
-            <option value="60">1 minute</option>
-            <option value="300">5 minutes</option>
-            <option value="600">10 minutes</option>
-            <option value="0" selected>All of it</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="project-start">
-        <label for="project-blueprint" class="muted small">Start from</label>
-        <select id="project-blueprint"></select>
-        <button id="project-fill" type="button">Use</button>
-      </div>
-
-      <div id="project-editor"></div>
-
-      <div class="title-choice">
-        <label for="project-edition">Edition</label>
-        <div class="title-row">
-          <input id="project-edition" type="text" autocomplete="off" placeholder="None">
-        </div>
-      </div>
-
-      <div class="project-containers">
-        <span class="muted small">Make</span>
-        <label class="chip"><input type="checkbox" checked disabled> MKV</label>
-        <label class="chip muted" title="Not yet"><input type="checkbox" disabled> MP4, not yet</label>
-      </div>
-
-      <p id="project-destination" class="muted small"></p>
-      <button id="project-run" class="primary">Start</button>
-      <p id="project-status" class="muted small"></p>
-      <div id="lab-results"></div>
     </section>
 
   </div>

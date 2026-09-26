@@ -24,7 +24,11 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 	}{
 		{"no picture", store.Project{Items: []store.Item{{Kind: store.KindAudio, Action: store.ActionCopy}}}, "needs a picture"},
 		{"two pictures", store.Project{Items: []store.Item{video, video}}, "one picture"},
-		{"MP4, not yet", store.Project{Containers: []string{"mp4"}, Items: []store.Item{video}}, "MP4"},
+		{"a container ARFABIT does not make", store.Project{Containers: []string{"avi"}, Items: []store.Item{video}}, "AVI"},
+		{"picture subtitles in MP4", store.Project{Containers: []string{"mp4"}, Items: []store.Item{video,
+			{Kind: store.KindSubtitle, Action: store.ActionCopy, Codec: "hdmv_pgs_subtitle"}}}, "picture subtitles"},
+		{"TrueHD in MP4", store.Project{Containers: []string{"mp4"}, Items: []store.Item{video,
+			{Kind: store.KindAudio, Action: store.ActionCopy, Codec: "truehd", Channels: 8}}}, "experimental"},
 		{"E-AC-3 7.1", store.Project{Items: []store.Item{video,
 			{Kind: store.KindAudio, Action: store.ActionConvert, To: "eac3", Channels: 8}}}, "six channels"},
 		{"E-AC-3 stereo", store.Project{Items: []store.Item{video,

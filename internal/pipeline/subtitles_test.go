@@ -483,3 +483,31 @@ func TestCopiesAreReplacedOnlyWhileUntouched(t *testing.T) {
 		t.Errorf("a copy that is not there is %s", got)
 	}
 }
+
+// A film can be made as an MP4: the picture copied, and its subtitles read
+// into text beside it as for Matroska. What it holds is checked; how it
+// plays is not known (§4).
+func TestFilmAsMP4(t *testing.T) {
+	original := pgsMaster(t)
+	r := runnerWithFolders(t)
+	r.OCR = &readsInOrder{}
+
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
+		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Project: store.Project{Edition: "MP4", Containers: []string{"mp4"}, Items: convertSubtitles},
+	})
+	if filepath.Base(job.Delivery) != "Test Film (2026) {edition-MP4}.mp4" {
+		t.Fatalf("made %s", job.Delivery)
+	}
+	info, err := ffmpeg.Probe(context.Background(), job.Delivery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := info.VideoStream(); v == nil || v.Codec != "h264" {
+		t.Errorf("the picture is %+v", v)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(job.Delivery), "Test Film (2026) {edition-MP4}.en.srt")); err != nil {
+		t.Errorf("no subtitles beside the MP4: %v", err)
+	}
+}

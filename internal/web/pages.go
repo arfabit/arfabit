@@ -125,58 +125,75 @@ func (s *Server) handleFreeDrive(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// original is one original a project can be made from.
-type original struct {
+// source is a file a project can start from: an original, or any other file
+// ARFABIT made, a film or a clip.
+type source struct {
 	Title string `json:"title"`
 	Path  string `json:"path"`
 	Size  int64  `json:"size"`
+
+	// Kind is "original", "film" or "clip".
+	Kind string `json:"kind"`
 }
 
-// originals lists every original: beside its films in the library, and in the
-// folder masters were kept in before (§6), which is only read.
-func (s *Server) originals() []original {
-	var found []original
-	add := func(title, path string) {
-		if info, err := os.Stat(path); err == nil {
-			found = append(found, original{Title: title, Path: path, Size: info.Size()})
-		}
+// sources lists every file a project can start from: originals beside their
+// films in the library, and in the folder masters were kept in before (§6),
+// which is only read; the films in the library; and the clips.
+func (s *Server) sources() []source {
+	var found []source
+	video := func(name string) bool {
+		ext := strings.ToLower(filepath.Ext(name))
+		return !strings.HasPrefix(name, ".") && (ext == meta.VideoExt || ext == ".mp4")
 	}
-
-	folders, _ := os.ReadDir(s.Config.Paths.Library)
-	for _, folder := range folders {
-		if !folder.IsDir() {
-			continue
+	each := func(root string, add func(folder, name, path string)) {
+		if root == "" {
+			return
 		}
-		files, _ := os.ReadDir(filepath.Join(s.Config.Paths.Library, folder.Name()))
-		for _, f := range files {
-			if filepath.Ext(f.Name()) == meta.VideoExt && meta.IsOriginal(f.Name()) {
-				add(folder.Name(), filepath.Join(s.Config.Paths.Library, folder.Name(), f.Name()))
-			}
-		}
-	}
-
-	if s.Config.Paths.Masters != "" {
-		folders, _ := os.ReadDir(s.Config.Paths.Masters)
+		folders, _ := os.ReadDir(root)
 		for _, folder := range folders {
 			if !folder.IsDir() {
 				continue
 			}
-			files, _ := os.ReadDir(filepath.Join(s.Config.Paths.Masters, folder.Name()))
+			files, _ := os.ReadDir(filepath.Join(root, folder.Name()))
 			for _, f := range files {
-				if filepath.Ext(f.Name()) == meta.VideoExt {
-					add(folder.Name(), filepath.Join(s.Config.Paths.Masters, folder.Name(), f.Name()))
+				if !f.IsDir() && video(f.Name()) {
+					add(folder.Name(), f.Name(), filepath.Join(root, folder.Name(), f.Name()))
 				}
 			}
 		}
 	}
+	add := func(title, path, kind string) {
+		if info, err := os.Stat(path); err == nil {
+			found = append(found, source{Title: title, Path: path, Size: info.Size(), Kind: kind})
+		}
+	}
 
-	sort.Slice(found, func(a, b int) bool { return found[a].Title < found[b].Title })
+	each(s.Config.Paths.Library, func(folder, name, path string) {
+		if meta.IsOriginal(name) {
+			add(folder, path, "original")
+		} else {
+			add(folder, path, "film")
+		}
+	})
+	each(s.Config.Paths.Masters, func(folder, name, path string) { add(folder, path, "original") })
+	each(s.Config.Paths.Clips, func(folder, name, path string) { add(folder, path, "clip") })
+
+	order := map[string]int{"original": 0, "film": 1, "clip": 2}
+	sort.SliceStable(found, func(a, b int) bool {
+		if order[found[a].Kind] != order[found[b].Kind] {
+			return order[found[a].Kind] < order[found[b].Kind]
+		}
+		if found[a].Title != found[b].Title {
+			return found[a].Title < found[b].Title
+		}
+		return found[a].Path < found[b].Path
+	})
 	return found
 }
 
-// handleOriginals lists the originals there are to make things from.
-func (s *Server) handleOriginals(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"originals": s.originals()})
+// handleSources lists the files there are to start a project from.
+func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"sources": s.sources()})
 }
 
 // handleBlueprints lists the named settings available to choose between.
@@ -481,14 +498,14 @@ func capitalise(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// isOriginal reports whether a path is one of the originals listed, which is
-// all these endpoints read. ARFABIT listens on the whole network, so a path is
-// not taken on trust.
-func (s *Server) isOriginal(path string) bool {
+// isSource reports whether a path is one of the files listed to start a
+// project from, which is all these endpoints read. ARFABIT listens on the
+// whole network, so a path is not taken on trust.
+func (s *Server) isSource(path string) bool {
 	if path == "" {
 		return false
 	}
-	for _, o := range s.originals() {
+	for _, o := range s.sources() {
 		if filepath.Clean(o.Path) == filepath.Clean(path) {
 			return true
 		}
@@ -496,16 +513,16 @@ func (s *Server) isOriginal(path string) bool {
 	return false
 }
 
-// handleOriginal says what an original holds, track by track, and what each
-// would cost on the television (§4), so a project can be planned from it.
-func (s *Server) handleOriginal(w http.ResponseWriter, r *http.Request) {
+// handleSource says what a file holds, track by track, and what each would
+// cost on the television (§4), so a project can be planned from it.
+func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		writeError(w, "No original was given.", nil)
+		writeError(w, "No file was given.", nil)
 		return
 	}
-	if !s.isOriginal(path) {
-		writeError(w, "That is not one of your originals.", nil)
+	if !s.isSource(path) {
+		writeError(w, "That is not a file ARFABIT made.", nil)
 		return
 	}
 
@@ -514,7 +531,7 @@ func (s *Server) handleOriginal(w http.ResponseWriter, r *http.Request) {
 
 	info, err := ffmpeg.Probe(ctx, path)
 	if err != nil {
-		writeError(w, "That original could not be read.", err)
+		writeError(w, "That file could not be read.", err)
 		return
 	}
 
@@ -525,19 +542,19 @@ func (s *Server) handleOriginal(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFillProject fills a project in from a blueprint, or from the
-// defaults, against what an original holds. Nothing is started: the line items
+// defaults, against what a file holds. Nothing is started: the line items
 // come back to be looked at and changed.
 func (s *Server) handleFillProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Original  string `json:"original"`
+		Source    string `json:"source"`
 		Blueprint string `json:"blueprint"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
-	if !s.isOriginal(req.Original) {
-		writeError(w, "That is not one of your originals.", nil)
+	if !s.isSource(req.Source) {
+		writeError(w, "That is not a file ARFABIT made.", nil)
 		return
 	}
 
@@ -553,33 +570,61 @@ func (s *Server) handleFillProject(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	info, err := ffmpeg.Probe(ctx, req.Original)
+	info, err := ffmpeg.Probe(ctx, req.Source)
 	if err != nil {
-		writeError(w, "That original could not be read.", err)
+		writeError(w, "That file could not be read.", err)
 		return
 	}
 
 	writeJSON(w, map[string]any{"project": pipeline.Recipe(pipeline.OriginalTracks(info), blueprint, s.Runner.OCR != nil)})
 }
 
-// handleStartProject makes a project from an original.
+// handleStartProject starts a project from a file ARFABIT made: reading
+// some of its subtitles into text, each track a task of its own, or making a
+// film or a clip from it.
 func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Original string        `json:"original"`
-		Film     string        `json:"film"`
-		Project  store.Project `json:"project"`
+		Source  string        `json:"source"`
+		Film    string        `json:"film"`
+		Make    string        `json:"make"`
+		Read    []int         `json:"read"`
+		Project store.Project `json:"project"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that request.", err)
 		return
 	}
-	if !s.isOriginal(req.Original) {
-		writeError(w, "That is not one of your originals.", nil)
+	if !s.isSource(req.Source) {
+		writeError(w, "That is not a file ARFABIT made.", nil)
+		return
+	}
+
+	if req.Make == "read" {
+		if len(req.Read) == 0 {
+			writeError(w, "Tick the subtitles to read.", nil)
+			return
+		}
+		var started, problems []string
+		for _, stream := range req.Read {
+			job, err := s.Runner.StartReading(context.Background(), pipeline.ReadingRequest{
+				Original: req.Source, Title: req.Film, Stream: stream,
+			})
+			if err != nil {
+				problems = append(problems, capitalise(err.Error())+".")
+				continue
+			}
+			started = append(started, job.ID)
+		}
+		if len(started) == 0 {
+			writeError(w, strings.Join(problems, " "), nil)
+			return
+		}
+		writeJSON(w, map[string]any{"jobs": started, "problems": problems})
 		return
 	}
 
 	job, err := s.Runner.StartProject(context.Background(), pipeline.ProjectRequest{
-		Original:   req.Original,
+		Original:   req.Source,
 		Film:       req.Film,
 		Project:    req.Project,
 		ClipsDir:   s.Config.Paths.Clips,
@@ -589,5 +634,5 @@ func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, capitalise(err.Error())+".", nil)
 		return
 	}
-	writeJSON(w, map[string]string{"job": job.ID})
+	writeJSON(w, map[string]any{"jobs": []string{job.ID}})
 }

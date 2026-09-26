@@ -547,18 +547,20 @@ func TestEjectAllowedWhileConverting(t *testing.T) {
 	}
 }
 
-// Projects need to find the originals that already exist: beside their films
-// in the library, and in the folder originals were kept in before, which is
-// still read.
-func TestOriginalsAreListed(t *testing.T) {
+// Projects start from any file ARFABIT made: originals beside their films in
+// the library and in the folder masters were kept in before, which is still
+// read; the films; and the clips. Anything that is not a video is not one.
+func TestSourcesAreListed(t *testing.T) {
 	s := newTestServer(t)
 
 	title := meta.Title{Name: "In the Grey", Year: 2026}
 	beside := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.OriginalName())
 	film := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.VideoName(""))
-	// A real original's name, en dash and all, where originals used to go.
+	clip := filepath.Join(s.Config.Paths.Clips, "In the Grey (2026)", "In the Grey (2026) {edition-Lab 001 - Small - 0h01m00s}.mkv")
+	// A real master's name, en dash and all, where masters used to go.
 	earlier := filepath.Join(s.Config.Paths.Masters, "Crime 101 (2025)", "CRIME 101 – BLU-RAY_t04.mkv")
-	for _, path := range []string{beside, film, earlier, filepath.Join(filepath.Dir(earlier), "job.json")} {
+	for _, path := range []string{beside, film, clip, earlier,
+		filepath.Join(filepath.Dir(earlier), "job.json"), filepath.Join(filepath.Dir(film), ".arfabit-piece-x.mkv")} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -567,38 +569,36 @@ func TestOriginalsAreListed(t *testing.T) {
 		}
 	}
 
-	rec := get(t, s, "/api/originals")
-
 	var got struct {
-		Originals []struct {
-			Title string `json:"title"`
-			Path  string `json:"path"`
-		} `json:"originals"`
+		Sources []source `json:"sources"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+	if err := json.Unmarshal(get(t, s, "/api/sources").Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-
-	// The film made from an original is not one, and nor is anything that
-	// is not a video.
-	if len(got.Originals) != 2 {
-		t.Fatalf("got %d originals, want 2: %+v", len(got.Originals), got.Originals)
+	want := []source{
+		{Title: "Crime 101 (2025)", Path: earlier, Kind: "original"},
+		{Title: "In the Grey (2026)", Path: beside, Kind: "original"},
+		{Title: "In the Grey (2026)", Path: film, Kind: "film"},
+		{Title: "In the Grey (2026)", Path: clip, Kind: "clip"},
 	}
-	if got.Originals[0].Title != "Crime 101 (2025)" || got.Originals[0].Path != earlier {
-		t.Errorf("first = %+v; the film's folder name is what names it", got.Originals[0])
+	if len(got.Sources) != len(want) {
+		t.Fatalf("got %+v", got.Sources)
 	}
-	if got.Originals[1].Title != "In the Grey (2026)" || got.Originals[1].Path != beside {
-		t.Errorf("second = %+v", got.Originals[1])
+	for i := range want {
+		g := got.Sources[i]
+		if g.Title != want[i].Title || g.Path != want[i].Path || g.Kind != want[i].Kind {
+			t.Errorf("%d: %+v, want %+v", i, g, want[i])
+		}
 	}
 }
 
 // Nothing copied yet is an ordinary state, and must come back as an empty list
 // rather than as nothing at all.
-func TestOriginalsWithNothingCopied(t *testing.T) {
+func TestSourcesWithNothingCopied(t *testing.T) {
 	s := newTestServer(t)
 
-	rec := get(t, s, "/api/originals")
-	if !strings.Contains(rec.Body.String(), "originals") {
+	rec := get(t, s, "/api/sources")
+	if !strings.Contains(rec.Body.String(), "sources") {
 		t.Errorf("body = %q", rec.Body.String())
 	}
 }
@@ -706,7 +706,7 @@ func TestProjectNeedsNoBlueprint(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/project",
-		strings.NewReader(`{"original":`+strconv.Quote(anOriginal(t, s))+`,"film":"x","project":{"length":30000000000,
+		strings.NewReader(`{"source":`+strconv.Quote(anOriginal(t, s))+`,"film":"x","make":"clip","project":{"length":30000000000,
 			"items":[{"kind":"video","action":"convert","to":"hevc","crf":26,"preset":"medium","source":0}]}}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a project of line items alone was refused: %s", rec.Body)
@@ -727,7 +727,7 @@ func TestProjectIsRefusedPlainly(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/project",
-		strings.NewReader(`{"original":`+strconv.Quote(anOriginal(t, s))+`,"project":{"items":[]}}`)))
+		strings.NewReader(`{"source":`+strconv.Quote(anOriginal(t, s))+`,"make":"film","project":{"items":[]}}`)))
 	if rec.Code == http.StatusOK {
 		t.Fatal("a project with no picture was accepted")
 	}
@@ -736,24 +736,24 @@ func TestProjectIsRefusedPlainly(t *testing.T) {
 	}
 }
 
-// Reading an original needs one, and one that cannot be read says so.
-func TestOriginalMustBeReadable(t *testing.T) {
+// Reading a file needs one, and one that cannot be read says so.
+func TestSourceMustBeReadable(t *testing.T) {
 	s := newTestServer(t)
 
-	if rec := get(t, s, "/api/original"); rec.Code == http.StatusOK {
-		t.Error("tracks were listed for no original at all")
+	if rec := get(t, s, "/api/source"); rec.Code == http.StatusOK {
+		t.Error("tracks were listed for no file at all")
 	}
-	rec := get(t, s, "/api/original?path="+url.QueryEscape(anOriginal(t, s)))
+	rec := get(t, s, "/api/source?path="+url.QueryEscape(anOriginal(t, s)))
 	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be read") {
-		t.Errorf("an original that is not a video: %d %s", rec.Code, rec.Body)
+		t.Errorf("a file that is not a video: %d %s", rec.Code, rec.Body)
 	}
 
 	// ARFABIT listens on the whole network, so it reads nothing but the
-	// originals it lists, however the path is dressed up.
+	// files it lists, however the path is dressed up.
 	missing := filepath.Join(s.Config.Paths.Masters, "Gone (2020)", "gone.mkv")
 	for _, outside := range []string{missing, "/etc/hosts", filepath.Join(s.Config.Paths.Library, "..", "config.toml"), s.Config.Paths.Library} {
-		rec := get(t, s, "/api/original?path="+url.QueryEscape(outside))
-		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not one of your originals") {
+		rec := get(t, s, "/api/source?path="+url.QueryEscape(outside))
+		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not a file ARFABIT made") {
 			t.Errorf("%s was read: %d %s", outside, rec.Code, rec.Body)
 		}
 	}
@@ -1055,5 +1055,24 @@ func TestNoticingADiscGoIn(t *testing.T) {
 		if got := len(wentIn([]disc.Drive{tc.before}, []disc.Drive{tc.now})) == 1; got != tc.in {
 			t.Errorf("%+v then %+v: went in = %v", tc.before, tc.now, got)
 		}
+	}
+}
+
+// Reading subtitles only starts nothing but OCR tasks, and says plainly why
+// when it cannot.
+func TestReadSubtitlesOnly(t *testing.T) {
+	s := newTestServer(t)
+	path := anOriginal(t, s)
+
+	rec := post(t, s, "/api/project", `{"source":`+strconv.Quote(path)+`,"make":"read","read":[]}`)
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "Tick") {
+		t.Errorf("nothing chosen: %d %s", rec.Code, rec.Body)
+	}
+	rec = post(t, s, "/api/project", `{"source":`+strconv.Quote(path)+`,"make":"read","read":[3]}`)
+	if rec.Code == http.StatusOK {
+		t.Errorf("a file with no subtitles was read: %s", rec.Body)
+	}
+	if len(s.Runner.Active()) != 0 {
+		t.Error("something joined the queue")
 	}
 }

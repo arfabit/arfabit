@@ -51,7 +51,7 @@ for (const match of fs.readFileSync(process.argv[3], "utf8").matchAll(/id="([a-z
 }
 
 // An original is chosen, so the project editor is drawn rather than skipped.
-byId.get("project-original").value = "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv";
+byId.get("project-source").value = "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv";
 
 global.document = {
   getElementById: (id) => byId.get(id) || null,
@@ -202,8 +202,11 @@ const answers = {
   },
   "/api/autostart": { enabled: true, mechanism: "launchd user agent", path: "/tmp/x.plist" },
   "/api/index": { state: "ready", count: 272565, path: "/tmp/titles.json", built: new Date().toISOString() },
-  "/api/originals": { originals: [{ title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv", size: 40700000000 }] },
-  "/api/original": {
+  "/api/sources": { sources: [
+    { title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv", size: 40700000000, kind: "original" },
+    { title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025).mkv", size: 4070000000, kind: "film" },
+  ] },
+  "/api/source": {
     duration: 5825,
     tracks: [
       { index: 0, kind: "video", codec: "h264", height: 1080, label: "H.264 · 1080p" },
