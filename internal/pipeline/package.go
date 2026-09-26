@@ -148,6 +148,25 @@ func outputs(library string, title meta.Title, pkg *store.Project) []string {
 	return paths
 }
 
+// AlreadyThere lists the files a Project from a file would make that are
+// already in the library, which it will not replace, so the page can say so
+// before Start.
+func AlreadyThere(library, film string, pkg store.Project) []string {
+	if len(pkg.Containers) == 0 {
+		pkg.Containers = []string{"mkv"}
+	}
+	return alreadyThere(library, meta.Title{Name: film}, &pkg)
+}
+
+// Outputs lists the files a Project from a file would make, so the page can
+// show their names as it is set up.
+func Outputs(library, film string, pkg store.Project) []string {
+	if len(pkg.Containers) == 0 {
+		pkg.Containers = []string{"mkv"}
+	}
+	return outputs(library, meta.Title{Name: film}, &pkg)
+}
+
 // alreadyThere lists what a Project would make that is already there, which
 // it will not replace (§0.6). A video under its edition counts as MKV or MP4,
 // since to Plex both are that edition.

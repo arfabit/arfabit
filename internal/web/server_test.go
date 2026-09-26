@@ -1059,3 +1059,37 @@ func TestSourceMustBeReadable(t *testing.T) {
 		}
 	}
 }
+
+// A project's name is checked against the film's folder as it is set up: with
+// no edition, a video file there already under the film's own name is found.
+func TestProjectNameIsChecked(t *testing.T) {
+	s := newTestServer(t)
+	title := meta.Title{Name: "In the Grey", Year: 2026}
+	dir := title.LibraryDir(s.Config.Paths.Library)
+	original := filepath.Join(dir, title.OriginalName())
+	film := filepath.Join(dir, title.VideoName(""))
+	for _, path := range []string{original, film} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(edition string) []string {
+		rec := post(t, s, "/api/project/check", `{"source":`+strconv.Quote(original)+`,"project":{"edition":`+strconv.Quote(edition)+`,"items":[{"kind":"video","action":"copy"}]}}`)
+		var reply struct {
+			Existing []string `json:"existing"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil {
+			t.Fatal(err)
+		}
+		return reply.Existing
+	}
+	if got := check(""); len(got) != 1 || got[0] != film {
+		t.Errorf("no edition: %v, want %s", got, film)
+	}
+	if got := check("Trial"); len(got) != 0 {
+		t.Errorf("a new edition: %v", got)
+	}
+}

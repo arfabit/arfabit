@@ -250,26 +250,17 @@ button.link {
 button.link[aria-pressed="true"] { color: var(--ink); text-decoration: none; font-weight: 600; }
 .queue-summary { margin-bottom: 0.75rem; }
 
-/* What a project will make, and Start, floating above the sections. */
-.dock {
-  position: fixed;
-  left: 50%;
-  bottom: calc(6rem + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  width: min(56rem, calc(100% - 2rem));
-  padding: 0.75rem 1rem;
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.12);
-  z-index: 10;
-}
-.dock .project-containers { margin: 0 0 0.5rem; }
-.dock p { margin: 0.25rem 0; }
-.dock-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; }
-.dock-row p { flex: 1; }
-.dock [hidden] { display: none; }
-body.docked { padding-bottom: calc(15rem + env(safe-area-inset-bottom)); }
+/* The top of Projects: what is being made and its name, kept in view. */
+.project-bar { position: sticky; top: 0.5rem; z-index: 5; box-shadow: 0 6px 24px rgb(0 0 0 / 0.12); }
+.bar-row { display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap; }
+.bar-row label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; color: var(--muted); }
+.bar-row .project-containers { margin: 0; align-self: flex-end; }
+.bar-end { align-items: center; justify-content: space-between; flex-wrap: nowrap; }
+.bar-end p { flex: 1; }
+.project-bar p { margin: 0.35rem 0; }
+.project-name { font-weight: 600; overflow-wrap: anywhere; }
+.bar-problem { color: var(--bad); }
+#project-summary[hidden], #project-file-fields[hidden] { display: none; }
 
 /* The sections of the page, always at the bottom of the window. */
 .tabbar {

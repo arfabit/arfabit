@@ -141,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/source", s.handleSource)
 	mux.HandleFunc("POST /api/project/fill", s.handleFillProject)
 	mux.HandleFunc("POST /api/project", s.handleStartProject)
+	mux.HandleFunc("POST /api/project/check", s.handleCheckProject)
 	mux.HandleFunc("POST /api/resume", s.handleResume)
 	mux.HandleFunc("POST /api/eject", s.handleEject)
 	mux.HandleFunc("GET /api/doctor", s.handleDoctor)

@@ -91,34 +91,24 @@
        is Tasks. -->
   <div class="view" data-view="projects" hidden>
 
-    <section class="card">
-      <h2>Project</h2>
-      <p class="muted small">Choose what to start from and what to make. Starting it adds its tasks to the queue, on Tasks.</p>
-
-      <div class="lab-controls">
+    <!-- What is being made and what it will be called, kept at the top of the
+         window while the line items below are changed. -->
+    <section id="project-bar" class="card project-bar">
+      <div class="bar-row">
         <label>
           <span>Start from</span>
           <select id="project-source"></select>
         </label>
-      </div>
-
-      <!-- A disc: its Plan, below, once it has been read. -->
-      <div id="project-disc" hidden>
-        <p id="project-disc-status" class="muted"></p>
-        <button id="project-read-disc" class="primary">Read the disc</button>
-      </div>
-
-      <!-- A file in the library: an original, or anything made from one. -->
-      <div id="project-file" hidden>
-        <div class="title-choice">
-          <label for="project-edition">Edition</label>
-          <div class="title-row">
+        <div id="project-file-fields" class="bar-row" hidden>
+          <label>
+            <span>Edition</span>
             <input id="project-edition" type="text" autocomplete="off" placeholder="None">
+          </label>
+          <div id="project-containers" class="project-containers" role="radiogroup" aria-label="As">
+            <span class="muted small">As</span>
+            <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
+            <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
           </div>
-          <p id="project-name" class="muted small"></p>
-        </div>
-
-        <div class="lab-controls">
           <label>
             <span>From</span>
             <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
@@ -137,15 +127,33 @@
             </select>
           </label>
         </div>
-
-        <div class="project-start">
-          <label for="project-blueprint" class="muted small">Start from</label>
-          <select id="project-blueprint"></select>
-          <button id="project-fill" type="button">Use</button>
-        </div>
-
-        <div id="project-editor"></div>
       </div>
+      <div id="project-summary" hidden>
+        <p id="project-name" class="project-name"></p>
+        <p id="project-conflict" class="bar-problem" hidden></p>
+        <p id="project-container-note" class="muted small"></p>
+        <div class="bar-row bar-end">
+          <p id="project-destination" class="small"></p>
+          <button id="project-run" class="primary">Start</button>
+        </div>
+        <p id="project-status" class="muted small"></p>
+      </div>
+    </section>
+
+    <!-- A disc: its Plan, below, once it has been read. -->
+    <section id="project-disc" class="card" hidden>
+      <p id="project-disc-status" class="muted"></p>
+      <button id="project-read-disc" class="primary">Read the disc</button>
+    </section>
+
+    <!-- A file in the library: its line items. -->
+    <section id="project-file" class="card" hidden>
+      <div class="project-start">
+        <label for="project-blueprint" class="muted small">Fill in from</label>
+        <select id="project-blueprint"></select>
+        <button id="project-fill" type="button">Use</button>
+      </div>
+      <div id="project-editor"></div>
     </section>
 
     <section id="plan" class="card" hidden>
@@ -271,22 +279,6 @@
   </div>
 
 </main>
-
-<!-- What pressing Start makes, and Start, kept in view above the sections
-     while a project is being set up from a file. -->
-<div id="project-dock" class="dock" hidden>
-  <div id="project-containers" class="project-containers" role="radiogroup" aria-label="Container">
-    <span class="muted small">As</span>
-    <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
-    <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
-  </div>
-  <p id="project-container-note" class="muted small"></p>
-  <div class="dock-row">
-    <p id="project-destination" class="small"></p>
-    <button id="project-run" class="primary">Start</button>
-  </div>
-  <p id="project-status" class="muted small"></p>
-</div>
 
 <nav class="tabbar" aria-label="Sections">
   <a href="#tasks" data-tab="tasks">

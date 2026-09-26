@@ -570,3 +570,35 @@ func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"jobs": []string{job.ID}})
 }
+
+// handleCheckProject says what files a project would make, and which of them
+// are already there, as it is being set up, so the name can be changed before
+// Start.
+func (s *Server) handleCheckProject(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Source  string        `json:"source"`
+		Film    string        `json:"film"`
+		Project store.Project `json:"project"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "ARFABIT could not read that request.", err)
+		return
+	}
+	if !s.isSource(req.Source) {
+		writeError(w, "That is not a file ARFABIT made.", nil)
+		return
+	}
+	film := req.Film
+	if film == "" {
+		film = filepath.Base(filepath.Dir(req.Source))
+	}
+	found := pipeline.AlreadyThere(s.Config.Paths.Library, film, req.Project)
+	if found == nil {
+		found = []string{}
+	}
+	files := pipeline.Outputs(s.Config.Paths.Library, film, req.Project)
+	if files == nil {
+		files = []string{}
+	}
+	writeJSON(w, map[string]any{"existing": found, "files": files})
+}

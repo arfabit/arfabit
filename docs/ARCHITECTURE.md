@@ -1128,15 +1128,17 @@ what they are making.
   button to read it until then. The drive's Plan button on Tasks reads the disc
   and comes here. Tasks says, under the drive, when a disc's Plan is here
   waiting or still open to change.
-- **A file** shows, in this order: the **Edition**, with the name the files
-  will have beneath it as it is typed; **From** and **Length** — Full by
-  default, or 5 s to 10 min from a start (`01:23:45`); and the line-item
-  editor, Video, Audio and Subtitles, started from the defaults or a blueprint
-  (§8, Projects). What it makes follows from the line items: a video or audio
-  file, or subtitle files alone. Its files go in the film's folder (§6).
-- A box floats above the sections while a file is chosen: **As** MKV or MP4,
-  shown only when there is video or audio; what Start will make, in a line;
-  and **Start**.
+- **A file** puts, in a bar that stays at the top of the window: its
+  **Edition**; **As** MKV or MP4, only when there is video or audio; **From**
+  and **Length**, Full by default or 5 s to 10 min from a start (`01:23:45`);
+  the names of the files it will make, as they are typed; what Start will
+  make, in a line; and **Start**. The names are asked of ARFABIT a moment after
+  each change, so they are what it will make, and if any is already in the
+  film's folder the bar says so in red and Start waits: ARFABIT does not
+  replace files (§0.6). Below the bar is the line-item editor, Video, Audio
+  and Subtitles, filled in from the defaults or a blueprint (§8, Projects).
+  What it makes follows from the line items: a video or audio file, or
+  subtitle files alone. Its files go in the film's folder (§6).
 
 Starting a project adds its tasks to the queue, and the page says they are on
 Tasks. Part of a film is a **file you watch on your own TV** — ARFABIT does not

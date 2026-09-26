@@ -1899,7 +1899,7 @@ function sourceChanged() {
   const disc = $("project-source").value === "disc";
   show("project-disc", disc);
   show("project-file", !disc);
-  updateDock();
+  updateBar();
   renderJob(lastJob, lastExisting);
   if (!disc) loadSource();
 }
@@ -1984,13 +1984,12 @@ function projectName() {
   return edition ? `${film} {edition-${edition}}` : film;
 }
 
-// updateDock shows what Start will make, and Start, floating above the
-// sections, while a project is being set up from a file.
-function updateDock() {
-  const view = location.hash.slice(1) || "tasks";
-  const on = view === "projects" && $("project-source").value !== "disc" && Boolean($("project-source").value);
-  $("project-dock").hidden = !on;
-  document.body.classList.toggle("docked", on);
+// updateBar shows the parts of the bar at the top of Projects that belong to
+// a file: its edition, container, stretch, name and Start.
+function updateBar() {
+  const file = $("project-source").value !== "disc" && Boolean($("project-source").value);
+  $("project-file-fields").hidden = !file;
+  $("project-summary").hidden = !file;
 }
 
 function containerChoice() {
@@ -2067,19 +2066,66 @@ function renderProject() {
   describeProject();
 }
 
-// renderName shows the name the project's files will have, as it is typed.
+// projectBody is the project as Start would send it.
+function projectBody() {
+  const chosen = $("project-source").selectedOptions[0];
+  const seconds = (n) => Math.round(n * 1e9);
+  return {
+    source: $("project-source").value,
+    film: chosen ? chosen.dataset.film : "",
+    project: {
+      ...pkg,
+      edition: $("project-edition").value.trim(),
+      containers: [containerChoice()],
+      at: part() ? seconds(parseTimestamp($("lab-at").value)) : 0,
+      length: part() ? seconds(Number($("lab-length").value)) : 0,
+    },
+  };
+}
+
+// The files the project would make that are already there. Start waits until
+// there are none, since ARFABIT does not replace them (§0.6).
+let conflicts = [];
+let checkTimer = null;
+
+// renderName asks what the project's files will be called, and whether any is
+// already there, a moment after the last change, and shows the answer.
 function renderName() {
   const name = projectName();
-  $("project-name").textContent = name ? `Named ${name}` : "";
+  $("project-name").textContent = name;
+  clearTimeout(checkTimer);
+  if (!pkg || !pkg.items.length) {
+    conflicts = [];
+    $("project-conflict").hidden = true;
+    return;
+  }
+  checkTimer = setTimeout(async () => {
+    const res = await fetch("/api/project/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(projectBody()),
+    }).catch(() => null);
+    if (!res || !res.ok) return;
+    const reply = await res.json();
+    const base = (p) => p.split(/[\\/]/).pop();
+    const files = (reply.files || []).map(base);
+    $("project-name").textContent = files.length ? files.join(" · ") : name;
+    conflicts = reply.existing || [];
+    $("project-conflict").hidden = conflicts.length === 0;
+    $("project-conflict").textContent = conflicts.length
+      ? `${conflicts.map(base).join(", ")} ${conflicts.length === 1 ? "is" : "are"} already in this film's folder, and ARFABIT does not replace files. Give this another edition, or move that file somewhere else.`
+      : "";
+    describeProject(true);
+  }, 250);
 }
 
 // describeProject says what pressing Start will make, and where it goes.
-function describeProject() {
-  renderName();
-  updateDock();
+function describeProject(checked) {
+  if (!checked) renderName();
+  updateBar();
   const say = (text, ready) => {
     $("project-destination").textContent = text;
-    $("project-run").disabled = !ready;
+    $("project-run").disabled = !ready || conflicts.length > 0;
   };
   if (!pkg) {
     say("", false);
@@ -3069,7 +3115,7 @@ function showView() {
   const name = views.some((v) => v.dataset.view === wanted) ? wanted : "tasks";
 
   for (const view of views) view.hidden = view.dataset.view !== name;
-  updateDock();
+  updateBar();
   for (const tab of document.querySelectorAll(".tabbar a")) {
     if (tab.dataset.tab === name) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
@@ -3232,27 +3278,14 @@ function wireButtons() {
   on("project-fill", "click", fillProject);
   on("project-edition", "input", (e) => {
     if (pkg) pkg.edition = e.target.value.trim();
-    renderName();
+    describeProject();
   });
 
   on("blueprint-new", "click", () => openBlueprintEditor({ name: "" }));
 
   on("project-run", "click", async (e) => {
     if (!pkg) return;
-    const chosen = $("project-source").selectedOptions[0];
-    const seconds = (n) => Math.round(n * 1e9);
-
-    const body = {
-      source: $("project-source").value,
-      film: chosen ? chosen.dataset.film : "",
-      project: {
-        ...pkg,
-        edition: $("project-edition").value.trim(),
-        containers: [containerChoice()],
-        at: part() ? seconds(parseTimestamp($("lab-at").value)) : 0,
-        length: part() ? seconds(Number($("lab-length").value)) : 0,
-      },
-    };
+    const body = projectBody();
     const result = await busy(e.target, "Adding\u2026", "Added to the queue", () => post("/api/project", body));
 
     if (result) {
