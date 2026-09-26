@@ -58,6 +58,9 @@ func interruptedNote(job *store.Job) string {
 	case job.From != "" && job.Original == "":
 		return "ARFABIT was restarted before this disc was copied, so its transcode never started. Read the disc again to plan it."
 
+	case job.Kind == store.KindOCR:
+		return "ARFABIT was restarted while these subtitles were being read. Nothing was written, so they can be read again."
+
 	case job.Original != "":
 		// Everything after the disc works from the copy, and the copy is
 		// still there.
@@ -80,6 +83,11 @@ func Resumable(job *store.Job) bool {
 	}
 
 	switch {
+	case job.Kind == store.KindOCR:
+		// Read again, as long as nothing has been written where it reads to.
+		if job.Reading == nil || existingAt(job.Reading.SRT) != nil {
+			return false
+		}
 	case job.Project != nil:
 		// A package has its line items, which is all it needs.
 	case job.Kind == store.KindDisc:
@@ -125,6 +133,11 @@ func (r *Runner) ResumeJob(id string) (*Job, error) {
 	}
 	if rec.State != store.StateStopped || !Resumable(rec) {
 		return nil, fmt.Errorf("%s cannot be picked up where it left off", rec.Title)
+	}
+
+	if rec.Kind == store.KindOCR {
+		rec.State, rec.Note, rec.Detail = store.StateRunning, "", ""
+		return r.runReading(context.Background(), rec)
 	}
 
 	log, err := NewLog(r.Store.LogPath(rec.ID), func(e Entry) {

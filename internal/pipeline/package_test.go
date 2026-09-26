@@ -235,7 +235,7 @@ func TestPackageIsBoundToTheMaster(t *testing.T) {
 		{Index: 4, Kind: store.KindSubtitle, Lang: "fra", Codec: "hdmv_pgs_subtitle"},
 	}
 
-	if err := bindToOriginal(pkg, original); err != nil {
+	if err := bindToOriginal(pkg, nil, original); err != nil {
 		t.Fatal(err)
 	}
 	var got []int
@@ -250,7 +250,7 @@ func TestPackageIsBoundToTheMaster(t *testing.T) {
 	}
 
 	missing := &store.Project{Items: []store.Item{{Kind: store.KindAudio, Lang: "jpn", Channels: 2, Label: "Japanese · Stereo"}}}
-	if err := bindToOriginal(missing, original); err == nil || !strings.Contains(err.Error(), "japanese") {
+	if err := bindToOriginal(missing, nil, original); err == nil || !strings.Contains(err.Error(), "japanese") {
 		t.Errorf("a track the original lacks was not reported: %v", err)
 	}
 }

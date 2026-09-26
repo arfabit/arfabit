@@ -66,6 +66,10 @@ const (
 
 	// KindConvert is a copy being turned into a film, with no disc involved.
 	KindConvert Kind = "convert"
+
+	// KindOCR is one subtitle track of an Original read into text, into
+	// the SRT beside it (§10).
+	KindOCR Kind = "ocr"
 )
 
 // Job is one piece of work: a disc on its way through the pipeline, or a set
@@ -116,6 +120,9 @@ type Job struct {
 	// were planned together. It waits for the copy, and does not start if
 	// the copy does not finish.
 	From string `json:"from,omitempty"`
+
+	// Reading is what an OCR task reads, and where it writes it.
+	Reading *Reading `json:"reading,omitempty"`
 
 	// Files produced, in the order they were made.
 	//
@@ -212,6 +219,10 @@ type Plan struct {
 	// them: what the original part of the Plan shows, and what its project
 	// is planned from.
 	Tracks []Track `json:"tracks,omitempty"`
+
+	// Read lists the subtitle tracks, by their number on the disc, to read
+	// into text once the disc is copied, each as an OCR task of its own.
+	Read []int `json:"read,omitempty"`
 
 	// Project is the film to make from the Original once the disc is copied,
 	// when Convert is on. It is a job of its own, planned here because this
@@ -405,4 +416,36 @@ type LowConfidence struct {
 	// Chosen is what they chose, now in the sidecar. Empty means left out.
 	Changed bool   `json:"changed,omitempty"`
 	Chosen  string `json:"chosen,omitempty"`
+}
+
+// Reading is one subtitle track of an Original, read into text by an OCR task
+// (§10).
+type Reading struct {
+	// Stream is the track's number in the Original, and Lang and Label say
+	// what it is.
+	Stream int    `json:"stream"`
+	Lang   string `json:"lang"`
+	Label  string `json:"label,omitempty"`
+
+	// SRT is the file it is read into, beside the Original: the one fixes
+	// are made to, and every film made from the Original gets a copy of.
+	SRT string `json:"srt"`
+
+	// Fine is set when a person has looked at the subtitles of low
+	// confidence and said they are fine as they are.
+	Fine bool `json:"fine,omitempty"`
+}
+
+// ToCheck reports whether an OCR task has subtitles of low confidence that
+// nobody has looked at yet.
+func (j *Job) ToCheck() bool {
+	if j.Kind != KindOCR || j.State != StateDone || j.Reading == nil || j.Reading.Fine {
+		return false
+	}
+	for _, l := range j.LowConfidence {
+		if !l.Changed {
+			return true
+		}
+	}
+	return false
 }

@@ -48,6 +48,14 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 	plan.Tracks = DiscTracks(title)
 	pkg := Recipe(plan.Tracks, blueprint, canRead)
 	plan.Project = &pkg
+
+	// The subtitles read with the copy start as those the film converts to
+	// text, and can be changed apart from it.
+	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
+		if it.Action == store.ActionConvert {
+			plan.Read = append(plan.Read, it.Source)
+		}
+	}
 	plan.Seconds = int(title.Duration.Seconds())
 	plan.Subtitles = planSubtitles(title, blueprint)
 

@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -977,5 +978,34 @@ func TestStateSaysWhetherSubtitlesCanBeRead(t *testing.T) {
 	}
 	if reply.OCR || !strings.Contains(reply.OCRNote, "cannot be read into text on this computer") {
 		t.Errorf("no reader: %+v", reply)
+	}
+}
+
+// Which subtitle tracks are read with the copy is chosen on the Plan, track
+// by track, and kept in the disc's order.
+func TestPlanChoosesSubtitlesToRead(t *testing.T) {
+	s := newTestServer(t)
+	job := &pipeline.Job{Job: &store.Job{
+		ID: "waiting", State: store.StateWaiting, Stage: store.StagePlan,
+		Plan: &store.Plan{Read: []int{7}, Tracks: []store.Track{
+			{Index: 0, Kind: store.KindVideo},
+			{Index: 7, Kind: store.KindSubtitle, Lang: "eng"},
+			{Index: 9, Kind: store.KindSubtitle, Lang: "eng"},
+		}},
+	}}
+	s.Runner.SetCurrentForTest(job)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/plan", strings.NewReader(`{"read":{"9":true,"0":true}}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if fmt.Sprint(job.Plan.Read) != "[7 9]" {
+		t.Errorf("read = %v, want [7 9]: the picture is not a subtitle track", job.Plan.Read)
+	}
+
+	s.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/plan", strings.NewReader(`{"read":{"7":false}}`)))
+	if fmt.Sprint(job.Plan.Read) != "[9]" {
+		t.Errorf("read = %v, want [9]", job.Plan.Read)
 	}
 }

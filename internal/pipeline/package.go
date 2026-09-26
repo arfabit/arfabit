@@ -195,6 +195,10 @@ func (r *Runner) StartProject(parent context.Context, req ProjectRequest) (*Job,
 	r.begin(job)
 	r.save(job)
 
+	// Subtitles the film converts to text are read from the original now,
+	// each as a task of its own, if they have not been already.
+	r.readMissing(parent, req.Original, film, req.Year, &pkg)
+
 	dirs := outputDirs{clips: req.ClipsDir, library: req.LibraryDir}
 	go func() {
 		defer cancel()
@@ -295,6 +299,14 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		if pkg.WholeFilm() {
 			job.Delivery = out
 			job.Stage = store.StageDeliver
+			r.save(job)
+			if note := r.takeSubtitles(ctx, job, OriginalTracks(info), out); note != "" {
+				notes = append(notes, note)
+			}
+			if ctx.Err() != nil {
+				r.stop(job, "Stopped at your request.", "")
+				return
+			}
 			if err := r.deliver(job, title, pkg.Edition); err != nil {
 				r.stop(job, "ARFABIT made the file but could not add it to your library's list.", err.Error())
 				return
@@ -452,6 +464,11 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		}
 	}
 
+	// A film takes its subtitles from beside its Original when it is
+	// delivered (takeSubtitles). A clip reads its own, from its piece.
+	if pkg.WholeFilm() {
+		return took, "", nil
+	}
 	note, err := r.readSubtitles(ctx, job, input, index, out)
 	return took, note, err
 }
@@ -562,15 +579,29 @@ func calibrationPlan(pkg *store.Project, info *ffmpeg.MediaInfo) *store.Plan {
 // and width, not yet taken. MakeMKV turns a disc's uncompressed sound into
 // FLAC, so failing an exact match, the same kind, language and width will do.
 // Lines made from one track — kept, and converted — stay on one track.
-func bindToOriginal(pkg *store.Project, tracks []Track) error {
+//
+// Subtitle tracks are found by their place among the disc's (bindSubtitles),
+// since a disc often has several in one language and format.
+func bindToOriginal(pkg *store.Project, disc, tracks []Track) error {
 	found := map[string]int{}
 	used := map[int]bool{}
+	subtitles := bindSubtitles(disc, tracks)
 
 	for i := range pkg.Items {
 		it := &pkg.Items[i]
 		key := fmt.Sprintf("%s:%d", it.Kind, it.Source)
 		if m, ok := found[key]; ok {
 			it.Source = m
+			continue
+		}
+		if m, ok := subtitles[it.Source]; ok && it.Kind == store.KindSubtitle && !used[m] {
+			used[m] = true
+			found[key] = m
+			for _, t := range tracks {
+				if t.Index == m {
+					it.Source, it.Codec = m, t.Codec
+				}
+			}
 			continue
 		}
 

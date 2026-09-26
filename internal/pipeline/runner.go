@@ -65,6 +65,10 @@ type Runner struct {
 	mu      sync.Mutex
 	pending *Job   // scanned, waiting for the user to say go
 	active  []*Job // being worked on
+
+	// readings are the OCR tasks running, by the track they read, so a film
+	// wanting that track's SRT can wait for it.
+	readings map[string]*Job
 }
 
 // TranscodeHold is how long a new Transcode waits before it may start.
@@ -91,6 +95,10 @@ type Job struct {
 	// ripped is closed when a rip is over, however it ended, so a transcode
 	// waiting on it can go on or give up. Nil for anything but a rip.
 	ripped chan struct{}
+
+	// read is closed when an OCR task is over, however it ended. Nil for
+	// anything else.
+	read chan struct{}
 }
 
 // Progress is how far the current stage has got.
@@ -440,7 +448,7 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 			r.stop(job, "ARFABIT could not read the original.", err.Error())
 			return
 		}
-		if err := bindToOriginal(job.Project, OriginalTracks(info)); err != nil {
+		if err := bindToOriginal(job.Project, rip.Plan.Tracks, OriginalTracks(info)); err != nil {
 			r.stop(job, sentence(err.Error())+". Nothing was made. The original is kept, so a film can be made from it in Projects.", "")
 			return
 		}
@@ -610,6 +618,10 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	}
 	job.Log.Printf(store.StageEject, "%s", job.Note)
 	r.save(job)
+
+	// Its subtitles are read from the original, each track a task of its
+	// own, while the film waits its turn at the processor.
+	r.readAfterCopy(ctx, job)
 	return nil
 }
 

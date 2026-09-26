@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -141,6 +142,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/log", s.handleLog)
 	mux.HandleFunc("GET /api/jobs/{id}/low-confidence/{n}/picture", s.handleLowConfidencePicture)
 	mux.HandleFunc("POST /api/jobs/{id}/low-confidence/{n}", s.handleChooseLowConfidence)
+	mux.HandleFunc("POST /api/jobs/{id}/fine", s.handleSubtitlesAreFine)
 
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("POST /api/start", s.handleStart)
@@ -219,16 +221,17 @@ type state struct {
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 	// Recent tasks are the ones that are over. Anything working or waiting
-	// is in the queue, and a disc waiting to be started is its Plan.
+	// is in the queue, and a disc waiting to be started is its Plan. Subtitles
+	// still to be checked stay in the list however long ago they were read,
+	// so a fix can always be found (§10).
 	all, _ := s.Store.AllJobs()
 	recent := []*store.Job{}
 	for _, job := range all {
 		if job.State != store.StateDone && job.State != store.StateStopped {
 			continue
 		}
-		recent = append(recent, job)
-		if len(recent) == 20 {
-			break
+		if len(recent) < 20 || job.ToCheck() {
+			recent = append(recent, job)
 		}
 	}
 
@@ -393,6 +396,7 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 	var change struct {
 		Audio     map[int]bool   `json:"audio"`
 		Subtitles map[int]bool   `json:"subtitles"`
+		Read      map[int]bool   `json:"read"`
 		Convert   *bool          `json:"convert"`
 		Edition   *string        `json:"edition"`
 		Project   *store.Project `json:"project"`
@@ -424,6 +428,22 @@ func (s *Server) handleUpdatePlan(w http.ResponseWriter, r *http.Request) {
 			job.Plan.Audio[i].Selected = selected
 		}
 	}
+	// Which subtitle tracks are read into text with the copy, by their
+	// number on the disc, in the disc's order.
+	if change.Read != nil {
+		var read []int
+		for _, t := range job.Plan.Tracks {
+			chosen, changed := change.Read[t.Index]
+			if !changed {
+				chosen = slices.Contains(job.Plan.Read, t.Index)
+			}
+			if chosen && t.Kind == store.KindSubtitle {
+				read = append(read, t.Index)
+			}
+		}
+		job.Plan.Read = read
+	}
+
 	for i := range job.Plan.Subtitles {
 		if selected, ok := change.Subtitles[job.Plan.Subtitles[i].SourceIndex]; ok {
 			job.Plan.Subtitles[i].Selected = selected

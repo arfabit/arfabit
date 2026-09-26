@@ -191,24 +191,24 @@ func (r *disagrees) Read(ctx context.Context, pictures []string, lang string) ([
 	return lines, err
 }
 
-// A subtitle of low confidence is listed on the job with both readings and
-// its picture; the sidecar keeps the first reading.
-func TestLowConfidenceIsListedOnTheJob(t *testing.T) {
+// A subtitle of low confidence is listed on its OCR task with both readings
+// and its picture; the SRT beside the original keeps the first reading.
+func TestLowConfidenceIsListedOnItsTask(t *testing.T) {
 	original := pgsMaster(t)
 	r := runnerWithFolders(t)
 	r.OCR = &disagrees{}
 
-	job := runPackageToEnd(t, r, ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
-		Project: store.Project{Items: convertSubtitles},
-	})
+	job := readToEnd(t, r, ReadingRequest{Original: original, Title: "Test Film", Year: 2026, Stream: 1})
 
+	srt := strings.TrimSuffix(original, ".mkv") + ".en.srt"
+	if job.Reading.SRT != srt || len(job.Sidecars) != 1 || job.Sidecars[0] != srt {
+		t.Errorf("read into %q, sidecars %v; want %s", job.Reading.SRT, job.Sidecars, srt)
+	}
 	if len(job.LowConfidence) != 1 {
 		t.Fatalf("low confidence = %+v, want one", job.LowConfidence)
 	}
 	l := job.LowConfidence[0]
-	if l.Text != "Line 2" || l.Fast != "Lime 2" || l.Start != 3500*time.Millisecond || l.Sidecar != job.Sidecars[0] {
+	if l.Text != "Line 2" || l.Fast != "Lime 2" || l.Start != 3500*time.Millisecond || l.Sidecar != srt {
 		t.Errorf("entry = %+v", l)
 	}
 	if _, err := os.Stat(l.Picture); err != nil {
@@ -217,9 +217,131 @@ func TestLowConfidenceIsListedOnTheJob(t *testing.T) {
 	if !strings.Contains(job.Note, "One subtitle has low confidence") {
 		t.Errorf("note = %q", job.Note)
 	}
-	data, _ := os.ReadFile(job.Sidecars[0])
+	if !job.ToCheck() {
+		t.Error("the task is not waiting to be checked")
+	}
+	data, _ := os.ReadFile(srt)
 	if !strings.Contains(string(data), "Line 2") {
-		t.Errorf("the sidecar does not hold the first reading:\n%s", data)
+		t.Errorf("the SRT does not hold the first reading:\n%s", data)
+	}
+
+	// Reading it again would replace it, so it is refused.
+	if _, err := r.StartReading(context.Background(), ReadingRequest{Original: original, Stream: 1}); err == nil {
+		t.Error("the track was read again over its SRT")
+	}
+}
+
+// readToEnd starts an OCR task and waits for it to end.
+func readToEnd(t *testing.T, r *Runner, req ReadingRequest) *Job {
+	t.Helper()
+	job, err := r.StartReading(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-job.read
+	waitUntilIdle(t, r)
+	if job.State != store.StateDone {
+		t.Fatalf("reading ended as %s: %s\n%s", job.State, job.Note, job.Detail)
+	}
+	return job
+}
+
+// A film takes the SRT beside its original as it is when the film is
+// delivered, fixes and all, and reads nothing itself.
+func TestFilmTakesTheOriginalsSRT(t *testing.T) {
+	original := pgsMaster(t)
+	r := runnerWithFolders(t)
+	r.OCR = readerFunc(func(context.Context, []string, string) ([]ocr.Line, error) {
+		t.Error("the film read subtitles that were already read")
+		return nil, nil
+	})
+	fixed := "1\n00:00:01,000 --> 00:00:02,000\nFixed by hand\n\n"
+	if err := os.WriteFile(strings.TrimSuffix(original, ".mkv")+".en.srt", []byte(fixed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026,
+		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Project: store.Project{Items: convertSubtitles},
+	})
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(job.Delivery), "Test Film (2026).en.srt"))
+	if err != nil || string(data) != fixed {
+		t.Errorf("the film's subtitles are %q (%v), want the original's", data, err)
+	}
+}
+
+// The SRT beside an original is named after it and the language; a second
+// picture track in the same language is numbered by its place.
+func TestSRTBesideTheOriginal(t *testing.T) {
+	tracks := []Track{
+		{Index: 0, Kind: store.KindVideo},
+		{Index: 3, Kind: store.KindSubtitle, Codec: pictureSubtitles, Lang: "eng"},
+		{Index: 4, Kind: store.KindSubtitle, Codec: pictureSubtitles, Lang: "fre"},
+		{Index: 5, Kind: store.KindSubtitle, Codec: pictureSubtitles, Lang: "eng"},
+		{Index: 6, Kind: store.KindSubtitle, Codec: "subrip", Lang: "eng"},
+	}
+	original := filepath.Join("lib", "Film (2020)", "Film (2020) {edition-Original}.mkv")
+	stem := strings.TrimSuffix(original, ".mkv")
+	for stream, want := range map[int]string{3: stem + ".en.srt", 4: stem + ".fr.srt", 5: stem + ".en.2.srt"} {
+		if got, err := srtFor(original, tracks, stream); err != nil || got != want {
+			t.Errorf("stream %d: %q, %v; want %q", stream, got, err, want)
+		}
+	}
+	for _, stream := range []int{0, 6, 9} {
+		if _, err := srtFor(original, tracks, stream); err == nil {
+			t.Errorf("stream %d was given an SRT to be read into", stream)
+		}
+	}
+}
+
+// A disc's subtitle tracks are found in its original by their place when
+// both hold as many, which tells two in one language apart; otherwise by
+// language, in order.
+func TestSubtitlesAreFoundInTheOriginal(t *testing.T) {
+	disc := []Track{
+		{Index: 2, Kind: store.KindAudio, Lang: "eng"},
+		{Index: 7, Kind: store.KindSubtitle, Lang: "eng"},
+		{Index: 9, Kind: store.KindSubtitle, Lang: "eng"},
+		{Index: 11, Kind: store.KindSubtitle, Lang: "fre"},
+	}
+	original := []Track{
+		{Index: 1, Kind: store.KindAudio, Lang: "eng"},
+		{Index: 3, Kind: store.KindSubtitle, Lang: "eng"},
+		{Index: 4, Kind: store.KindSubtitle, Lang: "eng"},
+		{Index: 5, Kind: store.KindSubtitle, Lang: "fre"},
+	}
+	if got := fmt.Sprint(bindSubtitles(disc, original)); got != fmt.Sprint(map[int]int{7: 3, 9: 4, 11: 5}) {
+		t.Errorf("by place: %s", got)
+	}
+	if got := fmt.Sprint(bindSubtitles(disc, original[:3])); got != fmt.Sprint(map[int]int{7: 3, 9: 4}) {
+		t.Errorf("by language: %s", got)
+	}
+}
+
+// Once a disc is copied, the subtitle tracks its Plan chose are each read as a
+// task of their own, from the original.
+func TestCopyReadsItsSubtitles(t *testing.T) {
+	original := pgsMaster(t)
+	r := runnerWithFolders(t)
+	r.OCR = &readsInOrder{}
+
+	copied := &Job{Job: store.NewJob("copy")}
+	copied.Log, _ = NewLog(r.Store.LogPath(copied.ID), nil)
+	copied.Title, copied.Original = "Test Film", original
+	copied.Plan = &store.Plan{
+		Tracks: []Track{{Index: 0, Kind: store.KindVideo}, {Index: 5, Kind: store.KindSubtitle, Lang: "eng"}},
+		Read:   []int{5},
+	}
+	r.readAfterCopy(context.Background(), copied)
+	waitUntilIdle(t, r)
+
+	jobs, _ := r.Store.Jobs()
+	if len(jobs) != 1 || jobs[0].Kind != store.KindOCR || jobs[0].From != "copy" || jobs[0].State != store.StateDone {
+		t.Fatalf("tasks = %+v", jobs)
+	}
+	if _, err := os.Stat(strings.TrimSuffix(original, ".mkv") + ".en.srt"); err != nil {
+		t.Errorf("no SRT beside the original: %v", err)
 	}
 }
 

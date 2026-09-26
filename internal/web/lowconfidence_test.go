@@ -1,6 +1,8 @@
 package web
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,4 +92,69 @@ func TestLowConfidencePicture(t *testing.T) {
 	if rec := get(t, s, "/api/jobs/job-1/low-confidence/0/picture"); rec.Code != http.StatusNotFound {
 		t.Errorf("a file outside the pictures was served: %d", rec.Code)
 	}
+}
+
+// "These are fine" marks an OCR task's subtitles as looked at, without
+// changing the SRT, and a task still to be checked stays in Recent tasks
+// however many have finished since.
+func TestSubtitlesCanBeMarkedFine(t *testing.T) {
+	s := newTestServer(t)
+	job, sidecar := lowConfidenceJob(t, s)
+	job.Kind, job.Reading = store.KindOCR, &store.Reading{Stream: 3, Lang: "eng", SRT: sidecar}
+	job.Started = time.Now().Add(-time.Hour)
+	if err := s.Store.SaveJob(job); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 25 {
+		later := &store.Job{ID: fmt.Sprintf("later-%02d", i), State: store.StateDone, Started: time.Now()}
+		if err := s.Store.SaveJob(later); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listed := func() bool {
+		var reply struct {
+			Recent []store.Job `json:"recent"`
+		}
+		if err := json.Unmarshal(get(t, s, "/api/state").Body.Bytes(), &reply); err != nil {
+			t.Fatal(err)
+		}
+		for _, j := range reply.Recent {
+			if j.ID == job.ID {
+				return true
+			}
+		}
+		return false
+	}
+	if !listed() {
+		t.Error("subtitles still to be checked scrolled out of Recent tasks")
+	}
+
+	before, _ := os.ReadFile(sidecar)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/jobs/job-1/fine", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	saved, _ := s.Store.LoadJob("job-1")
+	if saved.ToCheck() || !saved.Reading.Fine {
+		t.Error("the task is still waiting to be checked")
+	}
+	if after, _ := os.ReadFile(sidecar); string(after) != string(before) {
+		t.Error("the SRT changed")
+	}
+	if listed() {
+		t.Error("a task with nothing left to check is still kept in Recent tasks")
+	}
+
+	if rec := post(t, s, "/api/jobs/later-00/fine", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("a task that read nothing was marked fine: %d", rec.Code)
+	}
+}
+
+func post(t *testing.T, s *Server, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+	return rec
 }

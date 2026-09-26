@@ -100,6 +100,7 @@ const plan = {
     { source_index: 4, lang: "fra", channels: 6, label: "French · 5.1", selected: false },
   ],
   convert: true,
+  read: [7],
   tracks: [
     { index: 0, kind: "video", codec: "h264", height: 1080, label: "H.264 · 1080p" },
     { index: 1, kind: "audio", codec: "dts", lang: "eng", channels: 8, lossless: true, label: "English · 7.1 · DTS-HD Master Audio · lossless" },
@@ -127,6 +128,7 @@ const plan = {
 const answers = {
   "/api/state": {
     node_name: "test",
+    ocr: true,
     now: new Date().toISOString(),
     line: ["queued-job", "queued-disc"],
     drive_busy: "",
@@ -167,6 +169,11 @@ const answers = {
       progress: { operation: "Waiting for a turn", since: new Date().toISOString() },
     }],
     recent: [
+      { id: "o", kind: "ocr", state: "done", stage: "OCR", title: "Blade Runner", year: 1982, started: new Date().toISOString(),
+        original: "/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Original}.mkv",
+        reading: { stream: 3, lang: "eng", srt: "/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Original}.en.srt" },
+        sidecars: ["/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Original}.en.srt"],
+        low_confidence: [{ sidecar: "x.srt", start: 61000000000, end: 62000000000, text: "|t was", fast: "It was", picture: "/p.png" }] },
       { id: "p", kind: "convert", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982,
         made: ["/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Archive}.mkv"], started: new Date().toISOString() },
       { id: "a", state: "done", stage: "DELIVER", title: "Blade Runner", year: 1982, original: "/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Original}.mkv", started: new Date().toISOString(),

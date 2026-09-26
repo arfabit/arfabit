@@ -47,7 +47,7 @@ Three places where a bug is silent rather than loud:
 
 - **HDR metadata propagation (§9)** — wrong output, no error, looks like a disc problem.
 - **Reading subtitles (§10)** — a line read wrong still looks like a line. Lines of
-  low confidence are listed on the job and in the log, never passed off as read.
+  low confidence are listed on the task and in the log, never passed off as read.
 - **Atomic file writes (§6)** — a partial write to shared state is invisible until read.
 
 ---
@@ -83,7 +83,7 @@ These words are used consistently in code, UI, and logs. No synonyms.
 | **Delivery**  | The finished `.mkv` plus its sidecar subtitles.                          |
 | **Low confidence** | A subtitle OCR may have read wrong: nothing was read, what was read holds a mark known to be a misreading, or a second reading says other words. ARFABIT's own measure; no reader's score goes into it (§10). |
 | **Edition**   | A Plan's version name, written as `{edition-...}` in the Delivery's filename. Plex's word. Blank means none. |
-| **Task**      | One step a project becomes, in the queue: a copy of a disc to its Original, or a package (a film) or a clip made from an Original. A film planned with its disc is a task of its own that waits for the copy. In code, and in the files on disk, a **job**. |
+| **Task**      | One step a project becomes, in the queue: a copy of a disc to its Original, one subtitle track of an Original read into text (OCR), or a package (a film) or a clip made from an Original. A film planned with its disc is a task of its own that waits for the copy. In code, and in the files on disk, a **job**. |
 | **Library**   | Where originals and Deliveries land, one folder per film, in Plex layout (§6). |
 
 ### What waits on what
@@ -106,15 +106,24 @@ drive never idles, and the processor works through a queue behind it.
 ### Pipeline stages
 
 ```
-rip:        SCAN  →  PLAN  →  RIP  →  EJECT
-transcode:                               QUEUED  →  PACKAGE  →  OCR  →  DELIVER
+copy:       SCAN  →  PLAN  →  RIP  →  EJECT          the original, renamed into place
+OCR:                                    OCR           one task per chosen subtitle track
+package:                                QUEUED  →  PACKAGE  →  DELIVER
 ```
 
 Stage names appear verbatim in the logs and on the page.
 
-**OCR comes after PACKAGE.** Subtitles are read into text once the file is made,
-which takes a minute or two for a film. A problem reading them never costs the
-film: it is still delivered, and the job says what happened (§10).
+**Copy includes OCR.** Once the disc is copied, each subtitle track the Plan
+chose is read into text from the original, as a task of its own at stage OCR,
+into the SRT beside the original (§10). Reading takes a minute or two and
+little processor, so an OCR task takes no processor slot, and any number run
+at once. A problem reading them never costs the film: it is still delivered,
+and the task says what happened.
+
+**A package takes the original's SRTs at DELIVER,** not before, so a fix made
+while it was converting is in the film. A converted subtitle line item names
+its track; if that track is still being read, DELIVER waits for it, and if
+nobody has read it, it is read then.
 
 **A disc is two jobs.** The rip makes the Original and ends when the disc is out.
 If the Plan asked for a transcode, pressing Start also makes a second job, which
@@ -210,7 +219,8 @@ arfabit/
       runner.go                SCAN → DELIVER for a disc
       plan.go  audio.go        Plan construction, audio track rules
       package.go               package jobs: clips and whole-Original Deliveries, from line items
-      subtitles.go             OCR stage: subtitle line items read into SRT, sidecars
+      reading.go               OCR tasks: a track of an original read into the SRT beside it
+      subtitles.go             a track read into SRT, with low confidence; a clip's own subtitles
       recipe.go                blueprints as recipes; an Original's or a disc's tracks
     playback/                  what was tested to play where (§4), as notes
       slots.go                 processor slots (QUEUED)
@@ -289,8 +299,9 @@ an edition of its own, `Original`, so to Plex it is one more version of the film
   library/
     Blade Runner (1982)/
       Blade Runner (1982) {edition-Original}.mkv      # the original
+      Blade Runner (1982) {edition-Original}.en.srt   # its subtitles read into text (§10)
       Blade Runner (1982).mkv                         # a film, no edition
-      Blade Runner (1982).en.srt                      # subtitles read into text (§10)
+      Blade Runner (1982).en.srt                      # a copy of them
       Blade Runner (1982) {edition-Small}.mkv         # a film, edition "Small"
   clips/
     Blade Runner (1982)/
@@ -333,8 +344,23 @@ with several editions to play in turn. The run number comes from what is already
 the folder, so it survives restarts.
 Sidecar names match the video filename exactly, which is what Plex requires;
 `.sdh` and `.forced` are flags Plex understands, which ARFABIT does not set yet
-because it does not yet tell those tracks apart (Appendix A). One sidecar is made
-per language, so only one track of each language can be read into text.
+because it does not yet tell those tracks apart (Appendix A).
+
+**The SRT beside the original is the SRT.** OCR writes it there, fixes are
+made to it, and every film made from that original gets a copy (§10). Before
+removing an original, make sure its SRTs are where you want them: once it is
+gone, that film's subtitles cannot be read or fixed again from their
+pictures. The pictures of low-confidence subtitles are kept in the node's own
+folder (`nodes/<id>/ocr/<task>/`), so they can still be shown after an
+original is removed.
+
+Any number of tracks in one language can be read beside an original. The
+first picture track of a language, in the order the original holds them,
+gets the plain name (`.en.srt`); the second and after are numbered by their
+place (`.en.2.srt`, `.en.3.srt`). Whether Plex reads a language from a name
+like `.en.2.srt` is untested. A film still gets one SRT per language, named
+after the film (`.en.srt`), so only one track of each language can go into
+one film as text.
 
 ---
 
@@ -753,11 +779,18 @@ six times ("wondertul", "torce", "shitt"), a dropped "I" three times, "out" for
 "papenNork") and two are unclear. The Windows and Tesseract readers have not
 been run on real subtitles yet.
 
-**When.** Subtitle line items set to convert (to `srt`) are read as stage OCR, in
-their package job, once the file is made (§2). If they cannot be read — a
-language the reader does not have, or anything else — the film is delivered all
-the same, and the job's note and log say so. Only one track per language can be
-converted, since each becomes a file named by its language.
+**When.** Reading is a task of its own, stage OCR, one per subtitle track, read
+from the original into the SRT beside it (§2, §6). A disc's Plan says which of
+its picture subtitle tracks to read: at first those its film converts to text,
+and any can be ticked or unticked. Once the disc is copied, each chosen track,
+and each its film converts, is read. A film made later from an original, in
+Projects, starts an OCR task for any track it converts that has no SRT yet. A
+track is never read over an SRT already there.
+
+A film takes a copy of the original's SRT for each subtitle line item it
+converts to text, at DELIVER (§2). If a track cannot be read — a language the
+reader does not have, or anything else — the film is delivered all the same,
+without it, and the note says why.
 
 **How a track is read.**
 
@@ -785,32 +818,40 @@ converted, since each becomes a file named by its language.
    gets those wrong all the time. Windows and Tesseract have no second reading,
    so there only the first two apply.
 6. Every line is kept as read, never corrected (§15). Each subtitle of low
-   confidence is listed on the job with both readings and its picture, kept in
-   the node's own folder (`nodes/<id>/ocr/<job>/`), and in the log with its time;
-   the job's note says how many there are. A subtitle with nothing read is left
-   out of the SRT.
-7. The SRT is written beside the file as a sidecar, named after it and the
-   language (`Film (2020).en.srt`), for a clip as for a film. A file already there
-   with that name is not replaced: that is checked before anything is made.
+   confidence is listed on the task with both readings and its picture, kept in
+   the node's own folder (`nodes/<id>/ocr/<task>/`), and in the log with its
+   time; the task's note says how many there are. A subtitle with nothing read
+   is left out of the SRT.
+7. The SRT is written beside the original, named after it and the language
+   (§6), or beside a clip, named after the clip. A file already there with that
+   name is not replaced: that is checked before anything is read.
 
-**Clips.** A clip's subtitles are read from the piece cut for it, not from the
-Original, and trimmed to its length. A piece copied from the Original starts at the
-keyframe before the time asked for, so shifting the Original's times by that time
-would put every line early by up to the gap between keyframes. The piece is on
-the same clock as the clip.
+**Clips.** A clip reads its own subtitles, in its own task, from the piece cut
+for it, trimmed to its length; it does not take lines from the original's SRT.
+A piece copied from the Original starts at the keyframe before the time asked
+for, so shifting the Original's times by that time would put every line early
+by up to the gap between keyframes; the piece is on the same clock as the clip,
+which `TestClipSubtitlesKeepTimeWithThePicture` checks (3.2 s asked for, the
+piece starting at 3.0 s). Taking lines from the original's SRT instead would
+need the piece's true start found for every clip, and a clip is made to judge
+settings, not to keep; reading its few lines again costs seconds.
 
 **Blueprints.** A Blu-ray's picture subtitles are converted to text wherever the
 computer can read them, unless the blueprint says `keep_subtitle_pictures`. Where
 it cannot, they are copied, and the line says why.
 
-**Checking them.** A finished task lists its subtitles of low confidence under
-Tasks, each with its time and picture. Where there were two readings, the choice is
+**Checking them.** Every OCR task has a tag in Recent tasks: **green** when
+none of its subtitles has low confidence, or somebody has looked at them;
+**yellow** while some have low confidence and nobody has; **red** when reading
+did not finish. A yellow task stays in Recent tasks however long ago it ran,
+so a fix can always be found. Its subtitles of low confidence are listed, each
+with its time and picture. Where there were two readings, the choice is
 Accurate, Fast or Custom; otherwise it is the line as read, or Custom. Picking a
-reading writes it into the sidecar at once; Custom opens a box filled with
-whichever was picked last, to change and save. Only that subtitle in the sidecar
+reading writes it into the SRT beside the original at once; Custom opens a box
+filled with whichever was picked last, to change and save. Only that subtitle
 changes, and an empty Custom takes it out. Nothing is changed until somebody
-chooses, and the file inside the MKV is never touched, since subtitles read into
-text are only ever sidecars.
+chooses. **These are fine** turns the task green without going line by line,
+and changes nothing. A clip's subtitles are checked the same way, in its SRT.
 
 Not built: a context pass over what was read; telling SDH and forced tracks apart;
 DVD subtitles.
@@ -951,10 +992,13 @@ before each file is written, since a job can wait in the line for hours.
 
 ### Recent tasks
 
-The last twenty tasks of every kind, labelled Copy, Package or Clip, with what each
-became, when, and the names of the files it made: a copy's original, a package's film
-or clip. Anything that can be started again says so. The folders are the record of
-what exists; this is the record of what was done.
+The last twenty tasks of every kind, labelled Copy, OCR, Package or Clip, with
+what each became, when, and the names of the files it made: a copy's original,
+an OCR task's SRT, a package's film or clip. The label's colour says how it
+ended, and an OCR task's says whether its subtitles are still to be checked
+(§10); one that is stays in the list, beyond the twenty. Anything that can be
+started again says so. The folders are the record of what exists; this is the
+record of what was done.
 
 ### The queue
 
@@ -1063,7 +1107,7 @@ nothing in the UI presents a scary choice. Word substitutions:
 
 ## 16. What is built
 
-**Working today.** SCAN, PLAN, RIP, EJECT, OCR, PACKAGE, DELIVER, running end to end
+**Working today.** SCAN, PLAN, RIP, EJECT, OCR, QUEUED, PACKAGE, DELIVER, running end to end
 from the web page on one machine, with a queue for the processor, optional
 blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
 
@@ -1088,10 +1132,11 @@ blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
 | Doctor | built |
 | Autostart on all three platforms | built |
 | Eject on all three platforms | built |
-| Subtitles read into text by the computer's own reader, as sidecars, with low confidence listed (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
+| Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 
-**Subtitles.** A Project converts a Blu-ray's picture subtitles to SRT on macOS,
-on Windows, and wherever Tesseract is installed (§10), once the file is made.
+**Subtitles.** A Blu-ray's picture subtitles are read into SRT on macOS, on
+Windows, and wherever Tesseract is installed (§10), as tasks of their own once
+a disc is copied, and films take a copy.
 A disc's Plan made before projects still logs that its subtitles are not read.
 
 **Known shortcuts.**
@@ -1152,70 +1197,25 @@ reading subtitles means making a film, and fixes live under a task that scrolls
 out of Recent tasks. Both are what this changes.
 
 Built so far, and folded into the sections they belong to: the words Original,
-Project and Task (§2), and originals kept beside their films (§6).
+Project and Task (§2); originals kept beside their films, and their SRTs (§6);
+OCR as tasks of their own after the copy, films taking the SRTs at DELIVER,
+and tags on OCR tasks (§2, §10, §14).
 
-Stage names are unchanged: `SCAN PLAN RIP EJECT QUEUED PACKAGE OCR DELIVER`, plus
-`LAB`. OCR moves (below). The task list grows an OCR task.
+### Planning while copying
 
-### Subtitle files
-
-```
-Blade Runner (1982)/
-    Blade Runner (1982) {edition-Original}.mkv
-    Blade Runner (1982) {edition-Original}.en.srt   ← the SRT: the one that is fixed
-    Blade Runner (1982).mkv
-    Blade Runner (1982).en.srt                      ← a copy
-```
-
-- **The SRT beside the original is the SRT.** OCR writes it there, fixes are made
-  to it, and every film made from that original gets a copy. Before removing an
-  original, the user makes sure its SRTs are where they want them: once it is
-  gone, that film's subtitles cannot be read or fixed again from their pictures.
-- The pictures of low-confidence subtitles stay in the node's own folder
-  (`nodes/<id>/ocr/`), as now, so they can still be shown after an original is
-  removed.
-- A second track in the same language beside the original needs its own name
-  (say `.en.2.srt`); a film still gets one SRT per language. To settle when built.
-
-### The pipeline
-
-```
-Disc in → SCAN → PLAN → RIP → EJECT                    the original, renamed into place
-                           → OCR, one task per chosen subtitle track, from the original
-                           → QUEUED → PACKAGE → DELIVER, taking the SRTs at the last moment
-```
-
-- **Copy includes OCR.** Once RIP ends, each chosen subtitle track is read from the
-  original, as its own task. OCR takes a minute or two and little processor, so
-  it takes no processor slot and has no limit on how many run.
-- **A package takes the original's SRTs at DELIVER,** not before, so a fix made
-  while it was converting is in the film. A package remembers which of the
-  original's SRTs it wanted: a converted subtitle line item already names its
-  track.
 - **Each step stays editable until it starts.** The copy can start the moment a
   disc goes in, with the plan changed while it runs: SCAN already knows every
   track before copying, and a transcode already waits for its rip.
-- A clip's subtitles: taking them from the original's SRT needs the exact start
-  of the clip's piece, the keyframe before the time asked for (§10, "Clips").
-  Find it with ffprobe and test it against the 3.2 s → 3.0 s case, or keep
-  reading clips from their piece. To settle when built.
 
 ### Fixing after the fact
 
-- Every OCR task has a tag in Recent tasks: **green** for no low-confidence
-  subtitles, or marked fine by the user; **yellow** for low-confidence subtitles
-  not yet marked fine; **red** if reading did not finish. A button, "These are
-  fine", turns it green without going line by line.
-- Choosing a reading (Accurate, Fast or Custom, as in §10) changes the SRT beside
-  the original.
-- **Copies are then out of date.** When ARFABIT writes a copy, it records its
-  SHA-256. To bring a copy up to date it hashes the file again: if it is still
-  exactly what ARFABIT wrote, nobody has changed it, and it is replaced whole
-  (written aside and renamed into place). If not, it is left alone and the
-  project says the copy is out of date and was changed by someone else. This is
-  the only file ARFABIT replaces, and only on that proof.
-- Fixes need to be findable long after: yellow OCR tasks must not scroll out of
-  sight the way Recent tasks do today.
+- **Copies are out of date once the original's SRT is fixed.** When ARFABIT
+  writes a copy, it records its SHA-256. To bring a copy up to date it hashes
+  the file again: if it is still exactly what ARFABIT wrote, nobody has changed
+  it, and it is replaced whole (written aside and renamed into place). If not,
+  it is left alone and the project says the copy is out of date and was
+  changed by someone else. This is the only file ARFABIT replaces, and only on
+  that proof.
 
 ### The page (replaces §14's sections)
 

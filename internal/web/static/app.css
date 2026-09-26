@@ -380,6 +380,7 @@ body.dragging-something { user-select: none; -webkit-user-select: none; cursor: 
 /* How a task ended, on its label. The words beside it say the same. */
 .tag.task-done { color: var(--ok); border-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
 .tag.task-resumable { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.tag.task-check { color: var(--warn); border-color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .tag.task-failed { color: var(--bad); border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
 .spare-count { display: inline-block; min-width: 2.2ch; margin-right: 0.5rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .spare-count.used { color: var(--accent); font-weight: 600; }

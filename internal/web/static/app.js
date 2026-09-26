@@ -452,6 +452,7 @@ function renderOriginal(plan) {
       box.append(heading, ...items.map((t) => {
         const line = document.createElement("div");
         line.className = "small";
+        line.dataset.track = String(t.index);
         line.append(...titleOf(describe(t), t));
         return line;
       }));
@@ -466,8 +467,38 @@ function renderOriginal(plan) {
 
   if (sound.length) $("original-audio").replaceChildren(...byLanguage(sound, rest));
   else $("original-audio").textContent = "None on this disc.";
-  if (subs.length) $("original-subs").replaceChildren(...byLanguage(subs, rest));
+  if (subs.length) $("original-subs").replaceChildren(...byLanguage(subs, rest), ...readingNote(subs));
   else $("original-subs").textContent = "None on this disc.";
+
+  // A Blu-ray's picture subtitles can be read into text once the disc is
+  // copied, each track a task of its own. Ticking one is all it takes.
+  const read = new Set(plan.read || []);
+  for (const line of $("original-subs").querySelectorAll("[data-track]")) {
+    const track = subs.find((t) => String(t.index) === line.dataset.track);
+    if (!track || track.codec !== "hdmv_pgs_subtitle" || !subtitleReading.ocr) continue;
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = read.has(track.index);
+    box.title = "Read into text once the disc is copied";
+    box.addEventListener("change", () =>
+      post("/api/plan", { read: { [track.index]: box.checked } }).then(() => refresh()));
+    const label = document.createElement("label");
+    label.className = "inline small";
+    label.append(box, document.createTextNode(" Read into text"));
+    line.append(" ", label);
+  }
+}
+
+// readingNote says what ticking a subtitle track does, or why it cannot be
+// ticked here.
+function readingNote(subs) {
+  if (!subs.some((t) => t.codec === "hdmv_pgs_subtitle")) return [];
+  const p = document.createElement("p");
+  p.className = "muted small";
+  p.textContent = subtitleReading.ocr
+    ? "Those ticked are read into text from the original once the disc is copied, and kept beside it."
+    : subtitleReading.note;
+  return [p];
 }
 
 function renderPlan(job, existing = []) {
@@ -611,6 +642,7 @@ function elapsedText(start) {
 function kindOf(job) {
   if (job.stage === "QUEUED") return "waiting";
   if (job.stage === "LAB") return "lab";
+  if (job.kind === "ocr") return "reading";
 
   switch (job.stage) {
     case "SCAN":
@@ -627,6 +659,7 @@ const KINDS = [
   ["rip", (n) => `${n} disc${n === 1 ? "" : "s"} being read`],
   ["convert", (n) => `${n} converting`],
   ["lab", (n) => `${n} making test clips`],
+  ["reading", (n) => `${n} reading subtitles`],
   ["waiting", (n) => `${n} waiting their turn`],
 ];
 
@@ -1199,6 +1232,7 @@ let recentDrawn = "";
 // taskKind names what a task was.
 function taskKind(job) {
   if (job.kind === "lab") return "Clip";
+  if (job.kind === "ocr") return "OCR";
   if (job.kind === "convert") return "Package";
   return "Copy";
 }
@@ -1210,10 +1244,24 @@ function taskKind(job) {
 // can be started again, one that did not finish and has the output to show
 // why, and one stopped on purpose or by a restart with nothing to resume.
 function taskOutcome(job) {
+  // Reading subtitles: green once read and nothing is left to look at,
+  // yellow while some have low confidence, red if reading did not finish.
+  if (job.kind === "ocr") {
+    if (job.state !== "done") return ["failed", "Did not finish"];
+    if (toCheck(job)) return ["check", "Some subtitles have low confidence"];
+    return ["done", "Read"];
+  }
   if (job.state === "done") return ["done", "Finished"];
   if (resumable[job.id]) return ["resumable", "Did not finish, and can be started again"];
   if (job.detail) return ["failed", "Did not finish"];
   return ["stopped", "Stopped"];
+}
+
+// toCheck reports whether an OCR task has subtitles of low confidence nobody
+// has looked at yet.
+function toCheck(job) {
+  return job.kind === "ocr" && job.state === "done" && !(job.reading && job.reading.fine)
+    && (job.low_confidence || []).some((l) => !l.changed);
 }
 
 // madeBy is the files a task made: a copy's original, or a package's files.
@@ -1292,6 +1340,19 @@ function recentDetail(job) {
 
   // Subtitles OCR may have read wrong, to check against their pictures.
   if ((job.low_confidence || []).length) body.append(lowConfidenceList(job));
+
+  // Looking at every one is not the only way to be done with them.
+  if (toCheck(job)) {
+    const fine = document.createElement("button");
+    fine.textContent = "These are fine";
+    fine.title = "Leave the subtitles as they were read";
+    fine.addEventListener("click", async (e) => {
+      const result = await busy(e.target, "Saving\u2026", "Saved", () =>
+        post(`/api/jobs/${encodeURIComponent(job.id)}/fine`));
+      if (result) refresh();
+    });
+    body.append(fine);
+  }
 
   // How the copy went. Worth seeing because a drive that slows down half way
   // through looks just like a slow drive from the average alone.
@@ -1715,6 +1776,7 @@ async function fillProject() {
 
 function renderProject() {
   const box = $("project-editor");
+  if (pkg) pkg.length = Number($("lab-length").value) * 1e9;
   if (!pkg) {
     box.replaceChildren();
     describeProject();
@@ -1976,7 +2038,9 @@ function itemRow(item, position, tracks, pkg, changed, rows, kind) {
     notes.push(subtitleReading.note);
   }
   if (item.action === "convert" && kind === "subtitle") {
-    notes.push("Read into text once the file is made, and kept beside it as an SRT file. Lines of low confidence are listed in the task's log.");
+    notes.push(pkg.length
+      ? "Read into text once the clip is made, and kept beside it as an SRT file."
+      : "Read into text from the original, as a task of its own, and kept beside it. The film gets a copy when it is finished, fixes and all.");
   }
   if (item.action === "convert" && kind === "audio" && !track.lossless) {
     notes.push(track.note
@@ -2858,7 +2922,7 @@ function wireButtons() {
 
   on("lab-length", "change", () => {
     rememberStretch();
-    describeProject();
+    renderProject();
   });
 
   on("lab-at", "input", rememberStretch);

@@ -109,6 +109,33 @@ func (s *Server) handleChooseLowConfidence(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, map[string]any{"chosen": text})
 }
 
+// handleSubtitlesAreFine marks an OCR task's subtitles of low confidence as
+// looked at and fine as they are, without going through them one by one.
+// Nothing in the SRT changes.
+func (s *Server) handleSubtitlesAreFine(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" || strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	job, err := s.Store.LoadJob(id)
+	if err != nil || job.Kind != store.KindOCR || job.Reading == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if job.State != store.StateDone {
+		writeError(w, "Subtitles can be marked fine once they are read.", nil)
+		return
+	}
+	job.Reading.Fine = true
+	if err := s.Store.SaveJob(job); err != nil {
+		writeError(w, "ARFABIT could not note that on the task.", err)
+		return
+	}
+	s.events.send("job", map[string]string{"id": job.ID})
+	writeJSON(w, map[string]bool{"fine": true})
+}
+
 // replaceFile writes a file whole under another name and renames it into
 // place, so it is never seen half written.
 func replaceFile(path string, data []byte) error {

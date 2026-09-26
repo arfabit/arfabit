@@ -35,7 +35,7 @@ func sidecarPaths(pkg *store.Project, out string) map[int]string {
 	return paths
 }
 
-// readSubtitles reads a Project's converted subtitle tracks into SRT files
+// readSubtitles reads a clip's converted subtitle tracks into SRT files
 // beside out, as stage OCR, once the file is made. It reads them from input,
 // the file the Project was made from: a clip's piece starts where the clip
 // does, so its subtitles need only trimming to its length. (A copied piece
@@ -94,58 +94,67 @@ func (r *Runner) readSubtitles(ctx context.Context, job *Job, input string, inde
 		low += found
 	}
 
-	switch {
-	case low == 1:
-		notes = append(notes, "One subtitle has low confidence; the log says which.")
-	case low > 1:
-		notes = append(notes, fmt.Sprintf("%d subtitles have low confidence; the log lists them.", low))
+	if note := lowConfidenceNote(low); note != "" {
+		notes = append(notes, note)
 	}
 	return strings.Join(notes, " "), nil
 }
 
-// readTrack reads one subtitle track into its sidecar, and lists and keeps
-// the pictures of its subtitles of low confidence. It returns how many there
-// are.
+// readTrack reads one of a clip's subtitle tracks into its sidecar, and
+// lists and keeps the pictures of its subtitles of low confidence. It returns
+// how many there are.
 func (r *Runner) readTrack(ctx context.Context, job *Job, it store.Item, input string, index func(int) int, sidecar string, progress func(done, total int)) (int, error) {
-	if r.OCR == nil {
-		return 0, errors.New(ocr.NotAvailable)
+	read, low, err := r.readInto(ctx, job, input, index(it.Source), it.Lang, job.Project.Length, sidecar, it.Source, progress)
+	if err == nil && read == 0 {
+		job.Log.Printf(store.StageOCR, "No text was read from the %s subtitles, so there is no subtitle file for them.", languageName(it.Lang))
 	}
-	name := languageName(it.Lang)
+	return low, err
+}
 
-	subtitles, err := subs.ReadTrack(ctx, input, index(it.Source))
-	if err != nil {
-		return 0, err
+// readInto reads one subtitle track of input, the stream numbered stream, into
+// the SRT file srt, and lists and keeps on the job the pictures of its
+// subtitles of low confidence (§10). A length other than zero trims the lines
+// to a clip's. key names the pictures kept. It returns how many subtitles are
+// in the SRT, and how many of them have low confidence; with none read, there
+// is no SRT.
+func (r *Runner) readInto(ctx context.Context, job *Job, input string, stream int, lang string, length time.Duration, srt string, key int, progress func(done, total int)) (read, low int, err error) {
+	if r.OCR == nil {
+		return 0, 0, errors.New(ocr.NotAvailable)
 	}
-	result, err := ocr.ReadSubtitles(ctx, r.OCR, subtitles, it.Lang, "", progress)
+	name := languageName(lang)
+
+	subtitles, err := subs.ReadTrack(ctx, input, stream)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+	result, err := ocr.ReadSubtitles(ctx, r.OCR, subtitles, lang, "", progress)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	cues := result.Cues
-	if !job.Project.WholeFilm() {
-		cues = ocr.Trim(cues, job.Project.Length)
+	if length > 0 {
+		cues = ocr.Trim(cues, length)
 	}
 	if len(cues) == 0 {
-		job.Log.Printf(store.StageOCR, "No text was read from the %s subtitles, so there is no subtitle file for them.", name)
-		return 0, nil
+		return 0, 0, nil
 	}
-	if err := writeSidecar(job, sidecar, []byte(subs.WriteSRT(cues))); err != nil {
-		return 0, err
+	if err := writeSidecar(job, srt, []byte(subs.WriteSRT(cues))); err != nil {
+		return 0, 0, err
 	}
-	job.Sidecars = append(job.Sidecars, sidecar)
-	job.Log.Printf(store.StageOCR, "Read %d %s subtitles into %s.", len(cues), name, filepath.Base(sidecar))
+	job.Sidecars = append(job.Sidecars, srt)
+	job.Log.Printf(store.StageOCR, "Read %d %s subtitles into %s.", len(cues), name, filepath.Base(srt))
 
-	found := 0
 	for _, l := range result.LowConfidence {
-		if !job.Project.WholeFilm() && l.Start >= job.Project.Length {
+		if length > 0 && l.Start >= length {
 			continue
 		}
-		found++
-		entry := store.LowConfidence{Sidecar: sidecar, Start: l.Start, End: l.End, Text: l.Text, Fast: l.Fast}
+		low++
+		entry := store.LowConfidence{Sidecar: srt, Start: l.Start, End: l.End, Text: l.Text, Fast: l.Fast}
 
 		var picture bytes.Buffer
 		if err := png.Encode(&picture, subtitles[l.Index].Image); err == nil {
-			file := fmt.Sprintf("%d-%05d.png", it.Source, l.Index)
+			file := fmt.Sprintf("%d-%05d.png", key, l.Index)
 			if path, err := r.Store.SavePicture(job.ID, file, picture.Bytes()); err == nil {
 				entry.Picture = path
 			}
@@ -158,7 +167,19 @@ func (r *Runner) readTrack(ctx context.Context, job *Job, it store.Item, input s
 			job.Log.Printf(store.StageOCR, "Low confidence in the %s subtitles at %s: %q", name, clock(l.Start), l.Text)
 		}
 	}
-	return found, nil
+	return len(cues), low, nil
+}
+
+// lowConfidenceNote says how many subtitles have low confidence, for a job's
+// note.
+func lowConfidenceNote(low int) string {
+	switch {
+	case low == 1:
+		return "One subtitle has low confidence; the log says which."
+	case low > 1:
+		return fmt.Sprintf("%d subtitles have low confidence; the log lists them.", low)
+	}
+	return ""
 }
 
 // writeSidecar writes an SRT beside the file it belongs to: whole, under a
