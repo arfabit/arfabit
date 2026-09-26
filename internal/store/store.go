@@ -98,31 +98,11 @@ func (s *Store) LoadJob(id string) (*Job, error) {
 	return j, nil
 }
 
-// readJob reads a job record, including one written before an Original was
-// called a master and a Project a package: those words are only moved to
-// where they are now kept.
+// readJob reads a job record.
 func readJob(data []byte) (*Job, error) {
 	var j Job
 	if err := json.Unmarshal(data, &j); err != nil {
 		return nil, err
-	}
-	var before struct {
-		Master  string   `json:"master"`
-		Package *Project `json:"package"`
-		Plan    *struct {
-			Package *Project `json:"package"`
-		} `json:"plan"`
-	}
-	if json.Unmarshal(data, &before) == nil {
-		if j.Original == "" {
-			j.Original = before.Master
-		}
-		if j.Project == nil {
-			j.Project = before.Package
-		}
-		if j.Plan != nil && j.Plan.Project == nil && before.Plan != nil {
-			j.Plan.Project = before.Plan.Package
-		}
 	}
 	return &j, nil
 }

@@ -16,7 +16,6 @@ func runnerWithFolders(t *testing.T) *Runner {
 	t.Helper()
 	root := t.TempDir()
 	cfg := config.Defaults()
-	cfg.Paths.Masters = filepath.Join(root, "masters")
 	cfg.Paths.Library = filepath.Join(root, "library")
 	cfg.Paths.Clips = filepath.Join(root, "clips")
 	return &Runner{Config: cfg, Store: testStore(t), Calibration: NewCalibration()}

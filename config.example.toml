@@ -32,11 +32,6 @@ name = "living-room-mac"
 # trash yourself.
 library = "~/Downloads/arfabit/library"
 
-# Where originals were kept before they moved beside their films. Anything
-# already there is still offered to make films and clips from, and ARFABIT
-# puts nothing new there.
-masters = "~/Downloads/arfabit/masters"
-
 # Test clips from the quality lab. They are named so a folder listing reads
 # plainly, and they are meant to be copied to a television and watched.
 clips = "~/Downloads/arfabit/clips"

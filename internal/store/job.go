@@ -108,10 +108,6 @@ type Job struct {
 	// long after it ran.
 	Plan *Plan `json:"plan,omitempty"`
 
-	// Transcode records what a Transcode job was asked to make. Disc jobs
-	// have none.
-	Transcode *Transcode `json:"transcode,omitempty"`
-
 	// Project is what a package job makes from its Original: the line
 	// items, and the files to make them into.
 	Project *Project `json:"project,omitempty"`
@@ -216,8 +212,7 @@ type Plan struct {
 	Resolution  string `json:"resolution"`
 	HDR         bool   `json:"hdr"`
 
-	Audio     []PlannedAudio    `json:"audio"`
-	Subtitles []PlannedSubtitle `json:"subtitles"`
+	Audio []PlannedAudio `json:"audio"`
 
 	// Tracks are what the disc's title holds, as the Original will hold
 	// them: what the original part of the Plan shows, and what its project
@@ -263,23 +258,6 @@ type Plan struct {
 	Reason     string `json:"reason"`
 }
 
-// Transcode is what a Transcode job made from an Original, in records from
-// before packages.
-//
-// Each Plan is a copy of one blueprint's settings, taken when the job was made.
-// A blueprint only helps fill in a Plan: changing or removing it afterwards does
-// not reach a job that already has one, and running the job again means
-// running these Plans as they are (§8).
-type Transcode struct {
-	// At and Length say which stretch of the Original. A Length of zero means
-	// the whole of it, which makes Deliveries rather than lab clips.
-	At     time.Duration `json:"at"`
-	Length time.Duration `json:"length"`
-
-	// Plans holds one Plan per blueprint chosen, in the order chosen.
-	Plans []*Plan `json:"plans"`
-}
-
 // PlannedAudio is one audio track the Plan will produce.
 type PlannedAudio struct {
 	SourceIndex int    `json:"source_index"`
@@ -308,15 +286,6 @@ type PlannedAudio struct {
 	// Stereo marks a downmix ARFABIT adds itself rather than a track that
 	// exists on the disc.
 	Stereo bool `json:"stereo,omitempty"`
-}
-
-// PlannedSubtitle is one subtitle track the Plan will produce.
-type PlannedSubtitle struct {
-	SourceIndex int    `json:"source_index"`
-	Lang        string `json:"lang"`
-	Forced      bool   `json:"forced"`
-	Label       string `json:"label"`
-	Selected    bool   `json:"selected"`
 }
 
 // NewJob starts a job record.

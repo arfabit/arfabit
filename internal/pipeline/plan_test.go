@@ -135,29 +135,6 @@ func TestBuildPlanAudioCopyRule(t *testing.T) {
 }
 
 // Forced subtitles default to on; other languages are left unselected.
-func TestBuildPlanSubtitles(t *testing.T) {
-	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	byIndex := map[int]store.PlannedSubtitle{}
-	for _, s := range plan.Subtitles {
-		byIndex[s.SourceIndex] = s
-	}
-
-	if !byIndex[5].Selected || !byIndex[5].Forced {
-		t.Error("the English forced track should be selected by default")
-	}
-	if !byIndex[4].Selected {
-		t.Error("the full English track should be selected by default")
-	}
-	if byIndex[6].Selected {
-		t.Error("French subtitles were selected despite only English being wanted")
-	}
-}
-
 // Obfuscation reaches the Plan so the user is told, rather than it being
 // resolved silently.
 func TestBuildPlanCarriesObfuscation(t *testing.T) {
@@ -320,7 +297,7 @@ func TestSpaceDescribe(t *testing.T) {
 // A check that could not run must not stop a job: that would be ARFABIT
 // getting in the way over its own shortcoming rather than a real shortage.
 func TestSpaceFailsOpen(t *testing.T) {
-	space, err := CheckSpace(1_000_000, "/no/such/volume/that/exists", "/also/not/here")
+	space, err := CheckSpace(1_000_000, "/no/such/volume/that/exists")
 	if err == nil {
 		t.Skip("this system reported free space for a path that does not exist")
 	}
@@ -337,32 +314,7 @@ func TestSpaceFailsOpen(t *testing.T) {
 
 // Some discs carry surround only in formats an Apple TV cannot decode. Keeping
 // the bit-perfect stereo track is right, but the loss must be said out loud.
-func TestSurroundNoteWhenOnlyStereoSurvives(t *testing.T) {
-	plan := &store.Plan{Audio: []store.PlannedAudio{
-		{Label: "DTS-HD MA Surround 7.1 English", Layout: "7.1"},
-		{Label: "DD Stereo English", Layout: "stereo", Copy: true, Selected: true},
-	}}
-
-	note := surroundNote(plan)
-	if note == "" {
-		t.Fatal("no note was produced")
-	}
-	if !strings.Contains(note, "stereo") {
-		t.Errorf("note does not explain the outcome: %q", note)
-	}
-}
-
 // When surround does survive, there is nothing to say.
-func TestSurroundNoteSilentWhenSurroundKept(t *testing.T) {
-	plan := &store.Plan{Audio: []store.PlannedAudio{
-		{Label: "DD Surround 5.1 English", Layout: "5.1", Copy: true, Selected: true},
-		{Label: "Stereo", Layout: "stereo", Stereo: true, Selected: true},
-	}}
-	if note := surroundNote(plan); note != "" {
-		t.Errorf("a note was produced despite surround being kept: %q", note)
-	}
-}
-
 // Tracks are grouped the way a disc's own menu reads: wanted languages first,
 // widest first inside each language.
 func TestAudioOrdering(t *testing.T) {

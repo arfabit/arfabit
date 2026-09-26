@@ -59,14 +59,13 @@ func (r *Runner) Existing(job *Job) []string {
 	return found
 }
 
-// existingFilm lists a film already in dir under this edition, whether made
-// now or as an .mp4 before the switch to Matroska: to Plex both are this
-// edition of this film, and two of them would show as one version twice.
+// existingFilm lists a film already in dir under this edition, as MKV or as
+// MP4: to Plex both are this edition of this film.
 func existingFilm(dir string, title meta.Title, edition string) []string {
 	name := title.VideoName(edition)
 	found := existingAt(filepath.Join(dir, name))
 	stem := strings.TrimSuffix(name, meta.VideoExt)
-	for _, ext := range meta.EarlierVideoExts {
+	for _, ext := range meta.OtherVideoExts {
 		found = append(found, existingAt(filepath.Join(dir, stem+ext))...)
 	}
 	return found

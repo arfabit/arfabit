@@ -57,7 +57,6 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 		}
 	}
 	plan.Seconds = int(title.Duration.Seconds())
-	plan.Subtitles = planSubtitles(title, blueprint)
 
 	return plan, nil
 }
@@ -78,32 +77,6 @@ func planVideo(plan *store.Plan, kind disc.Kind, video *disc.Stream, blueprint c
 func isHEVC(codecID string) bool {
 	id := strings.ToUpper(codecID)
 	return strings.Contains(id, "HEVC") || strings.Contains(id, "H265") || strings.Contains(id, "MPEGH")
-}
-
-// planSubtitles selects subtitle tracks in the wanted languages.
-//
-// Forced tracks default to on: on most discs they carry the translations for
-// scenes in another language, which a viewer wants without asking (§10).
-func planSubtitles(title disc.Title, blueprint config.Blueprint) []store.PlannedSubtitle {
-	var planned []store.PlannedSubtitle
-
-	for _, s := range title.Streams {
-		if s.Kind != disc.StreamSubtitle {
-			continue
-		}
-		wanted := wantLanguage(s.Lang, blueprint.SubLanguages)
-		selected := wanted && ((s.Forced && blueprint.IncludeForcedSubs) || (!s.Forced && blueprint.IncludeFullSubs))
-
-		planned = append(planned, store.PlannedSubtitle{
-			SourceIndex: s.Index,
-			Lang:        s.Lang,
-			Forced:      s.Forced,
-			Label:       strings.TrimSpace(s.Summary),
-			Selected:    selected,
-		})
-	}
-
-	return planned
 }
 
 // wantLanguage reports whether a track's language is one the user asked for.

@@ -31,7 +31,6 @@ func newTestServer(t *testing.T) *Server {
 	root := t.TempDir()
 	cfg := config.Defaults()
 	cfg.Paths.Data = filepath.Join(root, "data")
-	cfg.Paths.Masters = filepath.Join(root, "masters")
 	cfg.Paths.Library = filepath.Join(root, "library")
 	cfg.Paths.Clips = filepath.Join(root, "clips")
 	cfg.Node.Name = "test-node"
@@ -550,48 +549,6 @@ func TestEjectAllowedWhileConverting(t *testing.T) {
 // Projects start from any file ARFABIT made: originals beside their films in
 // the library and in the folder masters were kept in before, which is still
 // read; the films; and the clips. Anything that is not a video is not one.
-func TestSourcesAreListed(t *testing.T) {
-	s := newTestServer(t)
-
-	title := meta.Title{Name: "In the Grey", Year: 2026}
-	beside := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.OriginalName())
-	film := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.VideoName(""))
-	clip := filepath.Join(s.Config.Paths.Clips, "In the Grey (2026)", "In the Grey (2026) {edition-Lab 001 - Small - 0h01m00s}.mkv")
-	// A real master's name, en dash and all, where masters used to go.
-	earlier := filepath.Join(s.Config.Paths.Masters, "Crime 101 (2025)", "CRIME 101 – BLU-RAY_t04.mkv")
-	for _, path := range []string{beside, film, clip, earlier,
-		filepath.Join(filepath.Dir(earlier), "job.json"), filepath.Join(filepath.Dir(film), ".arfabit-piece-x.mkv")} {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	var got struct {
-		Sources []source `json:"sources"`
-	}
-	if err := json.Unmarshal(get(t, s, "/api/sources").Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	want := []source{
-		{Title: "Crime 101 (2025)", Path: earlier, Kind: "original"},
-		{Title: "In the Grey (2026)", Path: beside, Kind: "original"},
-		{Title: "In the Grey (2026)", Path: film, Kind: "film"},
-		{Title: "In the Grey (2026)", Path: clip, Kind: "clip"},
-	}
-	if len(got.Sources) != len(want) {
-		t.Fatalf("got %+v", got.Sources)
-	}
-	for i := range want {
-		g := got.Sources[i]
-		if g.Title != want[i].Title || g.Path != want[i].Path || g.Kind != want[i].Kind {
-			t.Errorf("%d: %+v, want %+v", i, g, want[i])
-		}
-	}
-}
-
 // Nothing copied yet is an ordinary state, and must come back as an empty list
 // rather than as nothing at all.
 func TestSourcesWithNothingCopied(t *testing.T) {
@@ -737,28 +694,6 @@ func TestProjectIsRefusedPlainly(t *testing.T) {
 }
 
 // Reading a file needs one, and one that cannot be read says so.
-func TestSourceMustBeReadable(t *testing.T) {
-	s := newTestServer(t)
-
-	if rec := get(t, s, "/api/source"); rec.Code == http.StatusOK {
-		t.Error("tracks were listed for no file at all")
-	}
-	rec := get(t, s, "/api/source?path="+url.QueryEscape(anOriginal(t, s)))
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be read") {
-		t.Errorf("a file that is not a video: %d %s", rec.Code, rec.Body)
-	}
-
-	// ARFABIT listens on the whole network, so it reads nothing but the
-	// files it lists, however the path is dressed up.
-	missing := filepath.Join(s.Config.Paths.Masters, "Gone (2020)", "gone.mkv")
-	for _, outside := range []string{missing, "/etc/hosts", filepath.Join(s.Config.Paths.Library, "..", "config.toml"), s.Config.Paths.Library} {
-		rec := get(t, s, "/api/source?path="+url.QueryEscape(outside))
-		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not a file ARFABIT made") {
-			t.Errorf("%s was read: %d %s", outside, rec.Code, rec.Body)
-		}
-	}
-}
-
 // The edition can be changed on the Plan, or cleared.
 func TestPlanEditionCanBeChanged(t *testing.T) {
 	s := newTestServer(t)
@@ -1074,5 +1009,71 @@ func TestReadSubtitlesOnly(t *testing.T) {
 	}
 	if len(s.Runner.Active()) != 0 {
 		t.Error("something joined the queue")
+	}
+}
+
+// Projects start from any file ARFABIT made: originals beside their films in
+// the library, the films, and the clips. Anything that is not a video is not one.
+func TestSourcesAreListed(t *testing.T) {
+	s := newTestServer(t)
+
+	title := meta.Title{Name: "In the Grey", Year: 2026}
+	beside := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.OriginalName())
+	film := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.VideoName(""))
+	clip := filepath.Join(s.Config.Paths.Clips, "In the Grey (2026)", "In the Grey (2026) {edition-Lab 001 - Small - 0h01m00s}.mkv")
+	other := filepath.Join(s.Config.Paths.Library, "Crime 101 (2025)", "Crime 101 (2025) {edition-Original}.mkv")
+	for _, path := range []string{beside, film, clip, other,
+		filepath.Join(filepath.Dir(other), "job.json"), filepath.Join(filepath.Dir(film), ".arfabit-piece-x.mkv")} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got struct {
+		Sources []source `json:"sources"`
+	}
+	if err := json.Unmarshal(get(t, s, "/api/sources").Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []source{
+		{Title: "Crime 101 (2025)", Path: other, Kind: "original"},
+		{Title: "In the Grey (2026)", Path: beside, Kind: "original"},
+		{Title: "In the Grey (2026)", Path: film, Kind: "film"},
+		{Title: "In the Grey (2026)", Path: clip, Kind: "clip"},
+	}
+	if len(got.Sources) != len(want) {
+		t.Fatalf("got %+v", got.Sources)
+	}
+	for i := range want {
+		g := got.Sources[i]
+		if g.Title != want[i].Title || g.Path != want[i].Path || g.Kind != want[i].Kind {
+			t.Errorf("%d: %+v, want %+v", i, g, want[i])
+		}
+	}
+}
+
+// Reading a file needs one, and one that cannot be read says so.
+func TestSourceMustBeReadable(t *testing.T) {
+	s := newTestServer(t)
+
+	if rec := get(t, s, "/api/source"); rec.Code == http.StatusOK {
+		t.Error("tracks were listed for no file at all")
+	}
+	rec := get(t, s, "/api/source?path="+url.QueryEscape(anOriginal(t, s)))
+	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "could not be read") {
+		t.Errorf("a file that is not a video: %d %s", rec.Code, rec.Body)
+	}
+
+	// ARFABIT listens on the whole network, so it reads nothing but the
+	// files it lists, however the path is dressed up.
+	missing := filepath.Join(s.Config.Paths.Library, "Gone (2020)", "Gone (2020) {edition-Original}.mkv")
+	for _, outside := range []string{missing, "/etc/hosts", filepath.Join(s.Config.Paths.Library, "..", "config.toml"), s.Config.Paths.Library} {
+		rec := get(t, s, "/api/source?path="+url.QueryEscape(outside))
+		if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "not a file ARFABIT made") {
+			t.Errorf("%s was read: %d %s", outside, rec.Code, rec.Body)
+		}
 	}
 }

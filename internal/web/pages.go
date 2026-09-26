@@ -72,13 +72,8 @@ func (s *Server) handleDriveHealth(w http.ResponseWriter, r *http.Request) {
 
 		// What this drive has actually managed, which beats any claim about
 		// what it ought to manage.
-		// Speeds are kept under the drive's name. Ones measured before that
-		// are under whatever device path the disc had, and still count while
-		// that disc is in.
+		// Speeds are kept under the drive's name.
 		stats := s.Runner.Calibration.Drives[pipeline.DriveKey(h.Drive.Name, h.Drive.Device)]
-		if stats == nil && h.Drive.Device != "" {
-			stats = s.Runner.Calibration.Drives[h.Drive.Device]
-		}
 		if stats != nil {
 			for kind, rate := range stats.MBPerSecond {
 				if rate > report.Observed {
@@ -137,8 +132,7 @@ type source struct {
 }
 
 // sources lists every file a project can start from: originals beside their
-// films in the library, and in the folder masters were kept in before (§6),
-// which is only read; the films in the library; and the clips.
+// films in the library (§6), the films, and the clips.
 func (s *Server) sources() []source {
 	var found []source
 	video := func(name string) bool {
@@ -175,7 +169,6 @@ func (s *Server) sources() []source {
 			add(folder, path, "film")
 		}
 	})
-	each(s.Config.Paths.Masters, func(folder, name, path string) { add(folder, path, "original") })
 	each(s.Config.Paths.Clips, func(folder, name, path string) { add(folder, path, "clip") })
 
 	order := map[string]int{"original": 0, "film": 1, "clip": 2}

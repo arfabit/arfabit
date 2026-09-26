@@ -10,7 +10,6 @@ import (
 
 	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/disc/makemkv"
-	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -238,107 +237,10 @@ func TestSeveralJobsCanBeActive(t *testing.T) {
 // MakeMKV keeps only some streams and renumbers what it keeps. Matching by
 // language alone resolved every English track to the same stream, so a track
 // marked "copy" copied a different track than the one planned.
-func TestAudioTracksResolveAgainstTheMaster(t *testing.T) {
-	// The original, as ffprobe reports it.
-	original := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
-		{Index: 0, Kind: "video", Codec: "h264"},
-		{Index: 1, Kind: "audio", Codec: "dts", Channels: 8, Lang: "eng"},
-		{Index: 2, Kind: "audio", Codec: "dts", Channels: 6, Lang: "eng"},
-		{Index: 3, Kind: "audio", Codec: "ac3", Channels: 2, Lang: "eng"},
-		{Index: 4, Kind: "audio", Codec: "ac3", Channels: 6, Lang: "fra"},
-	}}
-
-	job := testJob(t)
-	job.Plan = &store.Plan{Audio: []store.PlannedAudio{
-		{SourceIndex: 1, Lang: "eng", Channels: 8, SourceCodec: "dts", Codec: "aac", Bitrate: "640k", Selected: true},
-		{SourceIndex: 3, Lang: "eng", Channels: 2, SourceCodec: "ac3", Codec: "ac3", Copy: true, Selected: true},
-	}}
-
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
-	tracks := r.audioTracks(job, original)
-
-	if len(tracks) != 2 {
-		t.Fatalf("got %d tracks, want 2", len(tracks))
-	}
-
-	// Each planned track must land on a different stream.
-	if tracks[0].SourceIndex == tracks[1].SourceIndex {
-		t.Fatalf("both tracks resolved to stream %d", tracks[0].SourceIndex)
-	}
-
-	// The 7.1 track was planned to be converted, and is.
-	if tracks[0].SourceIndex != 1 {
-		t.Errorf("the 7.1 track resolved to stream %d, want 1", tracks[0].SourceIndex)
-	}
-	if tracks[0].Copy {
-		t.Error("a track planned for converting was copied")
-	}
-
-	// The stereo Dolby track is copyable and lands on the stereo stream.
-	if tracks[1].SourceIndex != 3 {
-		t.Errorf("the stereo track resolved to stream %d, want 3", tracks[1].SourceIndex)
-	}
-	if !tracks[1].Copy {
-		t.Error("a Dolby stereo track was re-encoded needlessly")
-	}
-}
-
 // Copying is decided from what the original holds, not from what the Plan said:
 // the original is what gets muxed.
-func TestTrueHDIsKeptWhenThePlanKeepsIt(t *testing.T) {
-	original := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
-		{Index: 0, Kind: "video"},
-		{Index: 1, Kind: "audio", Codec: "truehd", Channels: 8, Lang: "eng"},
-	}}
-
-	job := testJob(t)
-	// A Plan that keeps the track as it is.
-	job.Plan = &store.Plan{Audio: []store.PlannedAudio{
-		{SourceIndex: 1, Lang: "eng", Channels: 8, SourceCodec: "truehd", Copy: true, Selected: true},
-	}}
-
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
-	tracks := r.audioTracks(job, original)
-
-	if len(tracks) != 1 {
-		t.Fatalf("got %d tracks, want 1", len(tracks))
-	}
-	// Matroska carries TrueHD, so a Plan that keeps it as it is, keeps it.
-	if !tracks[0].Copy {
-		t.Error("TrueHD was converted though the Plan kept it as it is")
-	}
-}
-
 // A stereo downmix shares its source with the track it came from, and must
 // actually be downmixed.
-func TestStereoDownmixAsksForTwoChannels(t *testing.T) {
-	original := &ffmpeg.MediaInfo{Streams: []ffmpeg.Stream{
-		{Index: 0, Kind: "video"},
-		{Index: 1, Kind: "audio", Codec: "dts", Channels: 8, Lang: "eng"},
-	}}
-
-	job := testJob(t)
-	job.Plan = &store.Plan{Audio: []store.PlannedAudio{
-		{SourceIndex: 1, Lang: "eng", Channels: 8, SourceCodec: "dts", Codec: "aac", Selected: true},
-		{SourceIndex: 1, Lang: "eng", Channels: 2, SourceCodec: "dts", Codec: "aac", Stereo: true, Selected: true},
-	}}
-
-	r := &Runner{Store: testStore(t), Calibration: NewCalibration()}
-	tracks := r.audioTracks(job, original)
-
-	if len(tracks) != 2 {
-		t.Fatalf("got %d tracks, want 2", len(tracks))
-	}
-	if tracks[1].Channels != 2 {
-		t.Errorf("the downmix asks for %d channels, want 2", tracks[1].Channels)
-	}
-	// Both come from the same stream: a downmix has no stream of its own.
-	if tracks[1].SourceIndex != tracks[0].SourceIndex {
-		t.Errorf("the downmix came from stream %d rather than its source %d",
-			tracks[1].SourceIndex, tracks[0].SourceIndex)
-	}
-}
-
 func testJob(t *testing.T) *Job {
 	t.Helper()
 	log, err := NewLog(t.TempDir()+"/job.txt", nil)

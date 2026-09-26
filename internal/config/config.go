@@ -51,12 +51,6 @@ type Paths struct {
 	// Data holds jobs, logs and the shared configuration. May be on a NAS.
 	Data string
 
-	// Masters is the folder originals were copied to before they moved
-	// beside their films (§6). What is there is still offered as an original
-	// to make things from. ARFABIT reads it and writes nothing new there,
-	// except the subtitle files it reads from those originals.
-	Masters string
-
 	// Library holds the originals and the films made from them, one folder
 	// per film, laid out the way Plex expects.
 	Library string
@@ -225,7 +219,6 @@ func Defaults() Config {
 		},
 		Paths: Paths{
 			Data:    defaultDataDir(),
-			Masters: filepath.Join(root, "masters"),
 			Library: filepath.Join(root, "library"),
 			Clips:   filepath.Join(root, "clips"),
 		},
@@ -390,11 +383,7 @@ func (c *Config) apply(doc document, source string) error {
 	str("node", "name", &c.Node.Name)
 	str("server", "addr", &c.Server.Addr)
 	path("paths", "data", &c.Paths.Data)
-	path("paths", "masters", &c.Paths.Masters)
 	path("paths", "library", &c.Paths.Library)
-	// "lab" is what the clips folder was called before; a settings file
-	// that still says so is still read.
-	path("paths", "lab", &c.Paths.Clips)
 	path("paths", "clips", &c.Paths.Clips)
 	path("paths", "deliver", &c.Paths.Deliver)
 	if err := num("machine", "max_conversions", &c.Machine.MaxConversions); err != nil {

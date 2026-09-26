@@ -48,10 +48,10 @@ func (t Title) BaseName(edition string) string {
 // VideoExt is the finished file's extension: Matroska (§0.2).
 const VideoExt = ".mkv"
 
-// EarlierVideoExts are extensions films were once made with. A film under one
-// of them is the same film to Plex, so it counts when looking for a file that
-// is already there.
-var EarlierVideoExts = []string{".mp4"}
+// OtherVideoExts are the other containers ARFABIT makes a film in. A film
+// under one of them is the same edition to Plex, so it counts when looking for
+// a file that is already there.
+var OtherVideoExts = []string{".mp4"}
 
 // VideoName is the finished file's name.
 func (t Title) VideoName(edition string) string {

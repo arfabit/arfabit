@@ -93,22 +93,16 @@ func TestWhatCanBePickedUp(t *testing.T) {
 		t.Error("a conversion with nothing planned was offered as resumable")
 	}
 
-	// A disc past its copy has its Plan and its copy, which is all it needs.
-	disc := &store.Job{Kind: store.KindDisc, Stage: store.StagePackage, Original: original,
-		Plan: &store.Plan{Blueprint: "Archive", Convert: true}}
-	if !Resumable(disc) {
-		t.Error("a disc interrupted while converting was not offered")
-	}
-
-	// One planned to stop at the copy has nothing left to do.
-	disc.Plan.Convert = false
-	if Resumable(disc) {
-		t.Error("a disc planned to stop at the copy was offered")
+	// A copy that finished is done: its film is a task of its own.
+	copied := &store.Job{Kind: store.KindDisc, Stage: store.StageEject, Original: original,
+		Plan: &store.Plan{Convert: true}}
+	if Resumable(copied) {
+		t.Error("a finished copy was offered to start again")
 	}
 }
 
-// Running a job again runs its own Plan. The blueprint it came from may have
-// been changed or removed since, and that does not reach it (§8).
+// Running a job again runs its own line items. The blueprint they came from
+// may have been changed or removed since, and that does not reach it (§8).
 func TestResumeKeepsThePlan(t *testing.T) {
 	st := testStore(t)
 	cfg := config.Defaults()
@@ -120,12 +114,14 @@ func TestResumeKeepsThePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := store.NewJob("interrupted-disc")
+	rec := store.NewJob("interrupted-film")
+	rec.Kind = store.KindConvert
 	rec.Title = "Crime 101"
 	rec.State = store.StateStopped
 	rec.Stage = store.StagePackage
 	rec.Original = original
-	rec.Plan = &store.Plan{Blueprint: "Removed Since", Convert: true, CRF: 17, Preset: "slower"}
+	rec.Project = &store.Project{Blueprint: "Removed Since", Items: []store.Item{
+		{Kind: store.KindVideo, Action: store.ActionConvert, To: "hevc", CRF: 17, Preset: "slower"}}}
 	if err := st.SaveJob(rec); err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +135,8 @@ func TestResumeKeepsThePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Plan.Blueprint != "Removed Since" || after.Plan.CRF != 17 || after.Plan.Preset != "slower" {
-		t.Errorf("the Plan changed on resume: %+v", after.Plan)
+	if v := after.Project.Items[0]; after.Project.Blueprint != "Removed Since" || v.CRF != 17 || v.Preset != "slower" {
+		t.Errorf("the line items changed on resume: %+v", after.Project)
 	}
 
 	// It ran, as the same job, rather than being replaced by a new one.

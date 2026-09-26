@@ -35,7 +35,7 @@ type Runner struct {
 	// regardless; it is the processor that has to take turns.
 	Slots *Slots
 
-	// Hold is how long a Transcode waits in the line before it may start,
+	// Hold is how long a project waits in the line before it may start,
 	// while it can still be moved or stopped at no cost. Zero means none.
 	Hold time.Duration
 
@@ -75,7 +75,7 @@ type Runner struct {
 	readings map[string]*Job
 }
 
-// TranscodeHold is how long a new Transcode waits before it may start.
+// TranscodeHold is how long a new project waits before it may start.
 const TranscodeHold = 10 * time.Second
 
 // Job is a job record plus the live state the UI needs.
@@ -736,7 +736,7 @@ func (r *Runner) Reestimate(job *Job) {
 	plan.EstimatedTime = plan.RipTime + packEst.Time
 
 	// The original and the film both exist at once, so both must fit.
-	job.Space, _ = CheckSpace(plan.SourceSize+packEst.Size, r.Config.Paths.Library, r.Config.Paths.Masters)
+	job.Space, _ = CheckSpace(plan.SourceSize+packEst.Size, r.Config.Paths.Library)
 }
 
 // speedEvery is how long each point on the read-speed graph drawn after a
@@ -781,272 +781,6 @@ func (s *speedSampler) observe(into time.Duration, read int64) {
 	s.since, s.read = into, read
 }
 
-// convert takes a copied disc from the Original to a Delivery, following the
-// job's Plan. It is also where an interrupted job picks up again.
-func (r *Runner) convert(ctx context.Context, job *Job, title meta.Title) error {
-	// OCR belongs here. Until it exists, the delivery carries no subtitles and
-	// says so plainly rather than quietly omitting them.
-	job.Stage = store.StageOCR
-	if r.hasSelectedSubtitles(job) {
-		job.Log.Printf(store.StageOCR,
-			"This disc has subtitles, but ARFABIT cannot read them into text yet, so the movie will not have any. They are still in the original.")
-	}
-
-	// Wait for a turn at the processor. Ripping is over by now and the drive
-	// is free, so the next disc can be going in while this one waits.
-	job.File = title.VideoName(job.Plan.Edition)
-
-	if r.Slots != nil {
-		err := r.Slots.Take(ctx, Ticket{ID: job.ID, Waiting: func() {
-			job.Stage = store.StageQueued
-			job.Progress = Progress{Since: time.Now(), Operation: "Waiting for a turn"}
-			job.Log.Printf(store.StageQueued,
-				"Waiting to convert: something else is using the processor. The disc is already copied, so nothing is holding up the drive.")
-			r.save(job)
-		}})
-		if err != nil {
-			return r.stop(job, "Stopped while waiting to convert.", "")
-		}
-		defer r.Slots.Give()
-	}
-
-	job.Stage = store.StagePackage
-	packageStart := time.Now()
-	job.Progress = Progress{Since: packageStart, Operation: "Making the movie file"}
-	job.Log.Printf(store.StagePackage,
-		"Making the movie file for your Apple TV. Converting the picture is slow; there is nothing to do but wait.")
-	r.save(job)
-
-	delivery, err := r.packageOriginal(ctx, job, title)
-	var replace *ReplaceError
-	if errors.As(err, &replace) {
-		return r.stop(job, fmt.Sprintf(
-			"%s is already in your library, so ARFABIT stopped rather than replace it. Nothing was removed, and the original is kept. Give this one a different edition, or move that file, and start it again.",
-			filepath.Base(replace.Path)), replace.Path)
-	}
-	if err != nil {
-		return r.stop(job, "ARFABIT did not finish making the movie file.", detailOf(err))
-	}
-	job.Delivery = delivery
-
-	job.Stage = store.StageDeliver
-	if err := r.deliver(job, title, job.Plan.Edition); err != nil {
-		return r.stop(job, "ARFABIT made the movie but could not put it in your library.", err.Error())
-	}
-
-	job.State = store.StateDone
-	job.Note = fmt.Sprintf("%s is ready.", job.Title)
-	job.Progress = Progress{Percent: 100}
-	r.save(job)
-
-	return nil
-}
-
-// packageOriginal encodes or copies the original into the delivery file.
-func (r *Runner) packageOriginal(ctx context.Context, job *Job, title meta.Title) (string, error) {
-	info, err := ffmpeg.Probe(ctx, job.Original)
-	if err != nil {
-		return "", err
-	}
-
-	video := info.VideoStream()
-	if video == nil {
-		return "", errors.New("the copied file has no picture")
-	}
-
-	outDir := title.LibraryDir(r.Config.Paths.Library)
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return "", err
-	}
-	out := filepath.Join(outDir, title.VideoName(job.Plan.Edition))
-	if err := refuseToReplace(out); err != nil {
-		return "", err
-	}
-
-	req := ffmpeg.EncodeRequest{
-		Input:            job.Original,
-		Output:           out,
-		VideoSourceIndex: video.Index,
-		Video: ffmpeg.VideoPlan{
-			Copy:   job.Plan.VideoCopy,
-			CRF:    job.Plan.CRF,
-			Preset: ffmpeg.Preset(job.Plan.Preset),
-		},
-		HDR:      video.HDR,
-		Color:    video.ColorInfo,
-		Chapters: true,
-		Audio:    r.audioTracks(job, info),
-	}
-
-	// An HDR source whose metadata could not be read must stop rather than
-	// produce a grey picture nobody would notice until playback (§9).
-	if video.ColorInfo.IsHDR() && !req.Video.Copy && !video.HDR.HasMasteringDisplay() {
-		return "", errors.New("this disc says it is HDR but its colour information could not be read, and encoding without it would wash the picture out")
-	}
-	if video.ColorInfo.IsHDR() {
-		job.Plan.HDR = true
-		job.Log.Printf(store.StagePackage, "Keeping the HDR picture information.")
-	}
-
-	args, err := req.Args()
-	if err != nil {
-		return "", err
-	}
-
-	start := time.Now()
-	var writeRate rateTracker
-
-	err = ffmpeg.Run(ctx, args, ffmpeg.RunOptions{
-		Duration: time.Duration(info.Duration * float64(time.Second)),
-		OnProgress: func(p ffmpeg.Progress) {
-			job.Progress = Progress{
-				Percent:   p.Percent(),
-				Operation: "Making the movie file",
-				Remaining: humanDuration(p.Remaining().Round(time.Minute)),
-				Since:     start,
-				Rate:      HumanRate(writeRate.Observe(p.Bytes)),
-			}
-			r.notify(job)
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-
-	if written, err := os.Stat(out); err == nil && !job.Plan.VideoCopy {
-		r.Calibration.ObserveEncode(job.Plan, video.Width, video.Height, written.Size(),
-			time.Duration(info.Duration*float64(time.Second)), time.Since(start))
-	}
-
-	return out, nil
-}
-
-// audioTracks turns the Plan's audio choices into encoder tracks.
-//
-// The Plan records the disc's own stream numbers, which are not the original's:
-// MakeMKV keeps only some streams and renumbers what it keeps. So each planned
-// track is matched back to a real stream in the original by what it is, and the
-// decision about copying is taken from the original rather than from the Plan —
-// the original is what gets muxed, and trusting the Plan here once copied a track
-// that could not play as it was.
-func (r *Runner) audioTracks(job *Job, info *ffmpeg.MediaInfo) []ffmpeg.AudioTrack {
-	sources := info.StreamsOfKind("audio")
-	if len(sources) == 0 {
-		return nil
-	}
-
-	used := map[int]bool{}
-	var tracks []ffmpeg.AudioTrack
-
-	for _, planned := range job.Plan.Audio {
-		if !planned.Selected {
-			continue
-		}
-
-		// A downmix is made from a track that is already being kept, so it
-		// looks among all the streams rather than the unclaimed ones.
-		claimed := used
-		if planned.Stereo {
-			claimed = nil
-		}
-
-		source := matchStream(sources, planned, claimed)
-		if source == nil {
-			job.Log.Printf(store.StagePackage,
-				"The %s track is not in the copy, so it has been left out.", planned.Label)
-			continue
-		}
-		if !planned.Stereo {
-			// A downmix shares its source with the track it came from; every
-			// other track takes one of its own.
-			used[source.Index] = true
-		}
-
-		// Copying is decided from what the original actually holds. A track
-		// that does not play directly is converted whatever the Plan said.
-		canCopy := ffmpeg.CanCopyAudio(source.Codec) && !planned.Stereo
-		if planned.Copy && !canCopy {
-			job.Log.Printf(store.StagePackage,
-				"The %s track is %s, which does not play directly, so it is being converted.",
-				planned.Label, source.Codec)
-		}
-
-		track := ffmpeg.AudioTrack{
-			SourceIndex: source.Index,
-			Copy:        canCopy && planned.Copy,
-			Codec:       planned.Codec,
-			Bitrate:     planned.Bitrate,
-			Lang:        planned.Lang,
-			Title:       shortTrackName(planned),
-			Default:     len(tracks) == 0,
-		}
-
-		if !track.Copy {
-			if planned.Stereo || planned.Channels <= 2 {
-				track.Channels = 2
-			}
-			if track.Codec == "" || track.Codec == source.Codec {
-				// Nothing usable was planned, so fall back to something that
-				// certainly plays: FLAC for lossless sound, so nothing is lost,
-				// and AAC otherwise.
-				track.Codec = "aac"
-				if streamLossless(*source) && track.Channels != 2 {
-					track.Codec = "flac"
-				}
-			}
-		}
-
-		tracks = append(tracks, track)
-	}
-
-	return tracks
-}
-
-// matchStream finds the stream in the original that a planned track refers to.
-//
-// Language and channel count together identify a track well enough in
-// practice; the codec breaks ties between, say, the DTS and Dolby versions of
-// the same mix. Streams already claimed are skipped so that two planned tracks
-// cannot both resolve to the same one, which is exactly what went wrong before.
-func matchStream(sources []ffmpeg.Stream, planned store.PlannedAudio, used map[int]bool) *ffmpeg.Stream {
-	best := -1
-	bestScore := 0
-
-	for i := range sources {
-		s := &sources[i]
-		if used[s.Index] {
-			continue
-		}
-
-		score := 0
-		if strings.EqualFold(s.Lang, planned.Lang) {
-			score += 4
-		}
-		if s.Channels == planned.Channels {
-			score += 3
-		} else if planned.Channels > 2 && s.Channels > 2 {
-			// Close enough: surround of one width stands in for another
-			// rather than the track being dropped altogether.
-			score++
-		}
-		if strings.EqualFold(s.Codec, planned.SourceCodec) {
-			score += 2
-		}
-		if score == 0 {
-			continue
-		}
-		if score > bestScore {
-			best, bestScore = i, score
-		}
-	}
-
-	// A track must at least be in the right language, or it is not the track.
-	if best < 0 || bestScore < 4 {
-		return nil
-	}
-	return &sources[best]
-}
-
 // deliver records the finished file and copies it onward if asked.
 func (r *Runner) deliver(job *Job, title meta.Title, edition string) error {
 	info, err := os.Stat(job.Delivery)
@@ -1069,46 +803,6 @@ func (r *Runner) deliver(job *Job, title meta.Title, edition string) error {
 
 	job.Log.Printf(store.StageDeliver, "Saved %s (%s).", filepath.Base(job.Delivery), HumanBytes(info.Size()))
 	return nil
-}
-
-// surroundNote explains a disc whose surround sound cannot be carried across.
-//
-// Some discs offer surround only in formats an Apple TV cannot decode, with
-// Dolby available in stereo alone. ARFABIT then keeps the stereo track, which
-// is bit-perfect, rather than converting surround down to it — but the loss is
-// worth saying out loud rather than leaving to be noticed on the sofa.
-func surroundNote(plan *store.Plan) string {
-	var chosen *store.PlannedAudio
-	var surroundAvailable bool
-
-	for i, a := range plan.Audio {
-		if a.Selected && chosen == nil {
-			chosen = &plan.Audio[i]
-		}
-		if a.Layout != "" && a.Layout != "stereo" {
-			surroundAvailable = true
-		}
-	}
-
-	if chosen == nil || !surroundAvailable || chosen.Layout != "stereo" {
-		return ""
-	}
-	return "This disc's surround sound is in a format an Apple TV cannot play, and its Dolby track is stereo only, so the movie will be in stereo."
-}
-
-// shortTrackName is what the track is called in the player's own menu, where
-// there is no room for the Plan's full explanation.
-func shortTrackName(planned store.PlannedAudio) string {
-	return fmt.Sprintf("%s %s", languageName(planned.Lang), planned.Layout)
-}
-
-func (r *Runner) hasSelectedSubtitles(job *Job) bool {
-	for _, s := range job.Plan.Subtitles {
-		if s.Selected {
-			return true
-		}
-	}
-	return false
 }
 
 // ripEstimate is how long copying this disc is expected to take.

@@ -58,8 +58,6 @@ The **library** folder is the one you want. It's named the way Plex, Infuse, and
 
 Each movie's folder also holds the **original**: an exact copy of what was on the disc. It's large. ARFABIT keeps it so you never have to copy the same disc twice, and it never removes anything on its own. Plex shows it as one more version of the movie, called Original. When you want the space back, move that one file to the trash yourself.
 
-If you used ARFABIT before, your earlier copies are still in a folder called `masters`, and ARFABIT still makes movies from them. It doesn't move them.
-
 If a disc won't fit, ARFABIT tells you before it starts, and shows you how much room your originals and your movies take.
 
 ## Why this exists

@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/arfabit/arfabit/internal/meta"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
@@ -73,10 +72,9 @@ func interruptedNote(job *store.Job) string {
 
 // Resumable reports whether a stopped job can simply be started again.
 //
-// A job can be run again when its copy is still there and it knows what it was
-// going to do with it: a disc job that got past the copy has its Plan, and a
-// Transcode has its Plans. A disc still being copied cannot, because its copy
-// stopped mid-file.
+// A job can be run again when what it works from is still there and it knows
+// what it was going to do with it: an OCR task its track, a package its line
+// items. A disc still being copied cannot, because its copy stopped mid-file.
 func Resumable(job *store.Job) bool {
 	if job.Original == "" {
 		return false
@@ -90,26 +88,8 @@ func Resumable(job *store.Job) bool {
 		}
 	case job.Project != nil:
 		// A package has its line items, which is all it needs.
-	case job.Kind == store.KindDisc:
-		// Disc jobs from before a rip and its transcode were separate jobs
-		// carried their own conversion, and can still be picked up.
-		if job.Plan == nil || !job.Plan.Convert {
-			return false
-		}
-		switch job.Stage {
-		case store.StageEject, store.StageOCR, store.StageQueued, store.StagePackage, store.StageDeliver:
-		default:
-			return false
-		}
-	case job.Transcode != nil:
-		// Made by the Transcode form packages replaced. Its copy is still
-		// there to make a package from.
-		return false
 	default:
-		// A transcode planned with its disc has that disc's Plan.
-		if job.Plan == nil {
-			return false
-		}
+		return false
 	}
 
 	_, err := os.Stat(job.Original)
@@ -166,13 +146,9 @@ func (r *Runner) ResumeJob(id string) (*Job, error) {
 		defer cancel()
 		defer r.finish(job)
 
-		if rec.Project != nil {
-			// Started again now, with nothing to hold back for: whoever
-			// pressed Start again meant it.
-			r.runPackage(ctx, job, r.configuredDirs(), 0)
-			return
-		}
-		_ = r.convert(ctx, job, meta.Title{Name: rec.Title, Year: rec.Year})
+		// Started again now, with nothing to hold back for: whoever
+		// pressed Start again meant it.
+		r.runPackage(ctx, job, r.configuredDirs(), 0)
 	}()
 
 	return job, nil

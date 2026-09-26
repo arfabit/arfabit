@@ -341,12 +341,6 @@ yourself, in Finder or Explorer. There is no retention timer, no cleanup job,
 and no "are you sure" dialog, because the program simply does not have that
 power.
 
-**Originals copied before this layout** stay where they were, in the folder
-named by `paths.masters` (`~/Downloads/arfabit/masters/` by default), under
-MakeMKV's names. ARFABIT moves nothing: it lists them as originals beside the
-ones in the library, makes films and clips from them, and writes nothing new
-there.
-
 The job record and log live in the data directory (above), not beside the
 Original.
 
@@ -610,8 +604,7 @@ fit. That message states four numbers and nothing else:
 
 - what this rip is estimated to need
 - how much room is left on the drive
-- how much the originals take, in the library and in the folder masters were kept
-  in before
+- how much the originals take
 - how much the films in the library take
 
 Those last two are there because they are almost always the answer — the user has
@@ -1113,8 +1106,7 @@ automatically, and the Settings links to the purchase page, the forum and r/make
 ### Projects page
 
 Setting something up to be made. **Start from** lists the disc in the drive,
-every original (beside its films, and in the folder masters were kept in
-before), every film in the library, and every clip. The user is trusted to
+every original, every film in the library, and every clip. The user is trusted to
 know what they are making.
 
 - **The disc** shows its Plan (§14, The Plan) once it has been read, with a

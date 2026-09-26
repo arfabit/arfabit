@@ -17,9 +17,8 @@ type Space struct {
 	Needed int64
 	Free   int64
 
-	// Originals is how much the originals take, beside their films and in
-	// the folder masters were kept in before (§6). Library is the rest of
-	// the library: the films.
+	// Originals is how much the originals take, beside their films (§6).
+	// Library is the rest of the library: the films.
 	Originals int64
 	Library   int64
 
@@ -37,10 +36,8 @@ type Space struct {
 const tightMargin = 1.10
 
 // CheckSpace compares what a job needs against what is free in the library,
-// where the original and its films are made. earlierMasters is the folder
-// masters were kept in before they moved beside their films; it is only
-// counted.
-func CheckSpace(needed int64, libraryDir, earlierMasters string) (Space, error) {
+// where the original and its films are made.
+func CheckSpace(needed int64, libraryDir string) (Space, error) {
 	free, err := freeBytes(libraryDir)
 	if err != nil {
 		// Fail open: the job may proceed, and the Plan says the check did not
@@ -52,7 +49,7 @@ func CheckSpace(needed int64, libraryDir, earlierMasters string) (Space, error) 
 	s := Space{
 		Needed:    needed,
 		Free:      free,
-		Originals: originals + dirSize(earlierMasters),
+		Originals: originals,
 		Library:   films,
 	}
 	s.Fits = free >= needed
@@ -122,22 +119,4 @@ func librarySizes(dir string) (originals, rest int64) {
 		return nil
 	})
 	return originals, rest
-}
-
-// dirSize totals a directory, returning zero when it cannot be read.
-//
-// This is only ever shown as information, so an unreadable folder reports zero
-// rather than stopping the check.
-func dirSize(dir string) int64 {
-	var total int64
-	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if info, err := d.Info(); err == nil {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total
 }

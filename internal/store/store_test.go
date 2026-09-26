@@ -183,37 +183,3 @@ func TestNewJobID(t *testing.T) {
 		t.Errorf("job id contains characters unsafe in a filename: %q", got)
 	}
 }
-
-// A record written before an Original was called a master, and a Project a
-// package, reads as it would be written now.
-func TestRecordsFromBeforeReadTheSame(t *testing.T) {
-	s, err := New(t.TempDir(), "node")
-	if err != nil {
-		t.Fatal(err)
-	}
-	old := `{"id":"old","state":"done","master":"/m/Film (2020)/t00.mkv",
-		"package":{"edition":"Small","items":[{"kind":"video","action":"copy","source":0}]},
-		"plan":{"package":{"edition":"Plan"}}}`
-	if err := os.WriteFile(s.JobPath("old"), []byte(old), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	j, err := s.LoadJob("old")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if j.Original != "/m/Film (2020)/t00.mkv" {
-		t.Errorf("Original = %q", j.Original)
-	}
-	if j.Project == nil || j.Project.Edition != "Small" || len(j.Project.Items) != 1 {
-		t.Errorf("Project = %+v", j.Project)
-	}
-	if j.Plan == nil || j.Plan.Project == nil || j.Plan.Project.Edition != "Plan" {
-		t.Errorf("the Plan's project = %+v", j.Plan)
-	}
-
-	listed, _ := s.Jobs()
-	if len(listed) != 1 || listed[0].Original == "" {
-		t.Errorf("the list reads it differently: %+v", listed)
-	}
-}
