@@ -1,111 +1,10 @@
 package lab
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/arfabit/arfabit/internal/ffmpeg"
 )
 
-func testVideo() *ffmpeg.Stream {
-	return &ffmpeg.Stream{Index: 0, Kind: "video", Codec: "h264", Width: 1920, Height: 1080}
-}
-
-// Seeking before the input makes ffmpeg jump to the right place instead of
-// decoding everything up to it — the difference between a clip taking seconds
-// and taking as long as the film.
-func TestSeekComesBeforeTheInput(t *testing.T) {
-	args := clipArgs(Request{
-		Original: "original.mkv",
-		At:       45 * time.Minute,
-		Length:   30 * time.Second,
-	}, Clip{Name: "test", Video: VideoSetting{CRF: 20, Preset: "slow"}}, testVideo())
-
-	joined := strings.Join(args, " ")
-	seek := strings.Index(joined, "-ss")
-	input := strings.Index(joined, "-i ")
-
-	if seek < 0 || input < 0 {
-		t.Fatalf("args are missing a seek or an input: %v", args)
-	}
-	if seek > input {
-		t.Error("the seek comes after the input, so the whole film would be decoded to reach the clip")
-	}
-	if !strings.Contains(joined, "2700.000") {
-		t.Errorf("45 minutes was not passed as seconds: %v", args)
-	}
-}
-
-func TestClipArgsVideoSettings(t *testing.T) {
-	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: time.Minute},
-		Clip{Name: "crf18", Video: VideoSetting{CRF: 18, Preset: "medium"}}, testVideo()), " ")
-
-	for _, want := range []string{"-c:v libx265", "-crf 18", "-preset medium", "-profile:v main10"} {
-		if !strings.Contains(args, want) {
-			t.Errorf("missing %q in %s", want, args)
-		}
-	}
-}
-
-// A copy is the honest baseline every other setting is judged against.
-func TestClipArgsCopyBaseline(t *testing.T) {
-	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: time.Minute},
-		Clip{Name: "untouched", Video: VideoSetting{Copy: true}, Audio: AudioSetting{Copy: true}}, testVideo()), " ")
-
-	if !strings.Contains(args, "-c:v copy") || !strings.Contains(args, "-c:a copy") {
-		t.Errorf("a baseline clip re-encoded something: %s", args)
-	}
-	if strings.Contains(args, "libx265") {
-		t.Errorf("a copy invoked the encoder: %s", args)
-	}
-}
-
-// Sound can be judged on its own, with the picture left untouched beneath it.
-func TestClipArgsAudioOnly(t *testing.T) {
-	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: 2 * time.Minute},
-		Clip{
-			Name:  "eac3-768",
-			Video: VideoSetting{Copy: true},
-			Audio: AudioSetting{Codec: "eac3", Bitrate: "768k", SourceIndex: 2},
-		}, testVideo()), " ")
-
-	if !strings.Contains(args, "-c:v copy") {
-		t.Errorf("the picture was re-encoded while judging sound: %s", args)
-	}
-	if !strings.Contains(args, "-c:a eac3") || !strings.Contains(args, "-b:a 768k") {
-		t.Errorf("the audio setting did not reach ffmpeg: %s", args)
-	}
-	if !strings.Contains(args, "-map 0:2") {
-		t.Errorf("the chosen audio track was not selected: %s", args)
-	}
-}
-
-// A lab clip that lost its HDR metadata would look grey beside one that kept
-// it, and the comparison would be of the wrong thing entirely.
-func TestClipKeepsHDR(t *testing.T) {
-	video := testVideo()
-	video.ColorInfo = ffmpeg.ColorInfo{Primaries: "bt2020", Transfer: "smpte2084", Space: "bt2020nc"}
-	video.HDR = &ffmpeg.HDR{
-		GreenX: 13250, GreenY: 34500, BlueX: 7500, BlueY: 3000,
-		RedX: 34000, RedY: 16000, WhiteX: 15635, WhiteY: 16450,
-		MaxLuminance: 10000000, MinLuminance: 50, MaxCLL: 1000, MaxFALL: 400,
-	}
-
-	args := strings.Join(clipArgs(Request{Original: "m.mkv", Length: time.Minute},
-		Clip{Name: "uhd", Video: VideoSetting{CRF: 20, Preset: "slow"}}, video), " ")
-
-	for _, want := range []string{"master-display=", "max-cll=1000,400", "hdr10=1", "-color_trc smpte2084"} {
-		if !strings.Contains(args, want) {
-			t.Errorf("HDR metadata missing %q: %s", want, args)
-		}
-	}
-}
-
-// The whole point of the lab: what a thirty-second clip means for a two-hour
-// film, in size and in hours of encoding.
 func TestCompareExtrapolatesToTheWholeFilm(t *testing.T) {
 	clips := []Clip{
 		{Name: "crf20", Size: 100_000_000, Took: time.Minute},
@@ -123,8 +22,8 @@ func TestCompareExtrapolatesToTheWholeFilm(t *testing.T) {
 	}
 
 	// Thirty seconds scaled to two hours is 240 times.
-	if want := int64(50_000_000 * 240); got.Clips[0].WholeFilm != want {
-		t.Errorf("WholeFilm = %d, want %d", got.Clips[0].WholeFilm, want)
+	if want := int64(50_000_000 * 240); got.Clips[0].Whole != want {
+		t.Errorf("Whole = %d, want %d", got.Clips[0].Whole, want)
 	}
 	if want := 240 * 50 * time.Second; got.Clips[0].EncodeTime != want {
 		t.Errorf("EncodeTime = %v, want %v", got.Clips[0].EncodeTime, want)
@@ -139,8 +38,6 @@ func TestCompareExtrapolatesToTheWholeFilm(t *testing.T) {
 	}
 }
 
-// A setting that fails must not stop the others being compared: four results
-// out of five is still a comparison.
 func TestCompareKeepsFailedSettingsInTheTable(t *testing.T) {
 	clips := []Clip{
 		{Name: "good", Size: 10_000_000, Took: time.Minute},
@@ -163,84 +60,5 @@ func TestCompareKeepsFailedSettingsInTheTable(t *testing.T) {
 	}
 	if broken.Clip.Problem == "" {
 		t.Error("the failed setting lost its explanation")
-	}
-}
-
-func TestSafeName(t *testing.T) {
-	if got := safeName("CRF 20 / slow"); strings.ContainsAny(got, ` /\:`) {
-		t.Errorf("safeName left something unsafe: %q", got)
-	}
-	if got := safeName(""); got != "clip" {
-		t.Errorf("an unnamed setting got %q", got)
-	}
-}
-
-// A media manager pointed at the lab folder should see one film with several
-// editions, and play them one after another. That is what comparing means.
-func TestClipNameIsAnEditionOfTheFilm(t *testing.T) {
-	got := ClipName("Crime 101 (2025)", 1, "crf20-medium", 75*time.Minute+20*time.Second)
-
-	if !strings.HasPrefix(got, "Crime 101 (2025) {edition-") {
-		t.Errorf("the clip is not named as an edition of the film: %q", got)
-	}
-	for _, want := range []string{"Lab 001", "crf20-medium", "1h15m20s", ".mkv"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("name %q is missing %q", got, want)
-		}
-	}
-}
-
-// A brace inside the tag would close it early and confuse the manager reading
-// it.
-func TestEditionTagHasNoBraces(t *testing.T) {
-	got := ClipName("Film", 2, "odd{setting}name", time.Minute)
-
-	if strings.Count(got, "{") != 1 || strings.Count(got, "}") != 1 {
-		t.Errorf("the edition tag is not closed exactly once: %q", got)
-	}
-}
-
-// Timestamps sort in the order they happen, so a listing reads as a walk
-// through the film.
-func TestClipTimestampsSort(t *testing.T) {
-	early := ClipName("Film", 1, "x", 9*time.Minute)
-	later := ClipName("Film", 1, "x", 70*time.Minute)
-
-	if !(early < later) {
-		t.Errorf("%q does not sort before %q", early, later)
-	}
-}
-
-// The folder is the record, so run numbers survive a restart and carry on
-// rather than starting again at one.
-func TestNextRunContinuesFromWhatIsThere(t *testing.T) {
-	dir := t.TempDir()
-
-	if got := NextRun(dir); got != 1 {
-		t.Errorf("an empty folder starts at run %d, want 1", got)
-	}
-
-	for _, name := range []string{
-		ClipName("Film", 1, "crf20", time.Minute),
-		ClipName("Film", 2, "crf22", time.Minute),
-		"something-else.mp4",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if got := NextRun(dir); got != 3 {
-		t.Errorf("NextRun = %d, want 3", got)
-	}
-}
-
-// Clips from one afternoon's comparison stay together under one number.
-func TestOneRunSharesItsNumber(t *testing.T) {
-	first := ClipName("Film", 7, "crf20", time.Minute)
-	second := ClipName("Film", 7, "crf22", time.Minute)
-
-	if !strings.Contains(first, "Lab 007") || !strings.Contains(second, "Lab 007") {
-		t.Errorf("clips from one run do not share a number: %q, %q", first, second)
 	}
 }

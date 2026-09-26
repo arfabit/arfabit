@@ -83,7 +83,7 @@ These words are used consistently in code, UI, and logs. No synonyms.
 | **Delivery**  | The finished `.mkv` plus its sidecar subtitles.                          |
 | **Low confidence** | A subtitle OCR may have read wrong: nothing was read, what was read holds a mark known to be a misreading, or a second reading says other words. ARFABIT's own measure; no reader's score goes into it (§10). |
 | **Edition**   | A Plan's version name, written as `{edition-...}` in the Delivery's filename. Plex's word. Blank means none. |
-| **Task**      | One step a project becomes, in the queue: a copy of a disc to its Original, one subtitle track of an Original read into text (OCR), or a package (a film) or a clip made from an Original. A film planned with its disc is a task of its own that waits for the copy. In code, and in the files on disk, a **job**. |
+| **Task**      | One step a project becomes, in the queue: a copy of a disc to its Original, one subtitle track of an Original read into text (OCR), or a package: the files a Project makes, of all of its source or part of it. A package planned with its disc is a task of its own that waits for the copy. In code, and in the files on disk, a **job**. |
 | **Library**   | Where originals and Deliveries land, one folder per film, in Plex layout (§6). |
 
 ### What waits on what
@@ -97,7 +97,7 @@ disc can go in while the last one converts.
 **The processor** could in principle run several conversions at once, and
 should not. x265 already uses every core, so a second conversion finishes both
 later than running them in turn would, and makes a nonsense of both estimates.
-Packaging and lab clips therefore share a small number of slots, one by default
+Packages, whole or in part, therefore share a small number of slots, one by default
 (`machine.max_conversions`), and whatever cannot start waits at stage QUEUED.
 
 The result is the arrangement that matters for ripping a shelf of discs: the
@@ -154,8 +154,8 @@ rearranged from the page, and only the front of the line is given a slot, so the
 order shown is the order things start in. A Project joins the line held for ten
 seconds before it may start, so one added by mistake or in the wrong place can be
 stopped or moved before anything has been done; the page calls this "Getting
-things ready". **LAB** is the stage a package job making
-test clips runs in (§14); it is not part of a disc's trip and takes a slot the
+things ready". **LAB** is the stage a package making part of its source
+runs in (§14); it is not part of a disc's trip and takes a slot the
 same way PACKAGE does.
 
 **EJECT comes straight after RIP**, not at the end. Once the Original exists the
@@ -232,9 +232,9 @@ arfabit/
     pipeline/                  stage runner, job lifecycle
       runner.go                SCAN → DELIVER for a disc
       plan.go  audio.go        Plan construction, audio track rules
-      package.go               package jobs: clips and whole-Original Deliveries, from line items
+      package.go               package jobs: what a Project makes, of all of a source or part, from line items
       reading.go               OCR tasks: a track of an original read into the SRT beside it
-      subtitles.go             a track read into SRT, with low confidence; a clip's own subtitles
+      subtitles.go             a track read into SRT, with low confidence; a Project's subtitle files
       recipe.go                blueprints as recipes; an Original's or a disc's tracks
     playback/                  what was tested to play where (§4), as notes
       slots.go                 processor slots (QUEUED)
@@ -246,7 +246,7 @@ arfabit/
       encode.go                ffmpeg/x265 arg construction
       hdr.go                   HDR10 metadata probe + propagation
       probe.go  run.go         ffprobe, subprocess + progress
-    lab/                       clip rendering and the comparison table
+    lab/                       what part of a source would come to across all of it
     blueprints/                blueprints made on the page (blueprints.json)
     subs/                      PGS decode, a track read from an original, SRT writing
     ocr/                       the computer's own text reader (§10): Vision, Windows, Tesseract
@@ -306,22 +306,21 @@ A node renders the global view by reading every `nodes/*/` directory.
 
 ### Media layout
 
-Originals and films share one folder per film, named for Plex. The original is
-an edition of its own, `Original`, so to Plex it is one more version of the film:
+The library (`paths.library`, `~/Downloads/arfabit` itself by default) is one
+folder per film, named for Plex. The original and everything made from it
+share it, each an edition of its own; the original's is `Original`, so to Plex
+it is one more version of the film:
 
 ```
 ~/Downloads/arfabit/
-  library/
-    Blade Runner (1982)/
-      Blade Runner (1982) {edition-Original}.mkv      # the original
-      Blade Runner (1982) {edition-Original}.en.srt   # its subtitles read into text (§10)
-      Blade Runner (1982).mkv                         # a film, no edition
-      Blade Runner (1982).en.srt                      # a copy of them
-      Blade Runner (1982) {edition-Small}.mkv         # a film, edition "Small"
-  clips/
-    Blade Runner (1982)/
-      Blade Runner (1982) {edition-Lab 001 - Defaults - 1h15m20s}.mkv
-      Blade Runner (1982) {edition-Lab 001 - Small - 1h15m20s}.mkv
+  Blade Runner (1982)/
+    Blade Runner (1982) {edition-Original}.mkv      # the original
+    Blade Runner (1982) {edition-Original}.en.srt   # its subtitles read into text (§10)
+    Blade Runner (1982).mkv                         # made from it, no edition
+    Blade Runner (1982).en.srt                      # a copy of them
+    Blade Runner (1982) {edition-Small}.mkv         # made from it, edition "Small"
+    Blade Runner (1982) {edition-Trial}.mkv         # part of it, edition "Trial"
+    Blade Runner (1982) {edition-Pictures}.en.sup   # its subtitles alone, as they are
 ```
 
 MakeMKV names its file its own way, in the film's folder; once the copy is
@@ -347,10 +346,9 @@ Original.
 A Delivery carries its Plan's edition as a tag. "Edition" is Plex's word, and the
 tag is how Plex keeps several versions of one film side by side as selectable
 editions. A blank edition means no tag. Braces are left out of an edition, since
-they would end the tag early. Lab clips use the same shape, with a run number, the blueprint
-(or "Defaults") and the position as the edition, so a media manager pointed at `clips/` sees one title
-with several editions to play in turn. The run number comes from what is already in
-the folder, so it survives restarts.
+they would end the tag early. The edition is the user's to choose, for part of
+a source as for all of it; ARFABIT does not record in the name what settings
+made a file.
 Sidecar names match the video filename exactly, which is what Plex requires;
 `.sdh` and `.forced` are flags Plex understands, which ARFABIT does not set yet
 because it does not yet tell those tracks apart (Appendix A).
@@ -490,10 +488,11 @@ to the machine, the drive or MakeMKV live in their own sections (§7).
 
 ### Projects
 
-A **Project** is what to make from an Original. It is planned against what the Original
-holds, track by track, in three sections — picture, sound, subtitles — as **line
-items**. Each line item is one of the Original's tracks and what to do with it: **copy
-as is**, or **convert** (the picture to HEVC at a quality and speed; sound to FLAC,
+A **Project** is what to make from an Original, or from anything in the library.
+It is planned against what that file holds, track by track, in three sections —
+Video, Audio, Subtitles — as **line items**. Each line item is one of its tracks
+and what to do with it: **copy as is**, or **convert** (video to HEVC at a
+quality and speed; audio to FLAC,
 AAC or E-AC-3 — E-AC-3 only for surround of up to six channels, since for stereo
 AAC does the same job everywhere). Lossy sound is never converted to a higher
 bitrate than it has, which would only make a bigger file of the same sound: the
@@ -524,7 +523,19 @@ asking for something the Original lacks adds nothing for it; one whose sound rul
 nothing adds no sound, and the user adds what they want. The defaults are a recipe
 too.
 
-One Project makes one file per container, MKV or MP4, and the container decides
+What a Project makes follows from its line items. With video or audio (either,
+or both, and at most one video) it makes one file per container, with its
+subtitles copied inside and those read into text beside it as SRT. With
+subtitles alone it makes a file for each: SRT for a track read into text or
+copied as text, and SUP for a Blu-ray's pictures copied as they are, taken out
+whole. Whether Plex reads a `.sup` beside a video is untested. Every file is
+named `<Title> {edition-…}` in the film's folder, with the language and kind
+after it for subtitle files; two of one kind in one language would share a
+name, and are refused. `Original` is the original's edition, and nothing with
+video or audio can take it; subtitles alone, from all of the original, can,
+which is how its own SRT is read from Projects.
+
+With video or audio, one Project makes one file per container, MKV or MP4, and the container decides
 which line items a file can carry. What MP4 can carry was found with ffmpeg
 9.0.2 and nothing else: every sound format a disc has goes in as it is except
 Dolby TrueHD, which ffmpeg calls experimental in MP4 and refuses, so a project
@@ -535,14 +546,15 @@ text go beside it as SRT, as for MKV. ffmpeg labels HEVC in MP4 `hev1` unless
 asked, and ARFABIT asks for `hvc1`, the label under which the picture's
 parameter sets travel outside the picture. How any of it plays is untested
 (§4). A film in MP4 counts as the same edition as one in MKV when ARFABIT looks
-for a file already there, so making both of one film needs two editions. A **whole** Original
-becomes a film in the library, beside it (stage PACKAGE), named with the Project's
-edition. A
-**stretch** becomes a clip in the clips folder (stage LAB). A stretch is cut first,
+for a file already there, so making both of one film needs two editions.
+
+**How much**: all of the source (stage PACKAGE), or part of it — a start and a
+length, 5 s to 10 min (stage LAB), which also says what all of it would come to
+(§14). Part of a source is cut first,
 with every stream it needs copied together into a temporary piece of ARFABIT's own,
 removed after, and the file is made from the piece without seeking: seeking while
 copying some streams and converting others moved them against each other by up to
-0.7 seconds. Copied streams can only start on a keyframe, so a clip starts at the
+0.7 seconds. Copied streams can only start on a keyframe, so a part starts at the
 last one before the time asked for, usually under a second before.
 
 A disc's Plan uses the same editor, fed with the disc's tracks from the scan. Its
@@ -551,7 +563,7 @@ once the Original exists, matching each by kind, language, format and width, sin
 MakeMKV numbers the Original's tracks its own way and turns uncompressed disc sound
 into FLAC.
 
-Not built: several containers from one Project sharing one encode of the picture;
+Not built: several containers from one Project sharing one encode of the video;
 making a Project's files while its Original is still being copied.
 
 ### Sound rules
@@ -802,16 +814,17 @@ been run on real subtitles yet.
 
 **When.** Reading is a task of its own, stage OCR, one per subtitle track, read
 from the original into the SRT beside it (§2, §6). A disc's Plan says which of
-its picture subtitle tracks to read: at first those its film converts to text,
-and any can be ticked or unticked. Once the disc is copied, each chosen track,
-and each its film converts, is read. A film made later from an original, in
-Projects, starts an OCR task for any track it converts that has no SRT yet. A
-track is never read over an SRT already there.
+its picture subtitle tracks to read: at first those its project converts to
+text, and any can be ticked or unticked. Once the disc is copied, each chosen
+track, and each its project converts, is read. A project made later in
+Projects, of all of a file, starts an OCR task for any track it converts that
+has no SRT beside that file yet. A track is never read over an SRT already
+there.
 
-A film takes a copy of the original's SRT for each subtitle line item it
-converts to text, at DELIVER (§2). If a track cannot be read — a language the
-reader does not have, or anything else — the film is delivered all the same,
-without it, and the note says why.
+What a project makes of all of a file takes a copy of that file's SRT for each
+subtitle line item it converts to text, at DELIVER (§2). If a track cannot be
+read — a language the reader does not have, or anything else — the rest is
+made all the same, without it, and the note says why.
 
 **How a track is read.**
 
@@ -843,19 +856,19 @@ without it, and the note says why.
    the node's own folder (`nodes/<id>/ocr/<task>/`), and in the log with its
    time; the task's note says how many there are. A subtitle with nothing read
    is left out of the SRT.
-7. The SRT is written beside the original, named after it and the language
-   (§6), or beside a clip, named after the clip. A file already there with that
+7. The SRT is written beside the file read, named after it and the language
+   (§6), or, for part of a file, beside what is made of it. A file already there with that
    name is not replaced: that is checked before anything is read.
 
-**Clips.** A clip reads its own subtitles, in its own task, from the piece cut
-for it, trimmed to its length; it does not take lines from the original's SRT.
-A piece copied from the Original starts at the keyframe before the time asked
-for, so shifting the Original's times by that time would put every line early
-by up to the gap between keyframes; the piece is on the same clock as the clip,
-which `TestClipSubtitlesKeepTimeWithThePicture` checks (3.2 s asked for, the
-piece starting at 3.0 s). Taking lines from the original's SRT instead would
-need the piece's true start found for every clip, and a clip is made to judge
-settings, not to keep; reading its few lines again costs seconds.
+**Part of a file.** A project of part of a file reads its own subtitles, in
+its own task, from the piece cut for it, trimmed to its length; it does not
+take lines from the file's SRT. A piece starts at the keyframe before the time
+asked for, so shifting the file's times by that time would put every line
+early by up to the gap between keyframes; the piece is on the same clock as
+what is made, which `TestClipSubtitlesKeepTimeWithThePicture` checks (3.2 s
+asked for, the piece starting at 3.0 s). Taking lines from the file's SRT
+instead would need the piece's true start found every time; reading a few
+lines again costs seconds.
 
 **Blueprints.** A Blu-ray's picture subtitles are converted to text wherever the
 computer can read them, unless the blueprint says `keep_subtitle_pictures`. Where
@@ -872,7 +885,8 @@ reading writes it into the SRT beside the original at once; Custom opens a box
 filled with whichever was picked last, to change and save. Only that subtitle
 changes, and an empty Custom takes it out. Nothing is changed until somebody
 chooses. **These are fine** turns the task green without going line by line,
-and changes nothing. A clip's subtitles are checked the same way, in its SRT.
+and changes nothing. Subtitles read from part of a file are checked the same
+way, in their SRT.
 
 **Copies fall behind, and are brought up to date.** When a film takes a copy
 of an SRT beside its original, ARFABIT records the copy's SHA-256 on the film's
@@ -1001,15 +1015,15 @@ section keeps running whichever is showing, so switching loses nothing.
 
 | Section | Holds |
 |---|---|
-| **Tasks** | Watching: Doctor, each drive, the queue, logs, clips compared, recent tasks |
+| **Tasks** | Watching: Doctor, each drive, the queue, logs, parts compared, recent tasks |
 | **Projects** | Creating: what to start from, and what to make. Nothing finished is shown here; that is Tasks |
 | **Blueprints** | Recipes, applied from the start by a drive or by hand |
 | **Settings** | Autostart, restart and stop, the film list |
 
 Two workflows matter, and the page exists to serve them: **automatic**, where
 a disc goes in and, with nothing clicked, the film comes out with its
-subtitles read into text (a drive set to *Blueprint*); and **manual**, clips to
-find the settings and making films from an original again later. OCR is never
+subtitles read into text (a drive set to *Blueprint*); and **manual**, parts of
+a film made to find the settings, and making from an original again later. OCR is never
 perfect, so both leave a way to fix subtitles after the fact, however long ago
 (§10).
 
@@ -1019,11 +1033,12 @@ the drive is doing is written underneath.
 Each drive has **When a disc goes in: Nothing / Copy / Blueprint: [name]**,
 kept by the drive's name in the node's own `drives.json`. *Nothing* waits for
 Plan to be pressed. *Copy* reads the disc as soon as it goes in and starts
-copying it, from the blueprint used by default, with no film; its subtitles
-are read as the Plan chose. *Blueprint* does the same and makes a film too,
+copying it, from the blueprint used by default, and makes nothing from it; its
+subtitles are read as the Plan chose. *Blueprint* does the same and makes a file
+from it too,
 from that blueprint or, as *Blueprint: Defaults*, from the defaults. Either
 way the Plan stays open while the disc copies (§2), to change anything or add
-a film. What stops a disc starting on its own — too little room, a file
+a file. What stops a disc starting on its own — too little room, a file
 already there, a blueprint since removed — leaves its Plan waiting, and the
 log says why. A disc already in the drive when ARFABIT starts did not just go
 in, and is left alone.
@@ -1032,9 +1047,9 @@ in, and is left alone.
 
 A disc's Plan is on the Projects page, with the disc chosen to start from. It
 is two parts. **The original** says what is on the disc and goes
-into the original — picture, and each sound track with whether it is lossless —
+into the original — video, and each audio track with whether it is lossless —
 and nothing else: nothing in it is converted, so it never talks about
-converting. **Make a film** turns on the second part, **the film**: the
+converting. **Also make a file from it** turns on the second part, **the file**: the
 same line-item editor as the Projects page, fed with the disc's tracks, started
 from the default blueprint or the defaults (§8, Projects).
 
@@ -1042,16 +1057,16 @@ Once started, the Plan stays up while any of it can still change (§2), saying
 which parts are still open; the rest is greyed and cannot be changed.
 
 The Plan will not start a job that would replace a file already there — an
-original, or a film in the library under the same edition — and says which file
+original, or a file in the library under the same edition — and says which file
 is in the way (§0.6). ffmpeg is run with `-y`, so this is looked for again just
 before each file is written, since a job can wait in the line for hours.
 
 ### Recent tasks
 
 Subtitles still to be checked are named at the top, each opening its task.
-Below them, the last twenty tasks of every kind, labelled Copy, OCR, Package or Clip, with
-what each became, when, and the names of the files it made: a copy's original,
-an OCR task's SRT, a package's film or clip. The label's colour says how it
+Below them, the last twenty tasks of every kind, labelled Copy, OCR or Package,
+with what each became, when, and the names of the files it made: a copy's
+original, an OCR task's SRT, a package's files. The label's colour says how it
 ended, and an OCR task's says whether its subtitles are still to be checked
 (§10); one that is stays in the list, beyond the twenty. Anything that can be
 started again says so. The folders are the record of what exists; this is the
@@ -1066,7 +1081,7 @@ record of what was done.
   corrected for any difference between the two computers' clocks. The figures
   under a bar sit in fixed-width cells so the line does not shift as they change.
 - Each job is headed with the file it is making, named exactly: the copy's
-  `.mkv` during RIP (MakeMKV's own name, until it is renamed), the Delivery's or clip's `.mkv` with its
+  `.mkv` during RIP (MakeMKV's own name, until it is renamed), the file a package is making, with its
   edition after.
 - Anything that could throw away ten minutes or more with one stray click asks
   first, saying how much work would be lost: stopping a job that is working, and
@@ -1106,42 +1121,41 @@ automatically, and the Settings links to the purchase page, the forum and r/make
 ### Projects page
 
 Setting something up to be made. **Start from** lists the disc in the drive,
-every original, every film in the library, and every clip. The user is trusted to
-know what they are making.
+and every video file in the library, in one list. The user is trusted to know
+what they are making.
 
 - **The disc** shows its Plan (§14, The Plan) once it has been read, with a
   button to read it until then. The drive's Plan button on Tasks reads the disc
   and comes here. Tasks says, under the drive, when a disc's Plan is here
   waiting or still open to change.
-- **A file** makes one of three things. **Subtitles only**: its picture
-  subtitle tracks, ticked, each read into text as an OCR task of its own into
-  the SRT beside the file (§10); no picture or sound is made. **A film**: all of
-  it, converted or remuxed as its line items say, as MKV or MP4 (§8), into the
-  library in the film's folder. **A clip**: a stretch — a start (`01:23:45`) and a
-  length, 5 s to 10 min — into `clips/<film>/`, named as an edition (§6). A film
-  or a clip starts from the defaults or a blueprint, and its line items can
-  then be changed (§8, Projects).
+- **A file** shows **How much** — all of it, or part: a start (`01:23:45`) and
+  a length, 5 s to 10 min — and the line-item editor, Video, Audio and
+  Subtitles, started from the defaults or a blueprint (§8, Projects). What it
+  makes follows from the line items: a video or audio file, MKV or MP4, or
+  subtitle files alone. It is named with the edition given, in the film's
+  folder (§6).
 
 Starting a project adds its tasks to the queue, and the page says they are on
-Tasks. Clips are **files you watch on your own TV** — ARFABIT does not pick a
-winner and does not change your settings. Judging is yours. Comparing two
-settings is two projects from the same Original.
+Tasks. Part of a film is a **file you watch on your own TV** — ARFABIT does not
+pick a winner and does not change your settings. Judging is yours. Comparing
+two settings is two projects from the same Original, under two editions.
 
-Alongside each clip, what the whole film would come to, extrapolated from clip
-length to the whole Original. Size and time are normalised so the best entry reads 100%:
+With video or audio, part of a file also says what all of it would come to,
+extrapolated from the part's length, under **Parts compared** on Tasks. Size
+and time are normalised so the best entry reads 100%:
 
 | Column | Basis for 100% |
 |---|---|
 | Size per hour | the smallest result |
-| Whole-film size | the smallest result |
-| Whole-film encode time | the fastest result |
+| All of it, size | the smallest result |
+| All of it, encode time | the fastest result |
 
 Not built: an average-bitrate column, and VMAF. VMAF, when it comes, is scored against
 a theoretical bit-perfect 100 rather than the best entry, so a row reading 94% means
 "94% of perfect", not "best of a bad set".
 
-A single clip lies — a dark, static scene flatters every bitrate; falling snow
-destroys them all. Auto-sampling three clips by scene complexity is **phase 2**.
+A single part lies — a dark, static scene flatters every bitrate; falling snow
+destroys them all. Auto-sampling three parts by scene complexity is **phase 2**.
 
 ---
 
@@ -1181,7 +1195,7 @@ nothing in the UI presents a scary choice. Word substitutions:
 
 **Working today.** SCAN, PLAN, RIP, EJECT, OCR, QUEUED, PACKAGE, DELIVER, running end to end
 from the web page on one machine, with a queue for the processor, optional
-blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
+blueprints as recipes, and Projects (of all of a file, or part of it).
 
 | Piece | State |
 |---|---|
@@ -1199,8 +1213,8 @@ blueprints as recipes, and Projects (lab clips and whole-Original Deliveries).
 | Defaults and blueprints: settings file, made on the page, one-off, optional default blueprint | built, tested |
 | Processor slots and QUEUED | built, tested |
 | A disc's Plan open to change until each step starts; what a drive does when a disc goes in | built, tested (starting on its own not yet tried with a real drive) |
-| Projects from any file ARFABIT made: subtitles only, a film as MKV or MP4, a clip | built, tested (MP4 made and read back; not played anywhere) |
-| Projects: line items copied or converted, blueprints as recipes, lab clips and whole-Original Deliveries | built, tested (no VMAF) |
+| Projects from any file in the library: video or audio as MKV or MP4, or subtitle files alone (SRT, SUP), of all or part | built, tested (MP4 made and read back; not played anywhere; SUP beside a video untested in Plex) |
+| Projects: line items copied or converted, blueprints as recipes, parts compared with the whole | built, tested (no VMAF) |
 | Offline IMDb index: download, lookup, suggestions on the Plan | built, tested |
 | Jobs left behind by a restart; running a stopped job again from its own Plans | built, tested |
 | Doctor | built |

@@ -374,7 +374,7 @@ func (r *Runner) Start(parent context.Context) error {
 	}
 	if job.Plan != nil && job.Plan.Convert {
 		if job.Plan.Project == nil {
-			return errors.New("there is no film planned; turn off Make a film to copy the disc only")
+			return errors.New("there is nothing planned to make from it; turn off Also make a file from it to copy the disc only")
 		}
 		check := *job.Plan.Project
 		if err := checkProject(&check, r.OCR != nil); err != nil {
@@ -421,7 +421,7 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 	pkg.Containers = slices.Clone(rip.Plan.Project.Containers)
 	r.mu.Unlock()
 
-	rec := store.NewJob(store.NewJobID(time.Now(), rip.Title+" film"))
+	rec := store.NewJob(store.NewJobID(time.Now(), rip.Title+" package"))
 	rec.Kind = store.KindConvert
 	rec.From = rip.ID
 	rec.Title, rec.Year = rip.Title, rip.Year
@@ -435,7 +435,7 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 		}
 	})
 	if err != nil {
-		rip.Log.Printf(store.StagePlan, "The film could not be set up, so only the original will be made: %v", err)
+		rip.Log.Printf(store.StagePlan, "What was to be made from it could not be set up, so only the original will be made: %v", err)
 		return
 	}
 	log.Describe(rec.ID, rec.Title)
@@ -487,11 +487,11 @@ func (r *Runner) followRip(parent context.Context, rip *Job) {
 		}
 		r.mu.Unlock()
 		if err != nil {
-			r.stop(job, sentence(err.Error())+". Nothing was made. The original is kept, so a film can be made from it in Projects.", "")
+			r.stop(job, sentence(err.Error())+". Nothing was made. The original is kept, so anything can be made from it in Projects.", "")
 			return
 		}
 		job.Log.Printf(store.StageQueued, "The original is ready.")
-		r.runPackage(ctx, job, r.configuredDirs(), 0)
+		r.runPackage(ctx, job, r.Config.Paths.Library, 0)
 	}()
 }
 
@@ -658,7 +658,7 @@ func (r *Runner) run(ctx context.Context, job *Job) error {
 	r.mu.Unlock()
 	job.Note = fmt.Sprintf("%s is copied.", job.Title)
 	if !convert {
-		job.Note += " Make a film from it whenever you like, in Projects."
+		job.Note += " Make anything from it whenever you like, in Projects."
 	}
 	job.Log.Printf(store.StageEject, "%s", job.Note)
 	r.save(job)

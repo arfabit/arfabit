@@ -98,7 +98,7 @@ function filmName(job, fallback = "A disc") {
 
 function stageWords(stage) {
   return {
-    LAB: "Making test clips",
+    LAB: "Making part of it",
     QUEUED: "Waiting its turn",
     SCAN: "Reading the disc",
     PLAN: "Working out what to do",
@@ -355,8 +355,8 @@ function renderDriveWhen(drive) {
 
   $("drive-when-note").textContent = {
     nothing: "Press Plan to read a disc and decide what to do with it.",
-    copy: "A disc is copied as soon as it goes in, and its subtitles read into text. Its Plan stays open while it copies, to add a film or change anything.",
-    blueprint: `A disc is copied as soon as it goes in, its subtitles read, and a film made from ${set.blueprint ? `the ${set.blueprint} blueprint` : "the defaults"}. Its Plan stays open while it copies.`,
+    copy: "A disc is copied as soon as it goes in, and its subtitles read into text. Its Plan stays open while it copies, to add a file or change anything.",
+    blueprint: `A disc is copied as soon as it goes in, its subtitles read, and a file made from ${set.blueprint ? `the ${set.blueprint} blueprint` : "the defaults"}. Its Plan stays open while it copies.`,
   }[set.when] || "";
 }
 
@@ -581,7 +581,7 @@ function renderPlan(job, existing = []) {
   const items = (plan.project && plan.project.items) || [];
   const soundChosen = items.some((it) => it.kind === "audio");
   if (transcoding && plan.sound_not_found && !soundChosen) {
-    notices.push("None of the sound this blueprint asks for is on this disc. Add the sound you want to the film below, or turn off Make a film to copy the disc and decide later.");
+    notices.push("None of the audio this blueprint asks for is on this disc. Add the audio you want below, or turn off Also make a file from it to copy the disc and decide later.");
   }
 
   $("plan-notice").hidden = notices.length === 0;
@@ -607,8 +607,8 @@ function renderPlan(job, existing = []) {
   $("plan-convert").checked = transcoding;
   $("plan-film").hidden = !transcoding;
   $("convert-note").textContent = transcoding
-    ? "The film joins the queue as a task of its own, and starts once the original is copied."
-    : "ARFABIT will copy the disc and stop. You can make a film from the original any time, in Projects.";
+    ? "It joins the queue as a task of its own, and starts once the original is copied."
+    : "ARFABIT will copy the disc and stop. You can make anything from the original later, in Projects.";
   $("film-target").textContent =
     `Started from ${plan.blueprint ? `the ${plan.blueprint} blueprint` : "the defaults"}. Everything the original will hold is listed; change anything.`;
 
@@ -627,19 +627,19 @@ function renderPlan(job, existing = []) {
   if (open.started) {
     const parts = [];
     if (open.name) parts.push("its name and the subtitles to read, until the copy is finished");
-    if (open.film) parts.push(transcoding ? "the film, until it starts" : "whether to make a film, until the copy is finished");
+    if (open.film) parts.push(transcoding ? "the file made from it, until that starts" : "whether to make a file from it, until the copy is finished");
     $("plan-started").textContent = (job.state === "running" ? "Being copied." : "Copied.")
       + (parts.length ? ` You can still change ${parts.join("; and ")}.` : "");
   }
 
   const fits = !job.space || job.space.Fits;
-  const pictures = items.filter((it) => it.kind === "video").length;
-  const noPicture = transcoding && pictures !== 1;
-  $("start").disabled = !fits || existing.length > 0 || noPicture;
+  const videos = items.filter((it) => it.kind === "video").length;
+  const nothing = transcoding && (items.length === 0 || videos > 1);
+  $("start").disabled = !fits || existing.length > 0 || nothing;
   $("plan-blocked").textContent = !fits
     ? "Free up some room and look for the disc again."
     : existing.length ? "A file with this name is already there."
-      : noPicture ? "The film needs a picture." : "";
+      : nothing ? (items.length ? "A file can hold one video." : "It has nothing to make.") : "";
 }
 
 // --- the queue ------------------------------------------------------------
@@ -1079,7 +1079,7 @@ async function askToStop(button, id) {
       : "";
     // A film waiting on this copy has nothing to work from without it.
     const follower = lastActive.find((j) => j.from === job.id);
-    const also = follower ? " The film waiting for it will be removed from the queue too." : "";
+    const also = follower ? " What was to be made from it will be removed from the queue too." : "";
     const yes = await confirmFirst({
       title: `Stop ${filmName(job)}?`,
       detail: lostWork(job) + kept + also,
@@ -1328,7 +1328,7 @@ let recentDrawn = "";
 
 // taskKind names what a task was.
 function taskKind(job) {
-  if (job.kind === "lab") return "Clip";
+  if (job.kind === "lab") return "Package";
   if (job.kind === "ocr") return "OCR";
   if (job.kind === "convert") return "Package";
   return "Copy";
@@ -1869,27 +1869,20 @@ function renderSources() {
   const was = select.value;
   const drive = drives[0];
 
-  const groups = [["disc", "Disc"], ["original", "Originals"], ["film", "Films"], ["clip", "Clips"]];
-  const children = [];
-  for (const [kind, label] of groups) {
-    const group = document.createElement("optgroup");
-    group.label = label;
-    if (kind === "disc") {
-      group.append(new Option(drive && drive.Name ? `The disc in ${drive.Name}` : "The disc in the drive", "disc"));
-    } else {
-      for (const source of sources.filter((f) => f.kind === kind)) {
-        const option = new Option(`${source.title} — ${source.path.split(/[\\/]/).pop()} (${bytes(source.size)})`, source.path);
-        option.dataset.film = source.title;
-        group.append(option);
-      }
-    }
-    if (group.children.length) children.push(group);
+  const disc = document.createElement("optgroup");
+  disc.label = "Disc";
+  disc.append(new Option(drive && drive.Name ? `The disc in ${drive.Name}` : "The disc in the drive", "disc"));
+  const library = document.createElement("optgroup");
+  library.label = "Library";
+  for (const source of sources) {
+    const option = new Option(`${source.path.split(/[\\/]/).pop()} (${bytes(source.size)})`, source.path);
+    option.dataset.film = source.title;
+    library.append(option);
   }
-  select.replaceChildren(...children);
+  select.replaceChildren(disc, ...(sources.length ? [library] : []));
 
   const values = [...select.querySelectorAll("option")].map((o) => o.value);
-  const fallback = sources.find((f) => f.kind === "original");
-  select.value = values.includes(was) ? was : fallback ? fallback.path : "disc";
+  select.value = values.includes(was) ? was : sources.length ? sources[0].path : "disc";
   if (select.value !== was) sourceChanged();
 }
 
@@ -1966,25 +1959,30 @@ let sourceInfo = { tracks: [], duration: 0 };
 let subtitleReading = { ocr: false, note: "" };
 let pkg = null;
 
-// The subtitle tracks ticked to read, when only subtitles are made.
-let readChoice = new Set();
 
 // The defaults' values, for a line that starts being converted by hand.
 let defaultValues = { crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, preset: "slow", audio_bitrate: "256k" };
 
 const PRESETS = ["superfast", "medium", "slow", "slower", "veryslow"];
 const BITRATES = ["128k", "192k", "256k", "320k", "448k", "640k", "768k"];
-const SECTIONS = [["video", "Picture"], ["audio", "Sound"], ["subtitle", "Subtitles"]];
+const SECTIONS = [["video", "Video"], ["audio", "Audio"], ["subtitle", "Subtitles"]];
 
-// makeKind is what the project makes from a file: "read", "film" or "clip".
-function makeKind() {
-  const chosen = document.querySelector('input[name="project-make"]:checked');
-  return chosen ? chosen.value : "film";
+// part reports whether the project makes something of part of the file
+// rather than all of it.
+function part() {
+  const chosen = document.querySelector('input[name="project-much"]:checked');
+  return Boolean(chosen && chosen.value === "part");
 }
 
 function containerChoice() {
   const chosen = document.querySelector('input[name="project-container"]:checked');
   return chosen ? chosen.value : "mkv";
+}
+
+// hasAV reports whether a project makes a video or audio file, rather than
+// subtitle files alone.
+function hasAV(p) {
+  return Boolean(p) && p.items.some((it) => it.kind === "video" || it.kind === "audio");
 }
 
 // loadSource reads what the chosen file holds, then fills the project in
@@ -1993,8 +1991,7 @@ async function loadSource() {
   const path = $("project-source").value;
   sourceInfo = { tracks: [], duration: 0 };
   pkg = null;
-  readChoice = new Set();
-  renderMake();
+  renderProject();
   if (!path || path === "disc") return;
 
   let reply;
@@ -2013,7 +2010,6 @@ async function loadSource() {
 }
 
 // fillProject starts the project again from a blueprint, or from the defaults.
-// The subtitles it would read into text start ticked, for reading only them.
 async function fillProject() {
   const path = $("project-source").value;
   if (!path || path === "disc") return;
@@ -2024,62 +2020,20 @@ async function fillProject() {
   if (!reply) return;
   pkg = reply.project;
   pkg.items = pkg.items || [];
-  readChoice = new Set(pkg.items.filter((it) => it.kind === "subtitle" && it.action === "convert").map((it) => it.source));
-  renderMake();
-}
-
-// renderMake shows what is asked for by what is being made.
-function renderMake() {
-  const make = makeKind();
-  show("project-read", make === "read");
-  show("project-make", make !== "read");
-  show("project-stretch", make === "clip");
-  show("project-containers", make === "film");
-  $("project-container-note").hidden = make !== "film" || containerChoice() !== "mp4";
-  $("project-container-note").textContent =
-    "How an MP4 plays on the Apple TV has not been tried yet. An MP4 cannot hold picture subtitles, or Dolby TrueHD as it is.";
-  if (make === "read") renderReadList();
-  else renderProject();
-  describeProject();
-}
-
-// renderReadList lists the picture subtitle tracks of the chosen file, to
-// tick those to read into text.
-function renderReadList() {
-  const box = $("project-read");
-  const pictures = sourceInfo.tracks.filter((t) => t.kind === "subtitle" && t.codec === "hdmv_pgs_subtitle");
-  if (!subtitleReading.ocr) {
-    box.textContent = subtitleReading.note;
-    return;
-  }
-  if (pictures.length === 0) {
-    box.textContent = "This file has no picture subtitles to read.";
-    return;
-  }
-  box.replaceChildren(...pictures.map((track) => {
-    const label = document.createElement("label");
-    label.className = "track";
-    const tick = document.createElement("input");
-    tick.type = "checkbox";
-    tick.checked = readChoice.has(track.index);
-    tick.addEventListener("change", () => {
-      if (tick.checked) readChoice.add(track.index);
-      else readChoice.delete(track.index);
-      describeProject();
-    });
-    const text = document.createElement("span");
-    text.textContent = track.label;
-    label.append(tick, text);
-    return label;
-  }));
+  renderProject();
 }
 
 function renderProject() {
+  show("project-stretch", part());
   const box = $("project-editor");
   if (pkg) {
-    pkg.length = makeKind() === "clip" ? Number($("lab-length").value) * 1e9 : 0;
-    pkg.containers = makeKind() === "film" ? [containerChoice()] : ["mkv"];
+    pkg.length = part() ? Number($("lab-length").value) * 1e9 : 0;
+    pkg.containers = [containerChoice()];
   }
+  show("project-containers", hasAV(pkg));
+  $("project-container-note").hidden = !hasAV(pkg) || containerChoice() !== "mp4";
+  $("project-container-note").textContent =
+    "How an MP4 plays on the Apple TV has not been tried yet. An MP4 cannot hold picture subtitles, or Dolby TrueHD as it is.";
   if (!pkg) {
     box.replaceChildren();
     describeProject();
@@ -2087,7 +2041,7 @@ function renderProject() {
   }
   renderProjectEditor(box, sourceInfo.tracks, pkg, () => {
     renderProject();
-  });
+  }, "Add from this file");
   if (document.activeElement !== $("project-edition")) {
     $("project-edition").value = pkg.edition || "";
   }
@@ -2096,32 +2050,39 @@ function renderProject() {
 
 // describeProject says what pressing Start will make, and where it goes.
 function describeProject() {
-  const make = makeKind();
   const say = (text, ready) => {
     $("project-destination").textContent = text;
     $("project-run").disabled = !ready;
   };
-
-  if (make === "read") {
-    const n = readChoice.size;
-    say(n === 0
-      ? "Tick the subtitles to read."
-      : `${n === 1 ? "One subtitle track" : `${n} subtitle tracks`}, each read into text as a task of its own and kept beside the file as an SRT.`,
-      n > 0 && subtitleReading.ocr);
-    return;
-  }
   if (!pkg) {
     say("", false);
     return;
   }
-  const pictures = pkg.items.filter((it) => it.kind === "video").length;
-  if (pictures !== 1) {
-    say(pictures === 0 ? "A film needs a picture. Add it from the file, above." : "A film can hold one picture.", false);
+  if (pkg.items.length === 0) {
+    say("Add video, audio or subtitles from the file, above.", false);
     return;
   }
-  say(make === "film"
-    ? `One ${containerChoice().toUpperCase()} file of all of it, saved to your library, in the film's folder.`
-    : "One MKV clip, saved to the clips folder to watch and compare.", true);
+  if (pkg.items.filter((it) => it.kind === "video").length > 1) {
+    say("A file can hold one video.", false);
+    return;
+  }
+
+  const much = part() ? "part of it" : "all of it";
+  const subs = pkg.items.filter((it) => it.kind === "subtitle");
+  const read = subs.filter((it) => it.action === "convert").length;
+  const kept = subs.length - read;
+  const plural = (n, one) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  let text;
+  if (hasAV(pkg)) {
+    text = `One ${containerChoice().toUpperCase()} of ${much}`;
+    if (read) text += `, with ${plural(read, "subtitle file")} read into text beside it`;
+  } else {
+    const files = [];
+    if (kept) files.push(`${plural(kept, "subtitle file")} as ${kept === 1 ? "it is" : "they are"}`);
+    if (read) files.push(`${plural(read, "subtitle file")} read into text`);
+    text = `${files.join(" and ")}, of ${much}`;
+  }
+  say(`${text}, in the film's folder in your library.`, true);
 }
 
 // renderProjectEditor lays out a project's line items, section by section,
@@ -2129,7 +2090,7 @@ function describeProject() {
 //
 // Written once for both places a project is planned: from an original here, and
 // from a disc on its Plan. changed is called after anything changes.
-function renderProjectEditor(box, tracks, pkg, changed) {
+function renderProjectEditor(box, tracks, pkg, changed, addLabel = "Add from original") {
   const sections = SECTIONS.map(([kind, title]) => {
     const section = document.createElement("div");
     section.className = "project-section";
@@ -2151,8 +2112,8 @@ function renderProjectEditor(box, tracks, pkg, changed) {
       const none = document.createElement("p");
       none.className = "muted small";
       none.textContent = {
-        video: "No picture yet. A film needs one.",
-        audio: "No sound yet.",
+        video: "No video.",
+        audio: "No audio.",
         subtitle: "No subtitles.",
       }[kind];
       rows.append(none);
@@ -2169,7 +2130,7 @@ function renderProjectEditor(box, tracks, pkg, changed) {
       more.className = "project-spare";
       const label = document.createElement("div");
       label.className = "muted small";
-      label.textContent = "Add from original";
+      label.textContent = addLabel;
       // Each line adds its track as it is; converting it is a choice made
       // on the line once it is in the project.
       more.append(label, ...offered.map((track) => {
@@ -2351,13 +2312,13 @@ function itemRow(item, position, tracks, pkg, changed, rows, kind) {
   }
   if (item.action === "convert" && kind === "subtitle") {
     notes.push(pkg.length
-      ? "Read into text once the clip is made, and kept beside it as an SRT file."
-      : "Read into text from the original, as a task of its own, and kept beside it. The film gets a copy when it is finished, fixes and all.");
+      ? "Read into text from the part cut for this, and kept beside what is made as an SRT file."
+      : "Read into text from the file, as a task of its own, and kept beside it. What is made here gets a copy when it is finished, fixes and all.");
   }
   if (item.action === "convert" && kind === "audio" && !track.lossless) {
     notes.push(track.note
-      ? "This sound is not lossless, so converting it loses a little more."
-      : "This sound is not lossless, so converting it loses a little more, and it plays directly as it is.");
+      ? "This audio is not lossless, so converting it loses a little more."
+      : "This audio is not lossless, so converting it loses a little more, and it plays directly as it is.");
   }
   const same = pkg.items.filter((other) => lineKey(other) === lineKey(item)).length;
   if (same > 1) notes.push(`This line is the same as ${same === 2 ? "another" : `${same - 1} others`}, so the file would hold the same track ${same} times.`);
@@ -2529,7 +2490,7 @@ function soundEditor(initial) {
 
   const draw = () => {
     const heading = document.createElement("h4");
-    heading.textContent = "Sound for the film";
+    heading.textContent = "Audio";
 
     const mode = select([["usual", "The usual choice"], ["rules", "Choose by rule"]],
       rules ? "rules" : "usual", (v) => {
@@ -2690,7 +2651,7 @@ function blueprintForm(values, options) {
   bitrate.type = "text";
   bitrate.value = values.audio_bitrate || "256k";
   bitrate.dataset.key = "audio_bitrate";
-  field("Stereo sound", bitrate);
+  field("Stereo audio", bitrate);
 
   box.append(fields);
 
@@ -2711,8 +2672,8 @@ function blueprintForm(values, options) {
   };
 
   tick("Keep 4K pictures exactly as they are", "allow_uhd_copy", values.allow_uhd_copy !== false);
-  tick("Keep the picture exactly as it is", "keep_picture", values.keep_picture === true);
-  tick("Keep sound exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
+  tick("Keep the video exactly as it is", "keep_picture", values.keep_picture === true);
+  tick("Keep audio exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
   // Picture subtitles make Plex convert the whole picture to show them (§4),
   // so they are read into text, where this computer can (§10), unless kept.
   tick("Keep subtitles as pictures, rather than reading them into text", "keep_subtitle_pictures",
@@ -2727,7 +2688,7 @@ function blueprintForm(values, options) {
   for (const [v, text] of [["keep", "Keep it as it is"], ["flac", "Convert it to FLAC"], ["both", "Both"]]) {
     truehdChoice.append(new Option(text, v, false, v === (values.truehd || "keep")));
   }
-  truehd.append(document.createTextNode("Dolby TrueHD sound: "), truehdChoice);
+  truehd.append(document.createTextNode("Dolby TrueHD audio: "), truehdChoice);
   box.append(truehd);
 
   box.append(soundEditor(values.sound || null));
@@ -2793,7 +2754,7 @@ function renderBlueprintManager(blueprints, defaults) {
 
     const sound = document.createElement("div");
     sound.className = "muted small";
-    sound.textContent = `Sound: ${describeSound(blueprint.sound)}`;
+    sound.textContent = `Audio: ${describeSound(blueprint.sound)}`;
 
     left.append(name, detail, sound);
 
@@ -2889,7 +2850,7 @@ function renderLabResults(comparison) {
   table.className = "results";
 
   const head = document.createElement("tr");
-  for (const heading of ["Setting", "Whole film", "Encode time", "Size", "Speed"]) {
+  for (const heading of ["Setting", "All of it", "Encode time", "Size", "Speed"]) {
     const th = document.createElement("th");
     th.textContent = heading;
     head.append(th);
@@ -3236,8 +3197,8 @@ function wireButtons() {
 
   on("lab-at", "input", rememberStretch);
   on("project-source", "change", sourceChanged);
-  for (const radio of document.querySelectorAll('input[name="project-make"], input[name="project-container"]')) {
-    radio.addEventListener("change", renderMake);
+  for (const radio of document.querySelectorAll('input[name="project-much"], input[name="project-container"]')) {
+    radio.addEventListener("change", renderProject);
   }
   on("project-read-disc", "click", (e) => readDisc(e.target));
   on("project-fill", "click", fillProject);
@@ -3248,23 +3209,21 @@ function wireButtons() {
   on("blueprint-new", "click", () => openBlueprintEditor({ name: "" }));
 
   on("project-run", "click", async (e) => {
-    const make = makeKind();
-    if (make !== "read" && !pkg) return;
+    if (!pkg) return;
     const chosen = $("project-source").selectedOptions[0];
     const seconds = (n) => Math.round(n * 1e9);
 
-    const body = { source: $("project-source").value, film: chosen ? chosen.dataset.film : "", make };
-    if (make === "read") {
-      body.read = [...readChoice];
-    } else {
-      body.project = {
+    const body = {
+      source: $("project-source").value,
+      film: chosen ? chosen.dataset.film : "",
+      project: {
         ...pkg,
         edition: $("project-edition").value.trim(),
-        containers: make === "film" ? [containerChoice()] : ["mkv"],
-        at: make === "clip" ? seconds(parseTimestamp($("lab-at").value)) : 0,
-        length: make === "clip" ? seconds(Number($("lab-length").value)) : 0,
-      };
-    }
+        containers: [containerChoice()],
+        at: part() ? seconds(parseTimestamp($("lab-at").value)) : 0,
+        length: part() ? seconds(Number($("lab-length").value)) : 0,
+      },
+    };
     const result = await busy(e.target, "Adding\u2026", "Added to the queue", () => post("/api/project", body));
 
     if (result) {

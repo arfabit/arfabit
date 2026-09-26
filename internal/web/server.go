@@ -174,7 +174,6 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		"NodeName": s.Config.Node.Name,
 		"Started":  s.started.Format("3:04 PM"),
 		"Library":  s.Config.Paths.Library,
-		"Clips":    s.Config.Paths.Clips,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

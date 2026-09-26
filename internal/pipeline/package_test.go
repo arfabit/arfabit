@@ -22,8 +22,8 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 		pkg  store.Project
 		want string
 	}{
-		{"no picture", store.Project{Items: []store.Item{{Kind: store.KindAudio, Action: store.ActionCopy}}}, "needs a picture"},
-		{"two pictures", store.Project{Items: []store.Item{video, video}}, "one picture"},
+		{"nothing", store.Project{}, "nothing to make"},
+		{"two videos", store.Project{Items: []store.Item{video, video}}, "one video"},
 		{"a container ARFABIT does not make", store.Project{Containers: []string{"avi"}, Items: []store.Item{video}}, "AVI"},
 		{"picture subtitles in MP4", store.Project{Containers: []string{"mp4"}, Items: []store.Item{video,
 			{Kind: store.KindSubtitle, Action: store.ActionCopy, Codec: "hdmv_pgs_subtitle"}}}, "picture subtitles"},
@@ -57,7 +57,7 @@ func TestPackageIsCheckedFirst(t *testing.T) {
 	}
 }
 
-// A stretch of an original becomes a clip made exactly from its line items, in
+// A stretch of an original is made exactly from its line items, in
 // their order, and the piece cut to make it does not stay behind.
 func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
@@ -87,8 +87,7 @@ func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 	r.Slots = NewSlots(1)
 
 	job, err := r.StartProject(context.Background(), ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{
 			Edition: "Trial",
 			At:      time.Second, Length: 2 * time.Second,
@@ -113,18 +112,18 @@ func TestPackageMakesAClipFromItsLineItems(t *testing.T) {
 		t.Fatalf("the package ended as %s: %s\n%s", job.State, job.Note, job.Detail)
 	}
 
-	folder := filepath.Join(r.Config.Paths.Clips, "Test Film")
+	folder := filepath.Join(r.Config.Paths.Library, "Test Film (2026)")
 	entries, _ := os.ReadDir(folder)
 	if len(entries) != 1 {
 		var names []string
 		for _, e := range entries {
 			names = append(names, e.Name())
 		}
-		t.Fatalf("the lab folder holds %v, want one clip and nothing else", names)
+		t.Fatalf("the film's folder holds %v, want the one file and nothing else", names)
 	}
 	clip := filepath.Join(folder, entries[0].Name())
-	if !strings.Contains(entries[0].Name(), "{edition-Lab 001 - Trial") || filepath.Ext(clip) != ".mkv" {
-		t.Errorf("clip is called %q", entries[0].Name())
+	if entries[0].Name() != "Test Film (2026) {edition-Trial}.mkv" {
+		t.Errorf("it is called %q", entries[0].Name())
 	}
 
 	info, err := ffmpeg.Probe(context.Background(), clip)
@@ -188,8 +187,7 @@ func TestPackageMakesAFilmForTheLibrary(t *testing.T) {
 
 	r := runnerWithFolders(t)
 	job, err := r.StartProject(context.Background(), ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{Edition: "Archive", Items: []store.Item{
 			{Kind: store.KindVideo, Source: 0, Action: store.ActionCopy},
 			{Kind: store.KindAudio, Source: 1, Action: store.ActionCopy},

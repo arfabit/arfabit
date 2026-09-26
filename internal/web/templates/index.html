@@ -74,13 +74,13 @@
     </section>
 
     <section id="lab-card" class="card" hidden>
-      <h2>Clips compared</h2>
+      <h2>Parts compared</h2>
       <div id="lab-results"></div>
     </section>
 
     <section class="card">
       <h2>Recent tasks</h2>
-      <p class="muted small">Originals and films go in {{.Library}}, clips in {{.Clips}}.</p>
+      <p class="muted small">Everything goes in {{.Library}}, one folder per film.</p>
       <div id="to-check" class="to-check" hidden></div>
       <div id="recent"></div>
     </section>
@@ -108,59 +108,54 @@
         <button id="project-read-disc" class="primary">Read the disc</button>
       </div>
 
-      <!-- A file ARFABIT made: an original, a film or a clip. -->
+      <!-- A file in the library: an original, or anything made from one. -->
       <div id="project-file" hidden>
-        <div class="make-choice" role="radiogroup" aria-label="Make">
-          <span class="muted small">Make</span>
-          <label class="chip"><input type="radio" name="project-make" value="read"> Subtitles only</label>
-          <label class="chip"><input type="radio" name="project-make" value="film" checked> A film</label>
-          <label class="chip"><input type="radio" name="project-make" value="clip"> A clip</label>
+        <div class="make-choice" role="radiogroup" aria-label="How much">
+          <span class="muted small">How much</span>
+          <label class="chip"><input type="radio" name="project-much" value="all" checked> All of it</label>
+          <label class="chip"><input type="radio" name="project-much" value="part"> Part of it</label>
         </div>
 
-        <div id="project-read" hidden></div>
-
-        <div id="project-make">
-          <div id="project-stretch" class="lab-controls" hidden>
-            <label>
-              <span>From</span>
-              <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
-            </label>
-            <label>
-              <span>Length</span>
-              <select id="lab-length">
-                <option value="5">5 seconds</option>
-                <option value="10">10 seconds</option>
-                <option value="15">15 seconds</option>
-                <option value="30">30 seconds</option>
-                <option value="60" selected>1 minute</option>
-                <option value="300">5 minutes</option>
-                <option value="600">10 minutes</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="project-start">
-            <label for="project-blueprint" class="muted small">Start from</label>
-            <select id="project-blueprint"></select>
-            <button id="project-fill" type="button">Use</button>
-          </div>
-
-          <div id="project-editor"></div>
-
-          <div class="title-choice">
-            <label for="project-edition">Edition</label>
-            <div class="title-row">
-              <input id="project-edition" type="text" autocomplete="off" placeholder="None">
-            </div>
-          </div>
-
-          <div id="project-containers" class="project-containers" role="radiogroup" aria-label="Container">
-            <span class="muted small">As</span>
-            <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
-            <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
-          </div>
-          <p id="project-container-note" class="muted small"></p>
+        <div id="project-stretch" class="lab-controls" hidden>
+          <label>
+            <span>From</span>
+            <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
+          </label>
+          <label>
+            <span>Length</span>
+            <select id="lab-length">
+              <option value="5">5 seconds</option>
+              <option value="10">10 seconds</option>
+              <option value="15">15 seconds</option>
+              <option value="30">30 seconds</option>
+              <option value="60" selected>1 minute</option>
+              <option value="300">5 minutes</option>
+              <option value="600">10 minutes</option>
+            </select>
+          </label>
         </div>
+
+        <div class="project-start">
+          <label for="project-blueprint" class="muted small">Start from</label>
+          <select id="project-blueprint"></select>
+          <button id="project-fill" type="button">Use</button>
+        </div>
+
+        <div id="project-editor"></div>
+
+        <div class="title-choice">
+          <label for="project-edition">Edition</label>
+          <div class="title-row">
+            <input id="project-edition" type="text" autocomplete="off" placeholder="None">
+          </div>
+        </div>
+
+        <div id="project-containers" class="project-containers" role="radiogroup" aria-label="Container">
+          <span class="muted small">As</span>
+          <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
+          <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
+        </div>
+        <p id="project-container-note" class="muted small"></p>
 
         <p id="project-destination" class="muted small"></p>
         <button id="project-run" class="primary">Start</button>
@@ -191,11 +186,11 @@
         <p class="muted small">Copied from the disc exactly as it is.</p>
         <div class="grid">
           <div>
-            <h4>Picture</h4>
+            <h4>Video</h4>
             <p id="original-video" class="muted"></p>
           </div>
           <div>
-            <h4>Sound</h4>
+            <h4>Audio</h4>
             <div id="original-audio"></div>
           </div>
           <div>
@@ -207,14 +202,14 @@
 
       <label class="track convert-choice">
         <input id="plan-convert" type="checkbox" checked>
-        <span>Make a film</span>
+        <span>Also make a file from it</span>
       </label>
       <p id="convert-note" class="muted small"></p>
 
-      <!-- The film: made from the original afterwards, as a task of its own.
-           The same editor as on the Projects page. -->
+      <!-- What is made from the original afterwards, as a task of its own.
+           The same editor as for any other project. -->
       <div id="plan-film" class="plan-part">
-        <h3>The film</h3>
+        <h3>The file</h3>
         <p id="film-target" class="muted small"></p>
 
         <div class="title-choice">

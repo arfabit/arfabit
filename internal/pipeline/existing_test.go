@@ -17,7 +17,6 @@ func runnerWithFolders(t *testing.T) *Runner {
 	root := t.TempDir()
 	cfg := config.Defaults()
 	cfg.Paths.Library = filepath.Join(root, "library")
-	cfg.Paths.Clips = filepath.Join(root, "clips")
 	return &Runner{Config: cfg, Store: testStore(t), Calibration: NewCalibration()}
 }
 
@@ -40,7 +39,7 @@ func TestPlanDoesNotStartOverAFile(t *testing.T) {
 
 	job := &Job{Job: store.NewJob("waiting")}
 	job.Title, job.Year = title.Name, title.Year
-	job.Plan = &store.Plan{RipName: "In the Grey_t00.mkv", Convert: true}
+	job.Plan = &store.Plan{RipName: "In the Grey_t00.mkv", Convert: true, Project: &store.Project{Items: []store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}}}}
 	job.Space = Space{Fits: true}
 	job.State = store.StateWaiting
 	r.SetCurrentForTest(job)
@@ -109,16 +108,22 @@ func TestPackageDoesNotReplaceAFilm(t *testing.T) {
 	}
 }
 
-// A film is never given the edition the original is kept under, since the
-// two would then have the same name.
-func TestFilmIsNotCalledOriginal(t *testing.T) {
-	p := store.Project{Edition: "original", Items: []store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}}}
+// Nothing with video or audio is given the edition the original is kept
+// under, since it would have the original's name. Subtitles read from the
+// whole of it may be, which is where the original's own SRT goes.
+func TestOnlyTheOriginalIsCalledOriginal(t *testing.T) {
+	video := store.Item{Kind: store.KindVideo, Action: store.ActionCopy}
+	p := store.Project{Edition: "original", Items: []store.Item{video}}
 	if err := checkProject(&p, false); err == nil {
-		t.Fatal("a film was allowed the original's edition")
+		t.Error("video was allowed the original's edition")
 	}
 	p.Length = 30e9
-	if err := checkProject(&p, false); err != nil {
-		t.Errorf("a clip, which is named otherwise, was refused: %v", err)
+	if err := checkProject(&p, false); err == nil {
+		t.Error("a stretch of video was allowed the original's edition")
+	}
+	subs := store.Project{Edition: "Original", Items: []store.Item{{Kind: store.KindSubtitle, Action: store.ActionCopy, Codec: pictureSubtitles, Lang: "eng"}}}
+	if err := checkProject(&subs, false); err != nil {
+		t.Errorf("subtitles alone were refused: %v", err)
 	}
 }
 

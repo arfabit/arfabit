@@ -53,8 +53,10 @@ func (r *Runner) Existing(job *Job) []string {
 	if job.Plan.RipName != "" {
 		found = append(found, existingAt(filepath.Join(folder, job.Plan.RipName))...)
 	}
-	if job.Plan.Convert {
-		found = append(found, existingFilm(title.LibraryDir(r.Config.Paths.Library), title, job.Plan.Edition)...)
+	if job.Plan.Convert && job.Plan.Project != nil {
+		pkg := *job.Plan.Project
+		pkg.Edition = job.Plan.Edition
+		found = append(found, alreadyThere(r.Config.Paths.Library, title, &pkg)...)
 	}
 	return found
 }

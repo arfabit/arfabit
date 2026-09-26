@@ -324,74 +324,69 @@ func bindSubtitles(disc, original []Track) map[int]int {
 	return found
 }
 
-// takeSubtitles puts a copy of the SRT beside the Original, for each subtitle
-// line item a film converts to text, beside the film: the Original's SRT as it
-// is at the last moment, so a fix made while the film was being made is in
-// it. A track still being read is waited for, and one nobody has read is read
-// now. A film is never held back by its subtitles: what could not be had is
-// said in what it returns, for the note.
-func (r *Runner) takeSubtitles(ctx context.Context, job *Job, tracks []Track, out string) string {
-	var notes []string
-	sidecars := sidecarPaths(job.Project, out)
-	for _, it := range job.Project.ItemsOf(store.KindSubtitle) {
-		if it.Action != store.ActionConvert {
-			continue
-		}
-		name := languageName(it.Lang)
-		srt, err := srtFor(job.Original, tracks, it.Source)
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("The %s subtitles are not in this film: %s.", name, err))
-			continue
-		}
-
-		if _, err := os.Stat(srt); err != nil {
-			reading := r.waitForReading(ctx, job.Original, it.Source)
-			if reading == nil && r.OCR != nil {
-				job.Log.Printf(store.StageDeliver, "The %s subtitles have not been read yet, so they are being read now.", name)
-				// Its own task, which stopping the film does not stop.
-				reading, err = r.StartReading(context.Background(), ReadingRequest{Original: job.Original, Title: job.Title, Year: job.Year, Stream: it.Source, From: job.ID})
-				if err == nil {
-					reading = r.waitForReading(ctx, job.Original, it.Source)
-				}
-			}
-			if ctx.Err() != nil {
-				return ""
-			}
-			if _, err := os.Stat(srt); err != nil {
-				note := fmt.Sprintf("The %s subtitles were not read, so this film has none.", name)
-				if reading != nil && reading.Note != "" {
-					note += " " + reading.Note
-				} else if r.OCR == nil {
-					note += " " + ocr.NotAvailable
-				}
-				job.Log.Printf(store.StageDeliver, "%s", note)
-				notes = append(notes, note)
-				continue
-			}
-		}
-
-		data, err := os.ReadFile(srt)
-		if err == nil {
-			err = writeSidecar(job, sidecars[it.Source], data)
-		}
-		if err != nil {
-			note := fmt.Sprintf("ARFABIT could not put the %s subtitles beside the film.", name)
-			job.Log.Detail(store.StageDeliver, note, err.Error())
-			notes = append(notes, note)
-			continue
-		}
-		job.Sidecars = append(job.Sidecars, sidecars[it.Source])
-		job.Copies = append(job.Copies, store.Copy{From: srt, To: sidecars[it.Source], SHA256: hashOf(data)})
-		job.Log.Printf(store.StageDeliver, "Copied the %s subtitles from %s.", name, filepath.Base(srt))
+// takeSubtitle puts a copy of the SRT beside the source at path, for one
+// subtitle line item read into text from the whole of it: the SRT as it is at
+// the last moment, so a fix made while the rest was being made is in it. A
+// track still being read is waited for, and one nobody has read is read now.
+// Nothing is ever held back by its subtitles: what could not be had is said
+// in what it returns, for the note. Where path is that SRT itself, reading it
+// is all there is to do.
+func (r *Runner) takeSubtitle(ctx context.Context, job *Job, tracks []Track, it store.Item, path string) string {
+	name := languageName(it.Lang)
+	srt, err := srtFor(job.Original, tracks, it.Source)
+	if err != nil {
+		return fmt.Sprintf("The %s subtitles were not made: %s.", name, err)
 	}
-	return strings.Join(notes, " ")
+
+	if _, err := os.Stat(srt); err != nil {
+		reading := r.waitForReading(ctx, job.Original, it.Source)
+		if reading == nil && r.OCR != nil {
+			job.Log.Printf(store.StageDeliver, "The %s subtitles have not been read yet, so they are being read now.", name)
+			// Its own task, which stopping this one does not stop.
+			reading, err = r.StartReading(context.Background(), ReadingRequest{Original: job.Original, Title: job.Title, Year: job.Year, Stream: it.Source, From: job.ID})
+			if err == nil {
+				reading = r.waitForReading(ctx, job.Original, it.Source)
+			}
+		}
+		if ctx.Err() != nil {
+			return ""
+		}
+		if _, err := os.Stat(srt); err != nil {
+			note := fmt.Sprintf("The %s subtitles were not read, so there is no subtitle file for them.", name)
+			if reading != nil && reading.Note != "" {
+				note += " " + reading.Note
+			} else if r.OCR == nil {
+				note += " " + ocr.NotAvailable
+			}
+			job.Log.Printf(store.StageDeliver, "%s", note)
+			return note
+		}
+	}
+	if filepath.Clean(srt) == filepath.Clean(path) {
+		job.Made = append(job.Made, path)
+		return ""
+	}
+
+	data, err := os.ReadFile(srt)
+	if err == nil {
+		err = writeSidecar(job, path, data)
+	}
+	if err != nil {
+		note := fmt.Sprintf("ARFABIT could not put the %s subtitles beside it.", name)
+		job.Log.Detail(store.StageDeliver, note, err.Error())
+		return note
+	}
+	job.Sidecars = append(job.Sidecars, path)
+	job.Copies = append(job.Copies, store.Copy{From: srt, To: path, SHA256: hashOf(data)})
+	job.Log.Printf(store.StageDeliver, "Copied the %s subtitles from %s.", name, filepath.Base(srt))
+	return ""
 }
 
 // readMissing starts an OCR task for each subtitle track a film converts to
 // text that has no SRT beside its Original yet, so it is read while the film
 // is made rather than after.
 func (r *Runner) readMissing(ctx context.Context, original, title string, year int, pkg *store.Project) {
-	if r.OCR == nil || !pkg.WholeFilm() {
+	if r.OCR == nil || !pkg.Whole() {
 		return
 	}
 	var tracks []Track

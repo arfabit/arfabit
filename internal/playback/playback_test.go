@@ -17,7 +17,7 @@ func TestNotes(t *testing.T) {
 	if n := Note(PlexAppleTV, "audio", "truehd", 8); !strings.Contains(n, "FLAC 7.1") {
 		t.Errorf("TrueHD 7.1 note = %q, want a FLAC 7.1 suggestion", n)
 	}
-	if n := Note(PlexAppleTV, "subtitle", "hdmv_pgs_subtitle", 0); !strings.Contains(n, "picture") {
+	if n := Note(PlexAppleTV, "subtitle", "hdmv_pgs_subtitle", 0); !strings.Contains(n, "whole video") {
 		t.Errorf("PGS note = %q", n)
 	}
 	if n := Note(PlexAppleTV, "video", "vc1", 0); !strings.Contains(n, "Not tested") {

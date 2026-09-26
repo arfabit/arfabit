@@ -120,67 +120,37 @@ func (s *Server) handleFreeDrive(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// source is a file a project can start from: an original, or any other file
-// ARFABIT made, a film or a clip.
+// source is a file in the library a project can start from: an original, or
+// anything made from one.
 type source struct {
 	Title string `json:"title"`
 	Path  string `json:"path"`
 	Size  int64  `json:"size"`
-
-	// Kind is "original", "film" or "clip".
-	Kind string `json:"kind"`
 }
 
-// sources lists every file a project can start from: originals beside their
-// films in the library (§6), the films, and the clips.
+// sources lists every video file in the library, one folder per film (§6),
+// by name.
 func (s *Server) sources() []source {
 	var found []source
-	video := func(name string) bool {
-		ext := strings.ToLower(filepath.Ext(name))
-		return !strings.HasPrefix(name, ".") && (ext == meta.VideoExt || ext == ".mp4")
-	}
-	each := func(root string, add func(folder, name, path string)) {
-		if root == "" {
-			return
+	root := s.Config.Paths.Library
+	folders, _ := os.ReadDir(root)
+	for _, folder := range folders {
+		if !folder.IsDir() {
+			continue
 		}
-		folders, _ := os.ReadDir(root)
-		for _, folder := range folders {
-			if !folder.IsDir() {
+		files, _ := os.ReadDir(filepath.Join(root, folder.Name()))
+		for _, f := range files {
+			ext := strings.ToLower(filepath.Ext(f.Name()))
+			if f.IsDir() || strings.HasPrefix(f.Name(), ".") || (ext != meta.VideoExt && ext != ".mp4") {
 				continue
 			}
-			files, _ := os.ReadDir(filepath.Join(root, folder.Name()))
-			for _, f := range files {
-				if !f.IsDir() && video(f.Name()) {
-					add(folder.Name(), f.Name(), filepath.Join(root, folder.Name(), f.Name()))
-				}
+			path := filepath.Join(root, folder.Name(), f.Name())
+			if info, err := os.Stat(path); err == nil {
+				found = append(found, source{Title: folder.Name(), Path: path, Size: info.Size()})
 			}
 		}
 	}
-	add := func(title, path, kind string) {
-		if info, err := os.Stat(path); err == nil {
-			found = append(found, source{Title: title, Path: path, Size: info.Size(), Kind: kind})
-		}
-	}
-
-	each(s.Config.Paths.Library, func(folder, name, path string) {
-		if meta.IsOriginal(name) {
-			add(folder, path, "original")
-		} else {
-			add(folder, path, "film")
-		}
-	})
-	each(s.Config.Paths.Clips, func(folder, name, path string) { add(folder, path, "clip") })
-
-	order := map[string]int{"original": 0, "film": 1, "clip": 2}
-	sort.SliceStable(found, func(a, b int) bool {
-		if order[found[a].Kind] != order[found[b].Kind] {
-			return order[found[a].Kind] < order[found[b].Kind]
-		}
-		if found[a].Title != found[b].Title {
-			return found[a].Title < found[b].Title
-		}
-		return found[a].Path < found[b].Path
-	})
+	sort.Slice(found, func(a, b int) bool { return found[a].Path < found[b].Path })
 	return found
 }
 
@@ -572,15 +542,11 @@ func (s *Server) handleFillProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"project": pipeline.Recipe(pipeline.OriginalTracks(info), blueprint, s.Runner.OCR != nil)})
 }
 
-// handleStartProject starts a project from a file ARFABIT made: reading
-// some of its subtitles into text, each track a task of its own, or making a
-// film or a clip from it.
+// handleStartProject starts a project from a file in the library.
 func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Source  string        `json:"source"`
 		Film    string        `json:"film"`
-		Make    string        `json:"make"`
-		Read    []int         `json:"read"`
 		Project store.Project `json:"project"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -592,35 +558,10 @@ func (s *Server) handleStartProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Make == "read" {
-		if len(req.Read) == 0 {
-			writeError(w, "Tick the subtitles to read.", nil)
-			return
-		}
-		var started, problems []string
-		for _, stream := range req.Read {
-			job, err := s.Runner.StartReading(context.Background(), pipeline.ReadingRequest{
-				Original: req.Source, Title: req.Film, Stream: stream,
-			})
-			if err != nil {
-				problems = append(problems, capitalise(err.Error())+".")
-				continue
-			}
-			started = append(started, job.ID)
-		}
-		if len(started) == 0 {
-			writeError(w, strings.Join(problems, " "), nil)
-			return
-		}
-		writeJSON(w, map[string]any{"jobs": started, "problems": problems})
-		return
-	}
-
 	job, err := s.Runner.StartProject(context.Background(), pipeline.ProjectRequest{
 		Original:   req.Source,
 		Film:       req.Film,
 		Project:    req.Project,
-		ClipsDir:   s.Config.Paths.Clips,
 		LibraryDir: s.Config.Paths.Library,
 	})
 	if err != nil {

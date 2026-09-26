@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/store"
 	"github.com/arfabit/arfabit/internal/subs"
@@ -20,78 +21,76 @@ import (
 // pictures a Blu-ray carries (PGS). subs.ParseSUP reads nothing else.
 const pictureSubtitles = "hdmv_pgs_subtitle"
 
-// sidecarPaths are the SRT files a Project's converted subtitles become, by
-// the Original stream they come from: beside the file made, named after it and
-// the track's language, which is how Plex matches a sidecar to a film (§6).
-// There is one per language; checkProject refuses a second.
-func sidecarPaths(pkg *store.Project, out string) map[int]string {
-	stem := strings.TrimSuffix(out, filepath.Ext(out))
-	paths := map[int]string{}
-	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
-		if it.Action == store.ActionConvert {
-			paths[it.Source] = stem + "." + ocr.Tag(it.Lang) + ".srt"
-		}
-	}
-	return paths
-}
-
-// readSubtitles reads a clip's converted subtitle tracks into SRT files
-// beside out, as stage OCR, once the file is made. It reads them from input,
-// the file the Project was made from: a clip's piece starts where the clip
-// does, so its subtitles need only trimming to its length. (A copied piece
-// begins at the keyframe before the time asked for, not at it, so shifting
-// the Original's times by that time would put every line early.)
+// subtitleFilesOf makes a Project's subtitle files beside stem
+// (subtitleFiles). A track copied as it is is taken out of input whole, as
+// SUP or SRT. A track read into text from the whole of a source is a copy of
+// the SRT beside the source (takeSubtitle). One from a stretch is read from
+// the piece cut for it, on the stretch's own clock: shifting the source's
+// times by the time asked for would put every line early by up to the gap
+// between keyframes, since the piece starts at the keyframe before it.
 //
-// The file is made whatever happens here. What goes wrong with one track is
-// said in the log, and in what it returns for the job's note; the rest are
-// still read. Only a stop is returned as an error.
-func (r *Runner) readSubtitles(ctx context.Context, job *Job, input string, index func(int) int, out string) (string, error) {
+// Subtitles that cannot be had never cost the rest: what went wrong is said
+// in what it returns, for the note. Only a stop, or a file already there, is
+// returned as an error.
+func (r *Runner) subtitleFilesOf(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, input string, index func(int) int, stem string) (string, error) {
 	pkg := job.Project
-	sidecars := sidecarPaths(pkg, out)
-	var items []store.Item
-	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
-		if it.Action == store.ActionConvert {
-			items = append(items, it)
-		}
-	}
-	if len(items) == 0 {
-		return "", nil
-	}
-
-	was := job.Stage
-	job.Stage = store.StageOCR
-	defer func() { job.Stage = was }()
+	files := subtitleFiles(pkg, stem)
+	tracks := OriginalTracks(info)
 
 	var notes []string
 	low := 0
-	for n, it := range items {
+	for i, it := range pkg.Items {
+		path, ok := files[i]
+		if !ok {
+			continue
+		}
 		name := languageName(it.Lang)
-		job.Progress = Progress{
-			Since:     time.Now(),
-			Percent:   float64(n) / float64(len(items)) * 100,
-			Operation: fmt.Sprintf("Reading the %s subtitles", name),
-		}
-		job.Log.Printf(store.StageOCR, "Reading the %s subtitles into text.", name)
-		r.save(job)
 
-		found, err := r.readTrack(ctx, job, it, input, index, sidecars[it.Source], func(done, total int) {
-			job.Progress.Percent = (float64(n) + float64(done)/float64(total)) / float64(len(items)) * 100
-			r.notify(job)
-		})
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		var lang *ocr.LanguageError
 		switch {
-		case errors.As(err, &lang):
-			job.Log.Printf(store.StageOCR, "%s", lang.Message)
-			notes = append(notes, lang.Message)
-		case err != nil:
-			text := fmt.Sprintf("ARFABIT could not read the %s subtitles into text.", name)
-			job.Log.Detail(store.StageOCR, text, detailOf(err))
-			notes = append(notes, text)
+		case it.Action == store.ActionCopy:
+			if err := takeOut(ctx, job, input, index(it.Source), path); err != nil {
+				return "", err
+			}
+			job.Made = append(job.Made, path)
+			job.Log.Printf(job.Stage, "Took the %s subtitles out, as %s.", name, filepath.Base(path))
+
+		case pkg.Whole():
+			if note := r.takeSubtitle(ctx, job, tracks, it, path); note != "" {
+				notes = append(notes, note)
+			}
+			if ctx.Err() != nil {
+				return "", ctx.Err()
+			}
+
+		default:
+			was := job.Stage
+			job.Stage = store.StageOCR
+			job.Progress = Progress{Since: time.Now(), Operation: fmt.Sprintf("Reading the %s subtitles", name)}
+			r.save(job)
+			read, found, err := r.readInto(ctx, job, input, index(it.Source), it.Lang, pkg.Length, path, it.Source, func(done, total int) {
+				job.Progress.Percent = float64(done) / float64(total) * 100
+				r.notify(job)
+			})
+			job.Stage = was
+			var lang *ocr.LanguageError
+			var replace *ReplaceError
+			switch {
+			case ctx.Err() != nil:
+				return "", ctx.Err()
+			case errors.As(err, &replace):
+				return "", err
+			case errors.As(err, &lang):
+				job.Log.Printf(store.StageOCR, "%s", lang.Message)
+				notes = append(notes, lang.Message)
+			case err != nil:
+				text := fmt.Sprintf("ARFABIT could not read the %s subtitles into text.", name)
+				job.Log.Detail(store.StageOCR, text, detailOf(err))
+				notes = append(notes, text)
+			case read == 0:
+				job.Log.Printf(store.StageOCR, "No text was read from the %s subtitles, so there is no subtitle file for them.", name)
+			}
+			low += found
 		}
-		low += found
 	}
 
 	if note := lowConfidenceNote(low); note != "" {
@@ -100,15 +99,30 @@ func (r *Runner) readSubtitles(ctx context.Context, job *Job, input string, inde
 	return strings.Join(notes, " "), nil
 }
 
-// readTrack reads one of a clip's subtitle tracks into its sidecar, and
-// lists and keeps the pictures of its subtitles of low confidence. It returns
-// how many there are.
-func (r *Runner) readTrack(ctx context.Context, job *Job, it store.Item, input string, index func(int) int, sidecar string, progress func(done, total int)) (int, error) {
-	read, low, err := r.readInto(ctx, job, input, index(it.Source), it.Lang, job.Project.Length, sidecar, it.Source, progress)
-	if err == nil && read == 0 {
-		job.Log.Printf(store.StageOCR, "No text was read from the %s subtitles, so there is no subtitle file for them.", languageName(it.Lang))
+// takeOut copies one subtitle track out of input as it is, into its own
+// file: SUP for a Blu-ray's pictures, SRT for text. It is written under a
+// name of ARFABIT's own and renamed into place, never over a file already
+// there.
+func takeOut(ctx context.Context, job *Job, input string, stream int, path string) error {
+	if err := refuseToReplace(path); err != nil {
+		return err
 	}
-	return low, err
+	format := strings.TrimPrefix(filepath.Ext(path), ".")
+	tmp := filepath.Join(filepath.Dir(path), ".arfabit-"+job.ID+"-"+filepath.Base(path))
+	args := []string{"-hide_banner", "-y", "-i", input, "-map", fmt.Sprintf("0:%d", stream), "-c", "copy", "-f", format, tmp}
+	if err := ffmpeg.Run(ctx, args, ffmpeg.RunOptions{}); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := refuseToReplace(path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // readInto reads one subtitle track of input, the stream numbered stream, into

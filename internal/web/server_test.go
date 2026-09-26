@@ -32,7 +32,6 @@ func newTestServer(t *testing.T) *Server {
 	cfg := config.Defaults()
 	cfg.Paths.Data = filepath.Join(root, "data")
 	cfg.Paths.Library = filepath.Join(root, "library")
-	cfg.Paths.Clips = filepath.Join(root, "clips")
 	cfg.Node.Name = "test-node"
 
 	st, err := store.New(cfg.Paths.Data, "test-node")
@@ -663,7 +662,7 @@ func TestProjectNeedsNoBlueprint(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/project",
-		strings.NewReader(`{"source":`+strconv.Quote(anOriginal(t, s))+`,"film":"x","make":"clip","project":{"length":30000000000,
+		strings.NewReader(`{"source":`+strconv.Quote(anOriginal(t, s))+`,"film":"x","project":{"length":30000000000,
 			"items":[{"kind":"video","action":"convert","to":"hevc","crf":26,"preset":"medium","source":0}]}}`)))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("a project of line items alone was refused: %s", rec.Body)
@@ -684,11 +683,11 @@ func TestProjectIsRefusedPlainly(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/project",
-		strings.NewReader(`{"source":`+strconv.Quote(anOriginal(t, s))+`,"make":"film","project":{"items":[]}}`)))
+		strings.NewReader(`{"source":`+strconv.Quote(anOriginal(t, s))+`,"project":{"items":[]}}`)))
 	if rec.Code == http.StatusOK {
 		t.Fatal("a project with no picture was accepted")
 	}
-	if !strings.Contains(rec.Body.String(), "needs a picture") {
+	if !strings.Contains(rec.Body.String(), "nothing to make") {
 		t.Errorf("the message does not say what was wrong: %s", rec.Body)
 	}
 }
@@ -995,32 +994,15 @@ func TestNoticingADiscGoIn(t *testing.T) {
 
 // Reading subtitles only starts nothing but OCR tasks, and says plainly why
 // when it cannot.
-func TestReadSubtitlesOnly(t *testing.T) {
-	s := newTestServer(t)
-	path := anOriginal(t, s)
-
-	rec := post(t, s, "/api/project", `{"source":`+strconv.Quote(path)+`,"make":"read","read":[]}`)
-	if rec.Code == http.StatusOK || !strings.Contains(rec.Body.String(), "Tick") {
-		t.Errorf("nothing chosen: %d %s", rec.Code, rec.Body)
-	}
-	rec = post(t, s, "/api/project", `{"source":`+strconv.Quote(path)+`,"make":"read","read":[3]}`)
-	if rec.Code == http.StatusOK {
-		t.Errorf("a file with no subtitles was read: %s", rec.Body)
-	}
-	if len(s.Runner.Active()) != 0 {
-		t.Error("something joined the queue")
-	}
-}
-
-// Projects start from any file ARFABIT made: originals beside their films in
-// the library, the films, and the clips. Anything that is not a video is not one.
+// Projects start from any video file in the library, originals and what was
+// made from them alike. Anything that is not a video is not one.
 func TestSourcesAreListed(t *testing.T) {
 	s := newTestServer(t)
 
 	title := meta.Title{Name: "In the Grey", Year: 2026}
 	beside := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.OriginalName())
 	film := filepath.Join(title.LibraryDir(s.Config.Paths.Library), title.VideoName(""))
-	clip := filepath.Join(s.Config.Paths.Clips, "In the Grey (2026)", "In the Grey (2026) {edition-Lab 001 - Small - 0h01m00s}.mkv")
+	clip := filepath.Join(title.LibraryDir(s.Config.Paths.Library), "In the Grey (2026) {edition-2609261755-1}.mkv")
 	other := filepath.Join(s.Config.Paths.Library, "Crime 101 (2025)", "Crime 101 (2025) {edition-Original}.mkv")
 	for _, path := range []string{beside, film, clip, other,
 		filepath.Join(filepath.Dir(other), "job.json"), filepath.Join(filepath.Dir(film), ".arfabit-piece-x.mkv")} {
@@ -1039,17 +1021,17 @@ func TestSourcesAreListed(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []source{
-		{Title: "Crime 101 (2025)", Path: other, Kind: "original"},
-		{Title: "In the Grey (2026)", Path: beside, Kind: "original"},
-		{Title: "In the Grey (2026)", Path: film, Kind: "film"},
-		{Title: "In the Grey (2026)", Path: clip, Kind: "clip"},
+		{Title: "Crime 101 (2025)", Path: other},
+		{Title: "In the Grey (2026)", Path: clip},
+		{Title: "In the Grey (2026)", Path: beside},
+		{Title: "In the Grey (2026)", Path: film},
 	}
 	if len(got.Sources) != len(want) {
 		t.Fatalf("got %+v", got.Sources)
 	}
 	for i := range want {
 		g := got.Sources[i]
-		if g.Title != want[i].Title || g.Path != want[i].Path || g.Kind != want[i].Kind {
+		if g.Title != want[i].Title || g.Path != want[i].Path {
 			t.Errorf("%d: %+v, want %+v", i, g, want[i])
 		}
 	}

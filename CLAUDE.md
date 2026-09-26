@@ -15,7 +15,7 @@ stop and say so rather than working around it.
 |---|---|
 | Language | Go. One static binary. No Python, Node, Docker, or runtime deps. |
 | External tools | `makemkvcon` and `ffmpeg`, driven with `os/exec`. No wrapper libs. |
-| Output | MKV (MP4 only when a project asks, untested) · picture and sound copied or converted as the user chooses · SRT sidecars + embedded SRT |
+| Output | MKV (MP4 only when a project asks, untested) · video and audio copied or converted as the user chooses · SRT sidecars + embedded SRT |
 | State | Plain JSON/JSONL files. No database. |
 | UI | One HTML page, plain JavaScript over a JSON API, SSE for live updates. No npm, no framework, no build step. |
 | Platforms | macOS and Windows are the real targets. Linux is supported. |
@@ -31,7 +31,7 @@ the folder layout. Where it is silent, use judgment and say what you assumed.
 
 **Use the terminology in §2 verbatim.** Node, Drive, Disc, Title, Defaults, Blueprint, Plan,
 Original, Project, Line item, Delivery, Edition, Task (a job, in code), Library. Stage names are `SCAN PLAN RIP EJECT QUEUED
-PACKAGE OCR DELIVER`, plus `LAB` for test clips, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
+PACKAGE OCR DELIVER`, plus `LAB` for making part of a file, uppercase, in code and logs alike. No synonyms — not "convert" for PACKAGE,
 not "master" or "source" for Original.
 
 **Known shortcut.** `internal/config/toml.go` is a hand-written subset parser,

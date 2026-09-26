@@ -51,14 +51,9 @@ type Paths struct {
 	// Data holds jobs, logs and the shared configuration. May be on a NAS.
 	Data string
 
-	// Library holds the originals and the films made from them, one folder
+	// Library holds the originals and everything made from them, one folder
 	// per film, laid out the way Plex expects.
 	Library string
-
-	// Clips holds the clips made from a stretch of an original. A
-	// folder of its own, and a visible one: the clips exist to be carried to
-	// a television and watched.
-	Clips string
 
 	// Deliver is an optional folder to copy finished files into. Empty by
 	// default, which leaves them in Library.
@@ -219,8 +214,7 @@ func Defaults() Config {
 		},
 		Paths: Paths{
 			Data:    defaultDataDir(),
-			Library: filepath.Join(root, "library"),
-			Clips:   filepath.Join(root, "clips"),
+			Library: root,
 		},
 		Server: Server{
 			// All interfaces, so the UI is reachable from any device in the
@@ -267,7 +261,7 @@ func (p Settings) Describe() string {
 		picture += "; 4K kept as-is"
 	}
 
-	sound := "sound converted"
+	sound := "audio converted"
 	if p.CopyNativeAudio {
 		sound = "Dolby kept as-is"
 	}
@@ -384,7 +378,6 @@ func (c *Config) apply(doc document, source string) error {
 	str("server", "addr", &c.Server.Addr)
 	path("paths", "data", &c.Paths.Data)
 	path("paths", "library", &c.Paths.Library)
-	path("paths", "clips", &c.Paths.Clips)
 	path("paths", "deliver", &c.Paths.Deliver)
 	if err := num("machine", "max_conversions", &c.Machine.MaxConversions); err != nil {
 		return err

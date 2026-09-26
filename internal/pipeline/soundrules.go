@@ -39,7 +39,7 @@ func applySoundRules(tracks []store.PlannedAudio, rules *config.SoundRules) (out
 		for i, code := range rules.Languages {
 			names[i] = languageName(code)
 		}
-		return []store.SoundOutcome{{Language: strings.Join(names, " or "), Choice: "any sound"}}, false
+		return []store.SoundOutcome{{Language: strings.Join(names, " or "), Choice: "any audio"}}, false
 	}
 
 	for _, lang := range languages {

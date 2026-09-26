@@ -76,7 +76,7 @@ func Note(device Device, kind, codec string, channels int) string {
 		case kind == "audio" && strings.EqualFold(codec, "truehd"):
 			return fmt.Sprintf("Plex has to convert this every time it plays on Apple TV. Consider adding/substituting a converted FLAC %s that remains lossless and plays directly.", layout(channels))
 		case kind == "subtitle":
-			return "Plex has to convert the whole picture to show these on Apple TV."
+			return "Plex has to convert the whole video to show these on Apple TV."
 		}
 		return "Plex has to convert this every time it plays on Apple TV."
 	default:

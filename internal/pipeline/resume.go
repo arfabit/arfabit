@@ -148,7 +148,7 @@ func (r *Runner) ResumeJob(id string) (*Job, error) {
 
 		// Started again now, with nothing to hold back for: whoever
 		// pressed Start again meant it.
-		r.runPackage(ctx, job, r.configuredDirs(), 0)
+		r.runPackage(ctx, job, r.Config.Paths.Library, 0)
 	}()
 
 	return job, nil

@@ -13,10 +13,12 @@ import (
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/lab"
 	"github.com/arfabit/arfabit/internal/meta"
+	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/store"
 )
 
-// ProjectRequest is a Project to make from an Original.
+// ProjectRequest is a Project to make from a file ARFABIT made: an Original,
+// or anything made from one.
 type ProjectRequest struct {
 	Original string
 	Film     string
@@ -24,19 +26,8 @@ type ProjectRequest struct {
 
 	Project store.Project
 
-	// ClipsDir and LibraryDir are where clips and films go.
-	ClipsDir   string
+	// LibraryDir is where what is made goes, in the film's own folder.
 	LibraryDir string
-}
-
-// outputDirs are where packages put clips and films. They belong to the
-// machine, not the job, so they are not part of the job record.
-type outputDirs struct {
-	clips, library string
-}
-
-func (r *Runner) configuredDirs() outputDirs {
-	return outputDirs{clips: r.Config.Paths.Clips, library: r.Config.Paths.Library}
 }
 
 // Containers ARFABIT can make. MKV is what §4 tested; MP4 is made when asked
@@ -46,6 +37,11 @@ var containers = map[string]string{"mkv": meta.VideoExt, "mp4": ".mp4"}
 // checkProject refuses a Project that could not be made, before anything
 // waits in the line for it. canRead says whether this computer can read
 // subtitles into text (§10).
+//
+// A Project with video or audio makes one file per container, with its
+// subtitles copied inside and those read into text beside it as SRT. One with
+// subtitles alone makes a file for each: SRT for text, and for picture
+// subtitles copied as they are, SUP, the pictures as a Blu-ray holds them.
 func checkProject(p *store.Project, canRead bool) error {
 	if len(p.Containers) == 0 {
 		p.Containers = []string{"mkv"}
@@ -55,38 +51,31 @@ func checkProject(p *store.Project, canRead bool) error {
 			return fmt.Errorf("ARFABIT cannot make %s files yet", strings.ToUpper(c))
 		}
 	}
-
-	// The original is filed under this edition, beside its films (§6).
-	if p.WholeFilm() && strings.EqualFold(strings.TrimSpace(p.Edition), meta.OriginalEdition) {
-		return fmt.Errorf("%q is the edition the original is kept under; give this film another", meta.OriginalEdition)
+	if len(p.Items) == 0 {
+		return errors.New("there is nothing to make: add video, audio or subtitles from the file")
+	}
+	if len(p.ItemsOf(store.KindVideo)) > 1 {
+		return errors.New("a file can hold one video")
 	}
 
-	if n := len(p.ItemsOf(store.KindVideo)); n != 1 {
-		if n == 0 {
-			return errors.New("a film needs a picture: add it from the original")
-		}
-		return errors.New("a film can hold one picture")
+	// The original is filed under this edition, beside what is made from it
+	// (§6). Subtitles read from the whole of it may go there too.
+	if strings.EqualFold(strings.TrimSpace(p.Edition), meta.OriginalEdition) && (p.HasAV() || !p.Whole()) {
+		return fmt.Errorf("%q is the edition the original is kept under; give this another", meta.OriginalEdition)
 	}
 
-	if slices.Contains(p.Containers, "mp4") {
+	if p.HasAV() && slices.Contains(p.Containers, "mp4") {
 		if err := checkMP4(p); err != nil {
 			return err
 		}
 	}
 
-	converted := map[string]bool{}
 	for _, it := range p.Items {
-		// Each becomes a file named by its language (§6), so two would need
-		// the same name.
-		if it.Kind == store.KindSubtitle && it.Action == store.ActionConvert {
-			lang := strings.ToLower(it.Lang)
-			if converted[lang] {
-				return fmt.Errorf("only one %s subtitle track can be read into text, since each becomes a file named by its language", languageName(it.Lang))
-			}
-			converted[lang] = true
-		}
 		switch it.Action {
 		case store.ActionCopy:
+			if it.Kind == store.KindSubtitle && !p.HasAV() && it.Codec != pictureSubtitles && it.Codec != "subrip" {
+				return errors.New("on their own, only a Blu-ray's picture subtitles and text subtitles can be taken out; add video or audio to keep these in a file")
+			}
 		case store.ActionConvert:
 			if err := checkConversion(it, canRead); err != nil {
 				return err
@@ -95,7 +84,84 @@ func checkProject(p *store.Project, canRead bool) error {
 			return fmt.Errorf("%q is not something a line item can do", it.Action)
 		}
 	}
+
+	// Each subtitle file is named by its language (§6), so two of one kind
+	// in one language would need the same name.
+	seen := map[string]bool{}
+	for _, path := range subtitleFiles(p, "x") {
+		if seen[path] {
+			return fmt.Errorf("two subtitle files would both be %s; keep one track of each kind per language", strings.TrimPrefix(path, "x"))
+		}
+		seen[path] = true
+	}
 	return nil
+}
+
+// subtitleFiles are the files a Project's subtitle line items become beside
+// stem, the name of what it makes without its extension, by each line item's
+// place in Items: the stem, the track's language, and what it is, which is how
+// Plex matches a subtitle file to a video (§6).
+func subtitleFiles(p *store.Project, stem string) map[int]string {
+	files := map[int]string{}
+	for i, it := range p.Items {
+		if it.Kind != store.KindSubtitle {
+			continue
+		}
+		ext := ""
+		switch {
+		case it.Action == store.ActionConvert:
+			ext = ".srt"
+		case p.HasAV():
+			// Copied into the file itself.
+		case it.Codec == pictureSubtitles:
+			ext = ".sup"
+		case it.Codec == "subrip":
+			ext = ".srt"
+		}
+		if ext != "" {
+			files[i] = stem + "." + ocr.Tag(it.Lang) + ext
+		}
+	}
+	return files
+}
+
+// outputStem is the name of what a Project makes, in the film's folder,
+// without its extension.
+func outputStem(library string, title meta.Title, pkg *store.Project) string {
+	return filepath.Join(title.LibraryDir(library), title.BaseName(pkg.Edition))
+}
+
+// outputs lists every file a Project makes.
+func outputs(library string, title meta.Title, pkg *store.Project) []string {
+	stem := outputStem(library, title, pkg)
+	var paths []string
+	if pkg.HasAV() {
+		for _, c := range pkg.Containers {
+			paths = append(paths, stem+containers[c])
+		}
+	}
+	for i := range pkg.Items {
+		if path, ok := subtitleFiles(pkg, stem)[i]; ok {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+// alreadyThere lists what a Project would make that is already there, which
+// it will not replace (§0.6). A video under its edition counts as MKV or MP4,
+// since to Plex both are that edition.
+func alreadyThere(library string, title meta.Title, pkg *store.Project) []string {
+	var found []string
+	if pkg.HasAV() {
+		found = existingFilm(title.LibraryDir(library), title, pkg.Edition)
+	}
+	for _, path := range outputs(library, title, pkg) {
+		if strings.HasSuffix(path, ".srt") || strings.HasSuffix(path, ".sup") {
+			found = append(found, existingAt(path)...)
+		}
+	}
+	return found
 }
 
 // checkMP4 refuses line items an MP4 cannot hold as they are, found with
@@ -121,14 +187,14 @@ func checkConversion(it store.Item, canRead bool) error {
 	switch it.Kind {
 	case store.KindVideo:
 		if it.To != "hevc" {
-			return fmt.Errorf("a picture can only be converted to HEVC, not %q", it.To)
+			return fmt.Errorf("video can only be converted to HEVC, not %q", it.To)
 		}
 		if !ffmpeg.Preset(it.Preset).Valid() {
 			return fmt.Errorf("%q is not one of the speeds offered", it.Preset)
 		}
 	case store.KindAudio:
 		if !slices.Contains([]string{"flac", "aac", "eac3"}, it.To) {
-			return fmt.Errorf("sound can be converted to FLAC, AAC or E-AC-3, not %q", it.To)
+			return fmt.Errorf("audio can be converted to FLAC, AAC or E-AC-3, not %q", it.To)
 		}
 		// E-AC-3 is for surround a receiver can take whole. ffmpeg's encoder
 		// stops at six channels and downmixes anything wider without a word
@@ -164,11 +230,11 @@ func checkConversion(it store.Item, canRead bool) error {
 	return nil
 }
 
-// StartProject makes a Project from an Original: one file per container, in the
-// library for a whole film and in the lab for a stretch of one.
+// StartProject makes a Project from a file ARFABIT made, into the film's
+// folder in the library: all of it, or a stretch.
 func (r *Runner) StartProject(parent context.Context, req ProjectRequest) (*Job, error) {
 	if req.Original == "" {
-		return nil, errors.New("there is no original to work from")
+		return nil, errors.New("there is no file to work from")
 	}
 	pkg := req.Project
 	if err := checkProject(&pkg, r.OCR != nil); err != nil {
@@ -180,23 +246,16 @@ func (r *Runner) StartProject(parent context.Context, req ProjectRequest) (*Job,
 		film = filepath.Base(filepath.Dir(req.Original))
 	}
 
-	// A film goes into the library under its edition, so one already there
-	// would be replaced. Refused now, before anything waits in the line.
-	if pkg.WholeFilm() {
-		title := meta.Title{Name: film, Year: req.Year}
-		dir := title.LibraryDir(req.LibraryDir)
-		existing := existingFilm(dir, title, pkg.Edition)
-		for _, path := range sidecarPaths(&pkg, filepath.Join(dir, title.VideoName(pkg.Edition))) {
-			existing = append(existing, existingAt(path)...)
-		}
-		if err := wouldReplace(existing); err != nil {
-			return nil, err
-		}
+	// Refused now, before anything waits in the line, if it would replace
+	// something already there.
+	title := meta.Title{Name: film, Year: req.Year}
+	if err := wouldReplace(alreadyThere(req.LibraryDir, title, &pkg)); err != nil {
+		return nil, err
 	}
 
 	rec := store.NewLabJob(store.NewJobID(time.Now(), film), film)
 	rec.Kind = store.KindLab
-	if pkg.WholeFilm() {
+	if pkg.Whole() {
 		rec.Kind = store.KindConvert
 	}
 	rec.Original = req.Original
@@ -221,23 +280,28 @@ func (r *Runner) StartProject(parent context.Context, req ProjectRequest) (*Job,
 	r.begin(job)
 	r.save(job)
 
-	// Subtitles the film converts to text are read from the original now,
-	// each as a task of its own, if they have not been already.
+	// Subtitles converted to text from the whole of it are read from the
+	// source now, each as a task of its own, if they have not been already.
 	r.readMissing(parent, req.Original, film, req.Year, &pkg)
 
-	dirs := outputDirs{clips: req.ClipsDir, library: req.LibraryDir}
 	go func() {
 		defer cancel()
 		defer r.finish(job)
-		r.runPackage(ctx, job, dirs, r.Hold)
+		r.runPackage(ctx, job, req.LibraryDir, r.Hold)
 	}()
 
 	return job, nil
 }
 
-// runPackage waits its turn at the processor, then makes the Project's files.
-func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold time.Duration) {
-	if r.Slots != nil {
+// runPackage makes a Project's files: waiting its turn at the processor if it
+// makes video or audio, then the files themselves, then its subtitle files.
+func (r *Runner) runPackage(ctx context.Context, job *Job, library string, hold time.Duration) {
+	r.mu.Lock()
+	av := job.Project.HasAV()
+	r.mu.Unlock()
+
+	// Subtitles alone take little processor, so they do not wait for it.
+	if r.Slots != nil && av {
 		job.Stage = store.StageQueued
 		r.save(job)
 
@@ -257,102 +321,44 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 		defer r.Slots.Give()
 	}
 
-	// From here the line items are what they are: a film planned with its
-	// disc could be changed until now (editing.go).
+	// From here the line items are what they are: one planned with its disc
+	// could be changed until now (editing.go).
 	r.mu.Lock()
 	pkg := job.Project
 	job.Stage = store.StageLab
-	if pkg.WholeFilm() {
+	if pkg.Whole() {
 		job.Stage = store.StagePackage
 	}
 	r.mu.Unlock()
 
 	info, err := ffmpeg.Probe(ctx, job.Original)
 	if err != nil {
-		r.stop(job, "ARFABIT could not read the original.", err.Error())
+		r.stop(job, "ARFABIT could not read "+filepath.Base(job.Original)+".", err.Error())
 		return
 	}
 
-	title := meta.Title{Name: job.Title, Year: job.Year}
-	run := 0
-	if !pkg.WholeFilm() {
-		run = lab.NextRun(filepath.Join(dirs.clips, job.Title))
-	}
+	notes, err := r.makeProject(ctx, job, info, library)
 
-	var (
-		made  []lab.Clip
-		notes []string
-	)
-	for i, container := range pkg.Containers {
-		if ctx.Err() != nil {
-			r.stop(job, "Stopped at your request.", "")
-			return
-		}
-
-		out := packageOutput(job, title, dirs, container, run)
-		job.File = filepath.Base(out)
-		job.Progress = Progress{
-			Since:     time.Now(),
-			Percent:   float64(i) / float64(len(pkg.Containers)) * 100,
-			Operation: fmt.Sprintf("Making %s (%d of %d)", strings.ToUpper(container), i+1, len(pkg.Containers)),
-		}
-		r.save(job)
-
-		took, note, err := r.makePackageFile(ctx, job, info, out)
-		if note != "" {
-			notes = append(notes, note)
-		}
-
-		var replace *ReplaceError
-		switch {
-		case errors.As(err, &replace):
-			r.stop(job, fmt.Sprintf(
-				"%s is already there, so ARFABIT stopped rather than replace it. Nothing was removed. Give this one a different edition, or move that file, and start it again.",
-				filepath.Base(replace.Path)), replace.Path)
-			return
-		case ctx.Err() != nil:
-			r.stop(job, "Stopped at your request.", "")
-			return
-		case err != nil:
-			r.stop(job, "ARFABIT did not finish making the file.", detailOf(err))
-			return
-		}
-
-		size := int64(0)
-		if st, err := os.Stat(out); err == nil {
-			size = st.Size()
-		}
-		made = append(made, lab.Clip{Name: packageName(pkg), Path: out, Size: size, Took: took})
-		job.Made = append(job.Made, out)
-
-		if pkg.WholeFilm() {
-			job.Delivery = out
-			job.Stage = store.StageDeliver
-			r.save(job)
-			if note := r.takeSubtitles(ctx, job, OriginalTracks(info), out); note != "" {
-				notes = append(notes, note)
-			}
-			if ctx.Err() != nil {
-				r.stop(job, "Stopped at your request.", "")
-				return
-			}
-			if err := r.deliver(job, title, pkg.Edition); err != nil {
-				r.stop(job, "ARFABIT made the file but could not add it to your library's list.", err.Error())
-				return
-			}
-		}
-	}
-
-	// A clip is made to judge, and says what the whole film would come to.
-	if !pkg.WholeFilm() {
-		job.Comparison = lab.Compare(made, pkg.Length, time.Duration(info.Duration*float64(time.Second)))
+	var replace *ReplaceError
+	switch {
+	case errors.As(err, &replace):
+		r.stop(job, fmt.Sprintf(
+			"%s is already there, so ARFABIT stopped rather than replace it. Nothing was removed. Give this one a different edition, or move that file, and start it again.",
+			filepath.Base(replace.Path)), replace.Path)
+		return
+	case ctx.Err() != nil:
+		r.stop(job, "Stopped at your request.", "")
+		return
+	case err != nil:
+		r.stop(job, "ARFABIT did not finish making the file.", detailOf(err))
+		return
 	}
 
 	job.State = store.StateDone
 	job.Progress = Progress{Percent: 100}
 	job.Note = fmt.Sprintf("%s is ready.", job.File)
-	if len(made) > 1 {
-		job.Note = fmt.Sprintf("%d files are ready.", len(made))
+	if len(job.Made) > 1 {
+		job.Note = fmt.Sprintf("%d files are ready.", len(job.Made))
 	}
 	for _, note := range notes {
 		job.Note += " " + note
@@ -361,8 +367,8 @@ func (r *Runner) runPackage(ctx context.Context, job *Job, dirs outputDirs, hold
 	r.save(job)
 }
 
-// packageName is what a package is called in a clip's edition: its edition,
-// or the blueprint it came from, or simply what it is.
+// packageName is what a Project was made as, for comparing parts: its
+// edition, or the blueprint it came from, or simply what it is.
 func packageName(p *store.Project) string {
 	for _, name := range []string{p.Edition, p.Blueprint} {
 		if name != "" {
@@ -372,64 +378,41 @@ func packageName(p *store.Project) string {
 	return "Project"
 }
 
-// packageOutput is where one of a Project's files goes, and what it is called.
-func packageOutput(job *Job, title meta.Title, dirs outputDirs, container string, run int) string {
-	pkg := job.Project
-	ext := containers[container]
-	if pkg.WholeFilm() {
-		name := strings.TrimSuffix(title.VideoName(pkg.Edition), meta.VideoExt) + ext
-		return filepath.Join(title.LibraryDir(dirs.library), name)
-	}
-	name := strings.TrimSuffix(lab.ClipName(job.Title, run, packageName(pkg), pkg.At), meta.VideoExt) + ext
-	return filepath.Join(dirs.clips, job.Title, name)
-}
-
-// makePackageFile makes one file from the Project's line items.
+// makeProject makes a Project's files beside stem, and returns anything to add
+// to the job's note.
 //
-// A stretch of the Original is cut first, into a piece with every stream it
-// needs copied as it is, and the file is made from the piece with no seeking
+// A stretch of the source is cut first, into a piece with every stream it
+// needs copied as it is, and everything is made from the piece with no seeking
 // at all. Seeking while copying some streams and converting others moved them
-// against each other: copied sound started at the keyframe before the cut, up
-// to 0.7 seconds ahead of the picture. Copied together, they keep their true
-// timing. The piece is ARFABIT's own, made for this and removed after.
-//
-// Copied streams can only start on a keyframe, so a clip starts at the last
-// one before the time asked for: on a disc, usually under a second before.
-//
-// Once the file is made, subtitles converted to text are read (OCR) from the
-// same piece, into SRT files beside it (readSubtitles). It returns how long
-// making the file took, and anything to add to the job's note about the
-// subtitles.
-func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, out string) (time.Duration, string, error) {
+// against each other: copied audio started at the keyframe before the cut, up
+// to 0.7 seconds ahead of the video. Copied together, they keep their true
+// timing. The piece is ARFABIT's own, made for this and removed after. Copied
+// streams can only start on a keyframe, so a stretch starts at the last one
+// before the time asked for: on a disc, usually under a second before.
+func (r *Runner) makeProject(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, library string) ([]string, error) {
 	pkg := job.Project
-	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		return 0, "", err
+	title := meta.Title{Name: job.Title, Year: job.Year}
+	stem := outputStem(library, title, pkg)
+	if err := os.MkdirAll(filepath.Dir(stem), 0o755); err != nil {
+		return nil, err
 	}
-	if err := refuseToReplace(out); err != nil {
-		return 0, "", err
-	}
-	// Found now rather than after hours of converting.
-	for _, path := range sidecarPaths(pkg, out) {
-		if err := refuseToReplace(path); err != nil {
-			return 0, "", err
-		}
+	// Looked for again, since a job can wait in the line for hours.
+	if found := alreadyThere(library, title, pkg); len(found) > 0 {
+		return nil, &ReplaceError{Path: found[0]}
 	}
 
 	input := job.Original
 	duration := time.Duration(info.Duration * float64(time.Second))
+	index := func(source int) int { return source } // where each stream is in input
 
-	// Where each Original stream is in the file being read.
-	index := func(source int) int { return source }
-
-	if !pkg.WholeFilm() {
+	if !pkg.Whole() {
 		var sources []int
 		for _, it := range pkg.Items {
 			if !slices.Contains(sources, it.Source) {
 				sources = append(sources, it.Source)
 			}
 		}
-
-		piece := filepath.Join(filepath.Dir(out), ".arfabit-piece-"+job.ID+".mkv")
+		piece := filepath.Join(filepath.Dir(stem), ".arfabit-piece-"+job.ID+".mkv")
 		args := []string{"-hide_banner", "-y",
 			"-ss", fmt.Sprintf("%.3f", pkg.At.Seconds()), "-i", job.Original,
 			"-t", fmt.Sprintf("%.3f", pkg.Length.Seconds())}
@@ -441,7 +424,7 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		job.Log.Printf(job.Stage, "Cutting %s from %s.", formatDuration(pkg.Length), formatDuration(pkg.At))
 		if err := ffmpeg.Run(ctx, args, ffmpeg.RunOptions{Duration: pkg.Length}); err != nil {
 			_ = os.Remove(piece)
-			return 0, "", err
+			return nil, err
 		}
 		defer os.Remove(piece)
 
@@ -450,14 +433,76 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		index = func(source int) int { return slices.Index(sources, source) }
 	}
 
+	var (
+		notes []string
+		made  []lab.Clip
+	)
+	if pkg.HasAV() {
+		for i, container := range pkg.Containers {
+			out := stem + containers[container]
+			job.File = filepath.Base(out)
+			job.Progress = Progress{
+				Since:     time.Now(),
+				Percent:   float64(i) / float64(len(pkg.Containers)) * 100,
+				Operation: fmt.Sprintf("Making %s (%d of %d)", strings.ToUpper(container), i+1, len(pkg.Containers)),
+			}
+			r.save(job)
+
+			took, err := r.encodeFile(ctx, job, info, input, index, duration, out)
+			if err != nil {
+				return nil, err
+			}
+			size := int64(0)
+			if st, err := os.Stat(out); err == nil {
+				size = st.Size()
+			}
+			made = append(made, lab.Clip{Name: packageName(pkg), Path: out, Size: size, Took: took})
+			job.Made = append(job.Made, out)
+			if pkg.Whole() {
+				job.Delivery = out
+			}
+		}
+	}
+
+	// Subtitle files: the whole of a source's read ones are copies of the
+	// SRT beside it, taken at DELIVER; a stretch's are read from its piece.
+	if pkg.Whole() {
+		job.Stage = store.StageDeliver
+		r.save(job)
+	}
+	if note, err := r.subtitleFilesOf(ctx, job, info, input, index, stem); err != nil {
+		return nil, err
+	} else if note != "" {
+		notes = append(notes, note)
+	}
+	if job.File == "" && len(job.Made) > 0 {
+		job.File = filepath.Base(job.Made[0])
+	}
+
+	if pkg.Whole() && pkg.HasAV() {
+		if err := r.deliver(job, title, pkg.Edition); err != nil {
+			notes = append(notes, "ARFABIT could not add it to your library's list: "+err.Error())
+		}
+	}
+	// A stretch is made to judge, and says what the whole would come to.
+	if !pkg.Whole() && pkg.HasAV() {
+		job.Comparison = lab.Compare(made, pkg.Length, time.Duration(info.Duration*float64(time.Second)))
+	}
+	return notes, nil
+}
+
+// encodeFile makes one video or audio file from the Project's line items,
+// reading input, and returns how long it took.
+func (r *Runner) encodeFile(ctx context.Context, job *Job, info *ffmpeg.MediaInfo, input string, index func(int) int, duration time.Duration, out string) (time.Duration, error) {
+	pkg := job.Project
 	req, err := encodeRequest(pkg, info, input, out, index)
 	if err != nil {
-		return 0, "", err
+		return 0, err
 	}
 	req.MP4 = strings.EqualFold(filepath.Ext(out), ".mp4")
 	args, err := req.Args()
 	if err != nil {
-		return 0, "", err
+		return 0, err
 	}
 
 	start := time.Now()
@@ -476,7 +521,7 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 		},
 	})
 	if err != nil {
-		return 0, "", err
+		return 0, err
 	}
 	took := time.Since(start)
 
@@ -486,47 +531,43 @@ func (r *Runner) makePackageFile(ctx context.Context, job *Job, info *ffmpeg.Med
 	}
 	job.Log.Printf(job.Stage, "Made %s (%s) in %s.", filepath.Base(out), HumanBytes(size), took.Round(time.Second))
 
-	// A whole film's encode is what the estimator learns from.
-	video := pkg.ItemsOf(store.KindVideo)[0]
-	if pkg.WholeFilm() && video.Action == store.ActionConvert && size > 0 {
+	// A whole encode is what the estimator learns from.
+	if videos := pkg.ItemsOf(store.KindVideo); pkg.Whole() && len(videos) == 1 && videos[0].Action == store.ActionConvert && size > 0 {
 		if v := info.VideoStream(); v != nil {
 			r.Calibration.ObserveEncode(calibrationPlan(pkg, info), v.Width, v.Height, size, duration, took)
 		}
 	}
-
-	// A film takes its subtitles from beside its Original when it is
-	// delivered (takeSubtitles). A clip reads its own, from its piece.
-	if pkg.WholeFilm() {
-		return took, "", nil
-	}
-	note, err := r.readSubtitles(ctx, job, input, index, out)
-	return took, note, err
+	return took, nil
 }
 
 // encodeRequest turns the line items into what the encoder is asked for.
 // index finds an Original stream in the file being read.
 func encodeRequest(pkg *store.Project, info *ffmpeg.MediaInfo, input, out string, index func(int) int) (ffmpeg.EncodeRequest, error) {
-	req := ffmpeg.EncodeRequest{Input: input, Output: out, Chapters: pkg.WholeFilm()}
+	req := ffmpeg.EncodeRequest{Input: input, Output: out, Chapters: pkg.Whole()}
 
-	video := pkg.ItemsOf(store.KindVideo)[0]
-	source := streamAt(info, video.Source)
-	if source == nil || source.Kind != "video" {
-		return req, fmt.Errorf("the original has no picture at stream %d", video.Source)
-	}
-	req.VideoSourceIndex = index(video.Source)
-	req.HEVC = video.Action == store.ActionConvert || source.Codec == "hevc"
-	if video.Action == store.ActionCopy {
-		req.Video = ffmpeg.VideoPlan{Copy: true}
-	} else {
-		req.Video = ffmpeg.VideoPlan{CRF: video.CRF, Preset: ffmpeg.Preset(video.Preset)}
-		// The HDR metadata is the Original's, whatever is being read (§9).
-		req.HDR = source.HDR
-		req.Color = source.ColorInfo
+	videos := pkg.ItemsOf(store.KindVideo)
+	req.NoVideo = len(videos) == 0
+	if !req.NoVideo {
+		video := videos[0]
+		source := streamAt(info, video.Source)
+		if source == nil || source.Kind != "video" {
+			return req, fmt.Errorf("the source has no video at stream %d", video.Source)
+		}
+		req.VideoSourceIndex = index(video.Source)
+		req.HEVC = video.Action == store.ActionConvert || source.Codec == "hevc"
+		if video.Action == store.ActionCopy {
+			req.Video = ffmpeg.VideoPlan{Copy: true}
+		} else {
+			req.Video = ffmpeg.VideoPlan{CRF: video.CRF, Preset: ffmpeg.Preset(video.Preset)}
+			// The HDR metadata is the source's, whatever is being read (§9).
+			req.HDR = source.HDR
+			req.Color = source.ColorInfo
+		}
 	}
 
 	for i, it := range pkg.ItemsOf(store.KindAudio) {
 		if s := streamAt(info, it.Source); s == nil || s.Kind != "audio" {
-			return req, fmt.Errorf("the original has no sound at stream %d", it.Source)
+			return req, fmt.Errorf("the source has no audio at stream %d", it.Source)
 		}
 		track := ffmpeg.AudioTrack{
 			SourceIndex: index(it.Source),
@@ -547,7 +588,7 @@ func encodeRequest(pkg *store.Project, info *ffmpeg.MediaInfo, input, out string
 
 	for _, it := range pkg.ItemsOf(store.KindSubtitle) {
 		if s := streamAt(info, it.Source); s == nil || s.Kind != "subtitle" {
-			return req, fmt.Errorf("the original has no subtitles at stream %d", it.Source)
+			return req, fmt.Errorf("the source has no subtitles at stream %d", it.Source)
 		}
 		// Converted, they become SRT files beside the one made.
 		if it.Action == store.ActionConvert {
@@ -593,10 +634,12 @@ func streamAt(info *ffmpeg.MediaInfo, index int) *ffmpeg.Stream {
 }
 
 // calibrationPlan describes a Project the way the estimator records encodes:
-// by picture settings, with the sound's size left out of what it learns.
+// by video settings, with the sound's size left out of what it learns.
 func calibrationPlan(pkg *store.Project, info *ffmpeg.MediaInfo) *store.Plan {
-	video := pkg.ItemsOf(store.KindVideo)[0]
-	plan := &store.Plan{CRF: video.CRF, Preset: video.Preset}
+	plan := &store.Plan{}
+	if videos := pkg.ItemsOf(store.KindVideo); len(videos) > 0 {
+		plan.CRF, plan.Preset = videos[0].CRF, videos[0].Preset
+	}
 	for _, it := range pkg.ItemsOf(store.KindAudio) {
 		plan.Audio = append(plan.Audio, store.PlannedAudio{Selected: true, Copy: it.Action == store.ActionCopy})
 	}

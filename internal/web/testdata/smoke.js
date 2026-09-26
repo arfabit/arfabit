@@ -203,8 +203,8 @@ const answers = {
   "/api/autostart": { enabled: true, mechanism: "launchd user agent", path: "/tmp/x.plist" },
   "/api/index": { state: "ready", count: 272565, path: "/tmp/titles.json", built: new Date().toISOString() },
   "/api/sources": { sources: [
-    { title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv", size: 40700000000, kind: "original" },
-    { title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025).mkv", size: 4070000000, kind: "film" },
+    { title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025) {edition-Original}.mkv", size: 40700000000 },
+    { title: "Crime 101 (2025)", path: "/library/Crime 101 (2025)/Crime 101 (2025).mkv", size: 4070000000 },
   ] },
   "/api/source": {
     duration: 5825,

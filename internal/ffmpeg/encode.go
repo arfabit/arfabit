@@ -81,8 +81,10 @@ type EncodeRequest struct {
 	// Subtitles are in the order they go into the file.
 	Subtitles []SubtitleTrack
 
-	// VideoSourceIndex is the input stream index of the picture.
+	// VideoSourceIndex is the input stream index of the video. NoVideo
+	// makes a file with none.
 	VideoSourceIndex int
+	NoVideo          bool
 
 	// HDR is the source's metadata, propagated when the video is re-encoded.
 	// Nil for SDR sources.
@@ -150,13 +152,15 @@ func (r EncodeRequest) Args() ([]string, error) {
 	if r.Input == "" || r.Output == "" {
 		return nil, fmt.Errorf("encode: input and output are both required")
 	}
-	if !r.Video.Copy && !r.Video.Preset.Valid() {
+	if !r.NoVideo && !r.Video.Copy && !r.Video.Preset.Valid() {
 		return nil, fmt.Errorf("encode: %q is not an offered preset", r.Video.Preset)
 	}
 
 	args := []string{"-hide_banner", "-y", "-i", r.Input}
 
-	args = append(args, "-map", fmt.Sprintf("0:%d", r.VideoSourceIndex))
+	if !r.NoVideo {
+		args = append(args, "-map", fmt.Sprintf("0:%d", r.VideoSourceIndex))
+	}
 	for _, a := range r.Audio {
 		args = append(args, "-map", fmt.Sprintf("0:%d", a.SourceIndex))
 	}
@@ -164,7 +168,9 @@ func (r EncodeRequest) Args() ([]string, error) {
 		args = append(args, "-map", fmt.Sprintf("0:%d", s.SourceIndex))
 	}
 
-	args = append(args, r.videoArgs()...)
+	if !r.NoVideo {
+		args = append(args, r.videoArgs()...)
+	}
 	args = append(args, r.audioArgs()...)
 	args = append(args, r.subtitleArgs()...)
 
@@ -184,7 +190,7 @@ func (r EncodeRequest) Args() ([]string, error) {
 	// "hev1" unless asked; "hvc1" is the label under which the picture's
 	// parameter sets travel outside the picture, which is what ARFABIT asks
 	// for. Which of the two an Apple TV plays is untested (§4).
-	if r.MP4 && r.HEVC {
+	if r.MP4 && r.HEVC && !r.NoVideo {
 		args = append(args, "-tag:v", "hvc1")
 	}
 	args = append(args, r.Output)

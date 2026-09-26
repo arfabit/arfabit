@@ -146,7 +146,7 @@ func (r *Runner) UpdateProject(pkg store.Project) error {
 	r.mu.Lock()
 	if !r.editingLocked(job).Film {
 		r.mu.Unlock()
-		return errStarted("the film")
+		return errStarted("what is made from it")
 	}
 	film := job.film
 	if film != nil {
@@ -210,12 +210,12 @@ func (r *Runner) SetConvert(parent context.Context, on bool) error {
 	film := job.film
 	if !e.Film || (on && film == nil && !e.Name) {
 		r.mu.Unlock()
-		return errStarted("the film")
+		return errStarted("what is made from it")
 	}
 	if on && film == nil && e.Started {
 		if job.Plan.Project == nil {
 			r.mu.Unlock()
-			return errors.New("there is no film planned")
+			return errors.New("there is nothing planned to make from it")
 		}
 		check := *job.Plan.Project
 		check.Items = slices.Clone(check.Items)

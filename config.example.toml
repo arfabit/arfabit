@@ -25,16 +25,13 @@ name = "living-room-mac"
 # computers; each one writes only in its own folder, so they cannot collide.
 # data = "/Volumes/nas/arfabit"
 
-# Your films, one folder each, named the way Plex, Infuse and Jellyfin expect.
-# Each disc's original goes in its film's folder too, as the edition
-# "Original": the disc exactly as it is, every track. Originals are large, and
+# Your library: one folder per film, named the way Plex, Infuse and Jellyfin
+# expect. Each disc's original goes in its film's folder, as the edition
+# "Original": the disc exactly as it is, every track. Everything made from it
+# goes beside it, each under the edition you give it. Originals are large, and
 # ARFABIT never removes them: when you want the space back, move one to the
 # trash yourself.
-library = "~/Downloads/arfabit/library"
-
-# Test clips from the quality lab. They are named so a folder listing reads
-# plainly, and they are meant to be copied to a television and watched.
-clips = "~/Downloads/arfabit/clips"
+library = "~/Downloads/arfabit"
 
 [server]
 # Where the web page is served. The default listens on every network, so you
@@ -42,7 +39,7 @@ clips = "~/Downloads/arfabit/clips"
 addr = ":7847"
 
 [machine]
-# How many films may be converted at once, counting test clips from the lab.
+# How many files may be converted at once, whole or in part.
 #
 # One is usually fastest. Converting already uses every core your computer has,
 # so a second one at the same time does not finish sooner — it makes both

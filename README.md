@@ -47,14 +47,12 @@ Everything lands in your Downloads folder, in a folder called `arfabit`.
 
 ```
 Downloads/arfabit/
-  library/                        your movies
-    Blade Runner (1982)/
-      Blade Runner (1982) {edition-Original}.mkv     the disc, exactly as it was
-      Blade Runner (1982).mkv                        the movie for your TV
-  clips/                          short clips, for choosing a quality
+  Blade Runner (1982)/
+    Blade Runner (1982) {edition-Original}.mkv     the disc, exactly as it was
+    Blade Runner (1982).mkv                        the movie for your TV
 ```
 
-The **library** folder is the one you want. It's named the way Plex, Infuse, and Jellyfin expect, so those apps pick it up without any setup.
+The `arfabit` folder is your library. It's named the way Plex, Infuse, and Jellyfin expect, so those apps pick it up without any setup. Point them at it.
 
 Each movie's folder also holds the **original**: an exact copy of what was on the disc. It's large. ARFABIT keeps it so you never have to copy the same disc twice, and it never removes anything on its own. Plex shows it as one more version of the movie, called Original. When you want the space back, move that one file to the trash yourself.
 

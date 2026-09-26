@@ -239,7 +239,7 @@ func (s *Server) discWentIn(ctx context.Context, d disc.Drive) {
 		return
 	}
 	if missing != "" {
-		job.Log.Printf(store.StagePlan, "This drive is set to make a film from the %s blueprint, which is no longer there, so this Plan waits for you.", missing)
+		job.Log.Printf(store.StagePlan, "This drive is set to make a file from the %s blueprint, which is no longer there, so this Plan waits for you.", missing)
 		return
 	}
 

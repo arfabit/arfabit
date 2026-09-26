@@ -114,8 +114,7 @@ func TestFilmSubtitlesAreReadIntoText(t *testing.T) {
 	r.OCR = &readsInOrder{}
 
 	job := runPackageToEnd(t, r, ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{Edition: "Text", Items: convertSubtitles},
 	})
 
@@ -160,8 +159,7 @@ func TestClipSubtitlesKeepTimeWithThePicture(t *testing.T) {
 	r.OCR = &readsInOrder{}
 
 	job := runPackageToEnd(t, r, ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{At: 3200 * time.Millisecond, Length: 2 * time.Second, Items: convertSubtitles},
 	})
 
@@ -262,8 +260,7 @@ func TestFilmTakesTheOriginalsSRT(t *testing.T) {
 	}
 
 	job := runPackageToEnd(t, r, ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{Items: convertSubtitles},
 	})
 	data, err := os.ReadFile(filepath.Join(filepath.Dir(job.Delivery), "Test Film (2026).en.srt"))
@@ -360,8 +357,7 @@ func TestUnreadableSubtitlesDoNotStopTheFilm(t *testing.T) {
 	})
 
 	job := runPackageToEnd(t, r, ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{Items: convertSubtitles},
 	})
 	if !strings.Contains(job.Note, message) {
@@ -406,25 +402,28 @@ func TestSubtitleConversionIsChecked(t *testing.T) {
 	second := sub
 	second.Source = 9
 	p = store.Project{Items: []store.Item{video, sub, second}}
-	if err := checkProject(&p, true); err == nil || !strings.Contains(err.Error(), "only one English") {
+	if err := checkProject(&p, true); err == nil || !strings.Contains(err.Error(), "both be") {
 		t.Errorf("two English: err = %v", err)
 	}
 }
 
-// Sidecars are named after the file they belong to and their language.
-func TestSidecarPaths(t *testing.T) {
-	pkg := &store.Project{Items: []store.Item{
-		{Kind: store.KindSubtitle, Source: 3, Action: store.ActionConvert, Lang: "eng"},
-		{Kind: store.KindSubtitle, Source: 5, Action: store.ActionConvert, Lang: "fre"},
-		{Kind: store.KindSubtitle, Source: 6, Action: store.ActionCopy, Lang: "ger"},
-	}}
-	got := sidecarPaths(pkg, filepath.Join("lib", "Film (2020)", "Film (2020).mkv"))
-	want := map[int]string{
-		3: filepath.Join("lib", "Film (2020)", "Film (2020).en.srt"),
-		5: filepath.Join("lib", "Film (2020)", "Film (2020).fr.srt"),
+// Subtitle files are named after what is made and their language. With video
+// or audio, only those read into text are files of their own; with subtitles
+// alone, a Blu-ray's pictures copied as they are become SUP, and text SRT.
+func TestSubtitleFiles(t *testing.T) {
+	items := []store.Item{
+		{Kind: store.KindSubtitle, Source: 3, Action: store.ActionConvert, Lang: "eng", Codec: pictureSubtitles},
+		{Kind: store.KindSubtitle, Source: 3, Action: store.ActionCopy, Lang: "eng", Codec: pictureSubtitles},
+		{Kind: store.KindSubtitle, Source: 6, Action: store.ActionCopy, Lang: "ger", Codec: "subrip"},
 	}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("sidecars = %v, want %v", got, want)
+	stem := filepath.Join("lib", "Film (2020)", "Film (2020)")
+	alone := &store.Project{Items: items}
+	if got := fmt.Sprint(subtitleFiles(alone, stem)); got != fmt.Sprint(map[int]string{0: stem + ".en.srt", 1: stem + ".en.sup", 2: stem + ".de.srt"}) {
+		t.Errorf("subtitles alone: %s", got)
+	}
+	withVideo := &store.Project{Items: append([]store.Item{{Kind: store.KindVideo, Action: store.ActionCopy}}, items...)}
+	if got := fmt.Sprint(subtitleFiles(withVideo, stem)); got != fmt.Sprint(map[int]string{1: stem + ".en.srt"}) {
+		t.Errorf("with video: %s", got)
 	}
 }
 
@@ -493,8 +492,7 @@ func TestFilmAsMP4(t *testing.T) {
 	r.OCR = &readsInOrder{}
 
 	job := runPackageToEnd(t, r, ProjectRequest{
-		Original: original, Film: "Test Film", Year: 2026,
-		ClipsDir: r.Config.Paths.Clips, LibraryDir: r.Config.Paths.Library,
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
 		Project: store.Project{Edition: "MP4", Containers: []string{"mp4"}, Items: convertSubtitles},
 	})
 	if filepath.Base(job.Delivery) != "Test Film (2026) {edition-MP4}.mp4" {
@@ -509,5 +507,28 @@ func TestFilmAsMP4(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(job.Delivery), "Test Film (2026) {edition-MP4}.en.srt")); err != nil {
 		t.Errorf("no subtitles beside the MP4: %v", err)
+	}
+}
+
+// Subtitles alone, copied as they are, come out as a SUP file of their own,
+// and nothing waits for the processor to make it.
+func TestSubtitlesAloneMakeASUP(t *testing.T) {
+	original := pgsMaster(t)
+	r := runnerWithFolders(t)
+	r.Slots = NewSlots(1)
+
+	job := runPackageToEnd(t, r, ProjectRequest{
+		Original: original, Film: "Test Film", Year: 2026, LibraryDir: r.Config.Paths.Library,
+		Project: store.Project{Edition: "Pictures", Items: []store.Item{
+			{Kind: store.KindSubtitle, Source: 1, Action: store.ActionCopy, Codec: pictureSubtitles, Lang: "eng"},
+		}},
+	})
+	sup := filepath.Join(r.Config.Paths.Library, "Test Film (2026)", "Test Film (2026) {edition-Pictures}.en.sup")
+	data, err := os.ReadFile(sup)
+	if err != nil || !bytes.HasPrefix(data, []byte("PG")) {
+		t.Fatalf("no SUP of the pictures (%v)", err)
+	}
+	if len(job.Made) != 1 || job.Made[0] != sup {
+		t.Errorf("made = %v", job.Made)
 	}
 }

@@ -35,7 +35,7 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 
 	video := findVideo(title)
 	if video == nil {
-		return nil, fmt.Errorf("this title has no picture")
+		return nil, fmt.Errorf("this title has no video")
 	}
 
 	plan.SourceCodec = video.CodecLong

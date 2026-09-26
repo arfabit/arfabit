@@ -21,8 +21,7 @@ type Project struct {
 	Blueprint string `json:"blueprint,omitempty"`
 
 	// At and Length say which stretch of the Original. A Length of zero means
-	// the whole of it, which makes a film for the library; anything shorter
-	// is a test clip for the lab.
+	// the whole of it.
 	At     time.Duration `json:"at"`
 	Length time.Duration `json:"length"`
 
@@ -97,8 +96,15 @@ func (p Project) ItemsOf(kind string) []Item {
 	return out
 }
 
-// WholeFilm reports whether the Project makes a film rather than a clip.
-func (p Project) WholeFilm() bool { return p.Length <= 0 }
+// Whole reports whether the Project makes something of all of its source,
+// rather than of a stretch of it.
+func (p Project) Whole() bool { return p.Length <= 0 }
+
+// HasAV reports whether the Project makes a video or audio file: whether it
+// has any video or audio line items. Without, it makes subtitle files alone.
+func (p Project) HasAV() bool {
+	return len(p.ItemsOf(KindVideo))+len(p.ItemsOf(KindAudio)) > 0
+}
 
 // Track is one track something holds, described the same way whether it was
 // read from an Original by ffprobe or from a disc by MakeMKV, so one recipe and
