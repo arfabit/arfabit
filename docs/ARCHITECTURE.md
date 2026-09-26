@@ -39,6 +39,7 @@ Do not re-litigate them, work around them, or "improve" them without being asked
 | Naming / metadata       | §6, §11             |
 | Web UI                  | §14, §15            |
 | Files, config, state    | §6, §7              |
+| **What comes next**     | **§18 — agreed, not built; it changes §2, §6, §10 and §14** |
 
 ### Highest-consequence code
 
@@ -1091,8 +1092,9 @@ A disc's Plan made before Packages still logs that its subtitles are not read.
 ## 17. Roadmap
 
 **Next**
-Measuring OCR on more discs, on Windows and with Tesseract · the encoder's own observed frame rate
-rather than an assumed 24 · VMAF in the lab.
+Originals, projects and subtitles that belong to the original (§18) · measuring OCR
+on more discs, on Windows and with Tesseract · the encoder's own observed frame
+rate rather than an assumed 24 · VMAF in the lab.
 
 **Later**
 Blueprint matchers (§8) · multichannel E-AC-3 · OS-level disc detection ·
@@ -1106,6 +1108,132 @@ this way, and it helps everywhere a disc's own subtitles are missing or poor.
 Music CDs (a separate backend — MakeMKV cannot read CDDA; needs libcdio and
 MusicBrainz) · Dolby Vision (P7 to P8.1 via `dovi_tool`) · HDR10+ ·
 `arfabit-control` for NAS targets · a context pass over what OCR read.
+
+---
+
+## 18. Next: originals, projects, and subtitles that belong to the original
+
+**Agreed, not built.** This was settled in discussion and replaces parts of §2,
+§5, §6, §8, §10 and §14. Where they disagree, this section is the plan and they
+describe what exists. As each piece is built, fold it into the section it
+belongs to and remove it from here.
+
+### Why
+
+Two workflows matter, and everything on the page exists to serve them:
+
+- **Automatic.** A disc goes in and, with nothing clicked, the film for the Apple
+  TV comes out, with its subtitles read into text.
+- **Manual.** Clips to find the settings, and packaging an original again later.
+
+OCR is never perfect, so both must leave a way to fix subtitles **after the
+fact**, however long ago the film was made. Today OCR runs inside a Package, so
+reading subtitles means making a film, and fixes live under a task that scrolls
+out of Recent tasks. Both are what this changes.
+
+### Words (replaces parts of §2)
+
+| Term | Meaning |
+|---|---|
+| **Original** | Was *Master*. The disc as it is, every track, subtitles still inside, as MakeMKV copies it. Always kept; only the user removes one (§0.6 unchanged). |
+| **Project** | Was *Package*, and wider. What you set up to be done: a source, and what to make from it. Starting it makes tasks. |
+| **Task** | One step a project becomes, in the queue: copy, OCR, package, clip. (In code, a job.) |
+| **Low confidence** | Unchanged (§10). |
+
+Stage names are unchanged: `SCAN PLAN RIP EJECT QUEUED PACKAGE OCR DELIVER`, plus
+`LAB`. OCR moves (below).
+
+### Files (replaces the media layout in §6)
+
+Originals and films share one folder per film, named for Plex. The original is
+an edition of its own:
+
+```
+Blade Runner (1982)/
+    Blade Runner (1982) {edition-Original}.mkv
+    Blade Runner (1982) {edition-Original}.en.srt   ← the SRT: the one that is fixed
+    Blade Runner (1982).mkv
+    Blade Runner (1982).en.srt                      ← a copy
+```
+
+- MakeMKV names its file its own way; ARFABIT renames it into place once the copy
+  is finished. A rename, never a removal.
+- The original keeps its picture subtitles. Plex plays it without converting the
+  picture unless those are switched on; its Dolby TrueHD sound, where it has
+  some, Plex converts on every play (§4). Choosing it is the user's business.
+- **The SRT beside the original is the SRT.** OCR writes it there, fixes are made
+  to it, and every film made from that original gets a copy. Before removing an
+  original, the user makes sure its SRTs are where they want them: once it is
+  gone, that film's subtitles cannot be read or fixed again from their pictures.
+- The pictures of low-confidence subtitles stay in the node's own folder
+  (`nodes/<id>/ocr/`), as now, so they can still be shown after an original is
+  removed.
+- A second track in the same language beside the original needs its own name
+  (say `.en.2.srt`); a film still gets one SRT per language. To settle when built.
+
+### The pipeline
+
+```
+Disc in → SCAN → PLAN → RIP → EJECT                    the original, renamed into place
+                           → OCR, one task per chosen subtitle track, from the original
+                           → QUEUED → PACKAGE → DELIVER, taking the SRTs at the last moment
+```
+
+- **Copy includes OCR.** Once RIP ends, each chosen subtitle track is read from the
+  original, as its own task. OCR takes a minute or two and little processor, so
+  it takes no processor slot and has no limit on how many run.
+- **A package takes the original's SRTs at DELIVER,** not before, so a fix made
+  while it was converting is in the film. A package remembers which of the
+  original's SRTs it wanted: a converted subtitle line item already names its
+  track.
+- **Each step stays editable until it starts.** The copy can start the moment a
+  disc goes in, with the plan changed while it runs: SCAN already knows every
+  track before copying, and a transcode already waits for its rip.
+- A clip's subtitles: taking them from the original's SRT needs the exact start
+  of the clip's piece, the keyframe before the time asked for (§10, "Clips").
+  Find it with ffprobe and test it against the 3.2 s → 3.0 s case, or keep
+  reading clips from their piece. To settle when built.
+
+### Fixing after the fact
+
+- Every OCR task has a tag in Recent tasks: **green** for no low-confidence
+  subtitles, or marked fine by the user; **yellow** for low-confidence subtitles
+  not yet marked fine; **red** if reading did not finish. A button, "These are
+  fine", turns it green without going line by line.
+- Choosing a reading (Accurate, Fast or Custom, as in §10) changes the SRT beside
+  the original.
+- **Copies are then out of date.** When ARFABIT writes a copy, it records its
+  SHA-256. To bring a copy up to date it hashes the file again: if it is still
+  exactly what ARFABIT wrote, nobody has changed it, and it is replaced whole
+  (written aside and renamed into place). If not, it is left alone and the
+  project says the copy is out of date and was changed by someone else. This is
+  the only file ARFABIT replaces, and only on that proof.
+- Fixes need to be findable long after: yellow OCR tasks must not scroll out of
+  sight the way Recent tasks do today.
+
+### The page (replaces §14's sections)
+
+- **Tasks** — watching. Each drive, with **"When a disc goes in: Nothing / Copy /
+  Blueprint: [name]"**, and a Plan button that opens the disc's project. The
+  queue, logs, and recent tasks.
+- **Projects** — creating. Pick a source: a disc in a drive, an original, or any
+  file ARFABIT made (a converted MKV can be remuxed to MP4 with other subtitles,
+  say). Pick what to make: copy; read subtitles (OCR only, no picture or sound
+  made); a film, converted or remuxed, MKV or MP4; a clip. Starting it adds its
+  tasks to the queue. Projects shows nothing finished; that is Tasks.
+- **Blueprints** — recipes, applied from the start by a drive or by hand.
+- **Settings** — the rest.
+
+The user is trusted to know what they are making in Projects.
+
+### Not settled by this, and untested
+
+- **MP4:** in §0.2 as "may be offered later". §4 has no tested result for MP4 or
+  its own subtitle format; nothing about it is assumed.
+- **Sidecar SRT on the Apple TV:** SRT inside MKV is tested to play directly
+  (§4); a sidecar SRT is not yet.
+- **Plex noticing a changed SRT:** untested; it may need the film's metadata
+  refreshed.
 
 ---
 
