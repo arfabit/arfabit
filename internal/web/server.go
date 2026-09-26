@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -58,6 +59,10 @@ type Server struct {
 	events  *eventStream
 	drives  driveWatcher
 	started time.Time
+
+	// hashes remembers the SHA-256 of the subtitle files the page asks
+	// about, until they change.
+	hashes pipeline.Hashes
 
 	// building guards the film list download. A button can be clicked twice;
 	// the server is where "once" has to be true. Projects need no such guard:
@@ -143,6 +148,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs/{id}/low-confidence/{n}/picture", s.handleLowConfidencePicture)
 	mux.HandleFunc("POST /api/jobs/{id}/low-confidence/{n}", s.handleChooseLowConfidence)
 	mux.HandleFunc("POST /api/jobs/{id}/fine", s.handleSubtitlesAreFine)
+	mux.HandleFunc("POST /api/jobs/{id}/bring-up-to-date", s.handleBringUpToDate)
 
 	mux.HandleFunc("POST /api/scan", s.handleScan)
 	mux.HandleFunc("POST /api/start", s.handleStart)
@@ -208,7 +214,14 @@ type state struct {
 	// clocks in step with the times it is sent.
 	Now time.Time `json:"now"`
 
-	Recent   []*store.Job `json:"recent"`
+	Recent []*store.Job `json:"recent"`
+
+	// Copies says how each film's SRTs stand against those beside its
+	// original, by the task that made them; CopiesOf says the same by the
+	// SRT beside the original, for the OCR task that read it (§10).
+	Copies   map[string][]copyState `json:"copies,omitempty"`
+	CopiesOf map[string][]copyState `json:"copies_of,omitempty"`
+
 	Drives   []disc.Drive `json:"drives"`
 	NodeName string       `json:"node_name"`
 	Paths    config.Paths `json:"paths"`
@@ -235,6 +248,19 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	byTask, byFrom := s.copiesOf(all)
+	copies, copiesOf := map[string][]copyState{}, map[string][]copyState{}
+	for _, job := range recent {
+		if c := byTask[job.ID]; len(c) > 0 {
+			copies[job.ID] = c
+		}
+		if job.Reading != nil {
+			if c := byFrom[filepath.Clean(job.Reading.SRT)]; len(c) > 0 {
+				copiesOf[job.ID] = c
+			}
+		}
+	}
+
 	resumable := map[string]bool{}
 	for _, job := range recent {
 		if job.State == store.StateStopped && pipeline.Resumable(job) {
@@ -254,6 +280,8 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Job:       current,
 		Active:    s.Runner.Active(),
 		Recent:    recent,
+		Copies:    copies,
+		CopiesOf:  copiesOf,
 		Drives:    s.Drives(),
 		NodeName:  s.Config.Node.Name,
 		Paths:     s.Config.Paths,

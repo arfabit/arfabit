@@ -347,7 +347,10 @@ Sidecar names match the video filename exactly, which is what Plex requires;
 because it does not yet tell those tracks apart (Appendix A).
 
 **The SRT beside the original is the SRT.** OCR writes it there, fixes are
-made to it, and every film made from that original gets a copy (§10). Before
+made to it, and every film made from that original gets a copy (§10). A copy
+ARFABIT made and nobody has changed since, proved by its SHA-256, is the one
+file ARFABIT replaces, to bring it up to date with a fix; anything else is
+never replaced. Before
 removing an original, make sure its SRTs are where you want them: once it is
 gone, that film's subtitles cannot be read or fixed again from their
 pictures. The pictures of low-confidence subtitles are kept in the node's own
@@ -853,6 +856,18 @@ changes, and an empty Custom takes it out. Nothing is changed until somebody
 chooses. **These are fine** turns the task green without going line by line,
 and changes nothing. A clip's subtitles are checked the same way, in its SRT.
 
+**Copies fall behind, and are brought up to date.** When a film takes a copy
+of an SRT beside its original, ARFABIT records the copy's SHA-256 on the film's
+task. A fix to the original's SRT leaves every copy out of date. The OCR task
+says how many films have one from before the change, and each film's task says
+its own; both offer **Bring up to date**. To do it ARFABIT hashes the copy
+again: if it is still exactly what ARFABIT wrote, nobody has changed it, and
+it is replaced whole with the original's SRT as it is now, written aside and
+renamed into place, and the new SHA-256 recorded. If not, it is left alone and
+the page says it was changed by someone else. That copy is the only file
+ARFABIT ever replaces, and only on that proof (§6). Whether Plex notices a
+changed SRT without the film's metadata being refreshed is untested.
+
 Not built: a context pass over what was read; telling SDH and forced tracks apart;
 DVD subtitles.
 
@@ -1199,23 +1214,13 @@ out of Recent tasks. Both are what this changes.
 Built so far, and folded into the sections they belong to: the words Original,
 Project and Task (§2); originals kept beside their films, and their SRTs (§6);
 OCR as tasks of their own after the copy, films taking the SRTs at DELIVER,
-and tags on OCR tasks (§2, §10, §14).
+tags on OCR tasks, and copies brought up to date after a fix (§2, §10, §14).
 
 ### Planning while copying
 
 - **Each step stays editable until it starts.** The copy can start the moment a
   disc goes in, with the plan changed while it runs: SCAN already knows every
   track before copying, and a transcode already waits for its rip.
-
-### Fixing after the fact
-
-- **Copies are out of date once the original's SRT is fixed.** When ARFABIT
-  writes a copy, it records its SHA-256. To bring a copy up to date it hashes
-  the file again: if it is still exactly what ARFABIT wrote, nobody has changed
-  it, and it is replaced whole (written aside and renamed into place). If not,
-  it is left alone and the project says the copy is out of date and was
-  changed by someone else. This is the only file ARFABIT replaces, and only on
-  that proof.
 
 ### The page (replaces §14's sections)
 
@@ -1238,8 +1243,6 @@ The user is trusted to know what they are making in Projects.
   its own subtitle format; nothing about it is assumed.
 - **Sidecar SRT on the Apple TV:** SRT inside MKV is tested to play directly
   (§4); a sidecar SRT is not yet.
-- **Plex noticing a changed SRT:** untested; it may need the film's metadata
-  refreshed.
 
 ---
 

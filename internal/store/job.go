@@ -133,6 +133,10 @@ type Job struct {
 	Delivery string   `json:"delivery,omitempty"`
 	Sidecars []string `json:"sidecars,omitempty"`
 
+	// Copies are the SRTs a film took from beside its Original, and what
+	// was in each when ARFABIT wrote it (§10).
+	Copies []Copy `json:"copies,omitempty"`
+
 	// LowConfidence lists the subtitles OCR may have read wrong, for a
 	// person to check (§10). The sidecars hold the first reading of each
 	// until somebody chooses otherwise.
@@ -448,4 +452,13 @@ func (j *Job) ToCheck() bool {
 		}
 	}
 	return false
+}
+
+// Copy is an SRT a film took from beside its Original: From is the
+// Original's, To is the film's, and SHA256 is what ARFABIT wrote there, so it
+// can tell later whether anybody else has changed it.
+type Copy struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	SHA256 string `json:"sha256"`
 }

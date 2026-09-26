@@ -376,6 +376,7 @@ func (r *Runner) takeSubtitles(ctx context.Context, job *Job, tracks []Track, ou
 			continue
 		}
 		job.Sidecars = append(job.Sidecars, sidecars[it.Source])
+		job.Copies = append(job.Copies, store.Copy{From: srt, To: sidecars[it.Source], SHA256: hashOf(data)})
 		job.Log.Printf(store.StageDeliver, "Copied the %s subtitles from %s.", name, filepath.Base(srt))
 	}
 	return strings.Join(notes, " ")

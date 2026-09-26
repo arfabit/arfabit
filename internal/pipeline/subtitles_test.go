@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -269,6 +270,9 @@ func TestFilmTakesTheOriginalsSRT(t *testing.T) {
 	if err != nil || string(data) != fixed {
 		t.Errorf("the film's subtitles are %q (%v), want the original's", data, err)
 	}
+	if len(job.Copies) != 1 || job.Copies[0].SHA256 != hashOf([]byte(fixed)) || CopyState(nil, job.Copies[0]) != CopyCurrent {
+		t.Errorf("the copy is recorded as %+v", job.Copies)
+	}
 }
 
 // The SRT beside an original is named after it and the language; a second
@@ -421,5 +425,61 @@ func TestSidecarPaths(t *testing.T) {
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("sidecars = %v, want %v", got, want)
+	}
+}
+
+// A film's SRT is a copy of the one beside its original. Once that one is
+// fixed the copy is out of date, and it is replaced only while it is exactly
+// what ARFABIT wrote; a copy somebody else has changed is left alone.
+func TestCopiesAreReplacedOnlyWhileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	from, to := filepath.Join(dir, "Film {edition-Original}.en.srt"), filepath.Join(dir, "Film.en.srt")
+	write := func(path, text string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(from, "read")
+	write(to, "read")
+	c := store.Copy{From: from, To: to, SHA256: hashOf([]byte("read"))}
+	var h Hashes
+
+	if got := CopyState(&h, c); got != CopyCurrent {
+		t.Errorf("a fresh copy is %s", got)
+	}
+
+	write(from, "fixed")
+	if got := CopyState(&h, c); got != CopyBehind {
+		t.Fatalf("after a fix the copy is %s, want behind", got)
+	}
+	if err := BringUpToDate(&c); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(to); string(data) != "fixed" || c.SHA256 != hashOf([]byte("fixed")) {
+		t.Errorf("the copy holds %q, recorded %s", data, c.SHA256)
+	}
+	if got := CopyState(&h, c); got != CopyCurrent {
+		t.Errorf("brought up to date, the copy is %s", got)
+	}
+
+	write(to, "somebody's own")
+	write(from, "fixed again")
+	if got := CopyState(&h, c); got != CopyChanged {
+		t.Errorf("a copy somebody changed is %s", got)
+	}
+	if err := BringUpToDate(&c); !errors.Is(err, ErrCopyChanged) {
+		t.Errorf("err = %v", err)
+	}
+	if data, _ := os.ReadFile(to); string(data) != "somebody's own" {
+		t.Errorf("a copy somebody changed was replaced: %q", data)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".arfabit-*")); len(left) != 0 {
+		t.Errorf("left behind: %v", left)
+	}
+
+	os.Remove(to)
+	if got := CopyState(&h, c); got != CopyGone {
+		t.Errorf("a copy that is not there is %s", got)
 	}
 }

@@ -1,6 +1,8 @@
 package web
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -157,4 +159,67 @@ func post(t *testing.T, s *Server, path, body string) *httptest.ResponseRecorder
 	rec := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
 	return rec
+}
+
+// After a fix beside the original, its OCR task says which films have an
+// older copy and brings them up to date; a copy somebody else changed is left
+// alone and said so.
+func TestCopiesAreBroughtUpToDate(t *testing.T) {
+	s := newTestServer(t)
+	dir := filepath.Join(s.Config.Paths.Library, "Film (2026)")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	from := filepath.Join(dir, "Film (2026) {edition-Original}.en.srt")
+	ours, theirs := filepath.Join(dir, "Film (2026).en.srt"), filepath.Join(dir, "Film (2026) {edition-Small}.en.srt")
+	for path, text := range map[string]string{from: "fixed", ours: "read", theirs: "somebody's own"} {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := sha256.Sum256([]byte("read"))
+	sum := hex.EncodeToString(read[:])
+	for _, job := range []*store.Job{
+		{ID: "ocr", Kind: store.KindOCR, State: store.StateDone, Reading: &store.Reading{SRT: from}},
+		{ID: "film", Kind: store.KindConvert, State: store.StateDone, Copies: []store.Copy{{From: from, To: ours, SHA256: sum}}},
+		{ID: "small", Kind: store.KindConvert, State: store.StateDone, Copies: []store.Copy{{From: from, To: theirs, SHA256: sum}}},
+	} {
+		if err := s.Store.SaveJob(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var state struct {
+		CopiesOf map[string][]copyState `json:"copies_of"`
+	}
+	if err := json.Unmarshal(get(t, s, "/api/state").Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(state.CopiesOf["ocr"]); !strings.Contains(got, "behind") || !strings.Contains(got, "changed") {
+		t.Errorf("the OCR task's copies: %s", got)
+	}
+
+	rec := post(t, s, "/api/jobs/ocr/bring-up-to-date", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var reply struct {
+		Updated int      `json:"updated"`
+		Left    []string `json:"left"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &reply)
+	if reply.Updated != 1 || len(reply.Left) != 1 || reply.Left[0] != theirs {
+		t.Errorf("reply = %+v", reply)
+	}
+	if data, _ := os.ReadFile(ours); string(data) != "fixed" {
+		t.Errorf("the film's copy holds %q", data)
+	}
+	if data, _ := os.ReadFile(theirs); string(data) != "somebody's own" {
+		t.Errorf("a copy somebody changed was replaced: %q", data)
+	}
+	film, _ := s.Store.LoadJob("film")
+	fixed := sha256.Sum256([]byte("fixed"))
+	if film.Copies[0].SHA256 != hex.EncodeToString(fixed[:]) {
+		t.Error("what was written is not recorded")
+	}
 }

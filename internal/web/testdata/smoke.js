@@ -168,6 +168,11 @@ const answers = {
       file: "Alien {edition-Archive}.mp4",
       progress: { operation: "Waiting for a turn", since: new Date().toISOString() },
     }],
+    copies: { p: [{ task: "p", from: "/lib/B {edition-Original}.en.srt", to: "/lib/B.en.srt", state: "behind" }] },
+    copies_of: { o: [
+      { task: "p", from: "/lib/B {edition-Original}.en.srt", to: "/lib/B.en.srt", state: "behind" },
+      { task: "q", from: "/lib/B {edition-Original}.en.srt", to: "/lib/B {edition-Small}.en.srt", state: "changed" },
+    ] },
     recent: [
       { id: "o", kind: "ocr", state: "done", stage: "OCR", title: "Blade Runner", year: 1982, started: new Date().toISOString(),
         original: "/lib/Blade Runner (1982)/Blade Runner (1982) {edition-Original}.mkv",

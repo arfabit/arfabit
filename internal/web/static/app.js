@@ -23,6 +23,8 @@ let lastActive = []; // every active job, whatever the queue is showing
 let queueFilter = "all";
 let focusedJob = "";
 let resumable = {};
+let copies = {};   // how each film's SRTs stand, by the task that made them
+let copiesOf = {}; // the same, by the OCR task whose SRT they copy
 let line = [];
 let clockTimer = null;
 
@@ -1273,7 +1275,7 @@ function madeBy(job) {
 
 function renderRecent(jobs) {
   const box = $("recent");
-  const drawn = JSON.stringify([jobs, resumable, new Date().toDateString()]);
+  const drawn = JSON.stringify([jobs, resumable, copies, copiesOf, new Date().toDateString()]);
   if (drawn === recentDrawn) return;
   recentDrawn = drawn;
 
@@ -1341,6 +1343,11 @@ function recentDetail(job) {
   // Subtitles OCR may have read wrong, to check against their pictures.
   if ((job.low_confidence || []).length) body.append(lowConfidenceList(job));
 
+  // A film's subtitles are copies of those beside its original, and fall
+  // behind when those are fixed.
+  const copied = job.kind === "ocr" ? copiesOf[job.id] : copies[job.id];
+  if (copied && copied.length) body.append(copiesNote(job, copied));
+
   // Looking at every one is not the only way to be done with them.
   if (toCheck(job)) {
     const fine = document.createElement("button");
@@ -1388,6 +1395,48 @@ function recentDetail(job) {
   }
 
   return body;
+}
+
+// copiesNote says how the copies of some subtitles stand, and offers to bring
+// those that are out of date up to date. A copy somebody else has changed is
+// only mentioned: ARFABIT leaves it as it is.
+function copiesNote(job, copied) {
+  const box = document.createElement("div");
+  box.className = "copies small";
+  const name = (path) => path.split(/[\\/]/).pop();
+  const line = (text) => {
+    const p = document.createElement("p");
+    p.textContent = text;
+    box.append(p);
+  };
+
+  const behind = copied.filter((c) => c.state === "behind");
+  if (job.kind === "ocr") {
+    line(behind.length === 0
+      ? `${copied.length === 1 ? "One film has" : `${copied.length} films have`} a copy of these subtitles.`
+      : behind.length === 1
+        ? `${name(behind[0].to)} has these subtitles as they were before they were changed.`
+        : `${behind.length} films have these subtitles as they were before they were changed.`);
+  } else {
+    for (const c of behind) line(`${name(c.to)} is older than the subtitles beside the original, which have been changed since.`);
+  }
+  for (const c of copied) {
+    if (c.state === "changed") line(`${name(c.to)} was changed by someone else since ARFABIT put it there, so ARFABIT leaves it as it is.`);
+    if (c.state === "gone") line(`${name(c.to)} is no longer where ARFABIT put it.`);
+    if (c.state === "no_origin") line(`The subtitles beside the original are no longer there, so ${name(c.to)} stays as it is.`);
+  }
+
+  if (behind.length) {
+    const update = document.createElement("button");
+    update.textContent = behind.length === 1 ? "Bring it up to date" : "Bring them up to date";
+    update.addEventListener("click", async (e) => {
+      const result = await busy(e.target, "Bringing up to date\u2026", "Up to date", () =>
+        post(`/api/jobs/${encodeURIComponent(job.id)}/bring-up-to-date`));
+      if (result) refresh();
+    });
+    box.append(update);
+  }
+  return box;
 }
 
 // Subtitles of low confidence (§10), each beside its picture. The sidecar
@@ -1503,6 +1552,8 @@ async function refresh() {
   const wasBusy = driveBusy;
   driveBusy = state.drive_busy || "";
   resumable = state.resumable || {};
+  copies = state.copies || {};
+  copiesOf = state.copies_of || {};
   line = state.line || [];
   subtitleReading = { ocr: Boolean(state.ocr), note: state.ocr_note || "" };
   renderDrives(state.drives);
