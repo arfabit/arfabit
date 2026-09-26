@@ -548,8 +548,8 @@ parameter sets travel outside the picture. How any of it plays is untested
 (§4). A film in MP4 counts as the same edition as one in MKV when ARFABIT looks
 for a file already there, so making both of one film needs two editions.
 
-**How much**: all of the source (stage PACKAGE), or part of it — a start and a
-length, 5 s to 10 min (stage LAB), which also says what all of it would come to
+**Length**: Full, all of the source (stage PACKAGE), or part of it — 5 s to
+10 min from a start (stage LAB), which also says what all of it would come to
 (§14). Part of a source is cut first,
 with every stream it needs copied together into a temporary piece of ARFABIT's own,
 removed after, and the file is made from the piece without seeking: seeking while
@@ -1128,12 +1128,15 @@ what they are making.
   button to read it until then. The drive's Plan button on Tasks reads the disc
   and comes here. Tasks says, under the drive, when a disc's Plan is here
   waiting or still open to change.
-- **A file** shows **How much** — all of it, or part: a start (`01:23:45`) and
-  a length, 5 s to 10 min — and the line-item editor, Video, Audio and
-  Subtitles, started from the defaults or a blueprint (§8, Projects). What it
-  makes follows from the line items: a video or audio file, MKV or MP4, or
-  subtitle files alone. It is named with the edition given, in the film's
-  folder (§6).
+- **A file** shows, in this order: the **Edition**, with the name the files
+  will have beneath it as it is typed; **From** and **Length** — Full by
+  default, or 5 s to 10 min from a start (`01:23:45`); and the line-item
+  editor, Video, Audio and Subtitles, started from the defaults or a blueprint
+  (§8, Projects). What it makes follows from the line items: a video or audio
+  file, or subtitle files alone. Its files go in the film's folder (§6).
+- A box floats above the sections while a file is chosen: **As** MKV or MP4,
+  shown only when there is video or audio; what Start will make, in a line;
+  and **Start**.
 
 Starting a project adds its tasks to the queue, and the page says they are on
 Tasks. Part of a film is a **file you watch on your own TV** — ARFABIT does not

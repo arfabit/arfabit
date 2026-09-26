@@ -110,13 +110,15 @@
 
       <!-- A file in the library: an original, or anything made from one. -->
       <div id="project-file" hidden>
-        <div class="make-choice" role="radiogroup" aria-label="How much">
-          <span class="muted small">How much</span>
-          <label class="chip"><input type="radio" name="project-much" value="all" checked> All of it</label>
-          <label class="chip"><input type="radio" name="project-much" value="part"> Part of it</label>
+        <div class="title-choice">
+          <label for="project-edition">Edition</label>
+          <div class="title-row">
+            <input id="project-edition" type="text" autocomplete="off" placeholder="None">
+          </div>
+          <p id="project-name" class="muted small"></p>
         </div>
 
-        <div id="project-stretch" class="lab-controls" hidden>
+        <div class="lab-controls">
           <label>
             <span>From</span>
             <input id="lab-at" type="text" value="0:00:00" placeholder="h:mm:ss">
@@ -124,11 +126,12 @@
           <label>
             <span>Length</span>
             <select id="lab-length">
+              <option value="0" selected>Full</option>
               <option value="5">5 seconds</option>
               <option value="10">10 seconds</option>
               <option value="15">15 seconds</option>
               <option value="30">30 seconds</option>
-              <option value="60" selected>1 minute</option>
+              <option value="60">1 minute</option>
               <option value="300">5 minutes</option>
               <option value="600">10 minutes</option>
             </select>
@@ -142,24 +145,6 @@
         </div>
 
         <div id="project-editor"></div>
-
-        <div class="title-choice">
-          <label for="project-edition">Edition</label>
-          <div class="title-row">
-            <input id="project-edition" type="text" autocomplete="off" placeholder="None">
-          </div>
-        </div>
-
-        <div id="project-containers" class="project-containers" role="radiogroup" aria-label="Container">
-          <span class="muted small">As</span>
-          <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
-          <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
-        </div>
-        <p id="project-container-note" class="muted small"></p>
-
-        <p id="project-destination" class="muted small"></p>
-        <button id="project-run" class="primary">Start</button>
-        <p id="project-status" class="muted small"></p>
       </div>
     </section>
 
@@ -286,6 +271,22 @@
   </div>
 
 </main>
+
+<!-- What pressing Start makes, and Start, kept in view above the sections
+     while a project is being set up from a file. -->
+<div id="project-dock" class="dock" hidden>
+  <div id="project-containers" class="project-containers" role="radiogroup" aria-label="Container">
+    <span class="muted small">As</span>
+    <label class="chip"><input type="radio" name="project-container" value="mkv" checked> MKV</label>
+    <label class="chip"><input type="radio" name="project-container" value="mp4"> MP4</label>
+  </div>
+  <p id="project-container-note" class="muted small"></p>
+  <div class="dock-row">
+    <p id="project-destination" class="small"></p>
+    <button id="project-run" class="primary">Start</button>
+  </div>
+  <p id="project-status" class="muted small"></p>
+</div>
 
 <nav class="tabbar" aria-label="Sections">
   <a href="#tasks" data-tab="tasks">

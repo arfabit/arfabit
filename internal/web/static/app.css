@@ -250,6 +250,27 @@ button.link {
 button.link[aria-pressed="true"] { color: var(--ink); text-decoration: none; font-weight: 600; }
 .queue-summary { margin-bottom: 0.75rem; }
 
+/* What a project will make, and Start, floating above the sections. */
+.dock {
+  position: fixed;
+  left: 50%;
+  bottom: calc(6rem + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(56rem, calc(100% - 2rem));
+  padding: 0.75rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.12);
+  z-index: 10;
+}
+.dock .project-containers { margin: 0 0 0.5rem; }
+.dock p { margin: 0.25rem 0; }
+.dock-row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; }
+.dock-row p { flex: 1; }
+.dock [hidden] { display: none; }
+body.docked { padding-bottom: calc(15rem + env(safe-area-inset-bottom)); }
+
 /* The sections of the page, always at the bottom of the window. */
 .tabbar {
   position: fixed;

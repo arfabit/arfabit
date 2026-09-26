@@ -1899,6 +1899,7 @@ function sourceChanged() {
   const disc = $("project-source").value === "disc";
   show("project-disc", disc);
   show("project-file", !disc);
+  updateDock();
   renderJob(lastJob, lastExisting);
   if (!disc) loadSource();
 }
@@ -1968,10 +1969,28 @@ const BITRATES = ["128k", "192k", "256k", "320k", "448k", "640k", "768k"];
 const SECTIONS = [["video", "Video"], ["audio", "Audio"], ["subtitle", "Subtitles"]];
 
 // part reports whether the project makes something of part of the file
-// rather than all of it.
+// rather than all of it: any length but Full.
 function part() {
-  const chosen = document.querySelector('input[name="project-much"]:checked');
-  return Boolean(chosen && chosen.value === "part");
+  return Number($("lab-length").value) !== 0;
+}
+
+// projectName is what the project's files will be called, before the
+// language and extension: the film's folder name and the edition, as the
+// server names them (braces cannot be in an edition).
+function projectName() {
+  const chosen = $("project-source").selectedOptions[0];
+  const film = chosen ? chosen.dataset.film || "" : "";
+  const edition = $("project-edition").value.replace(/[{}]/g, "").trim();
+  return edition ? `${film} {edition-${edition}}` : film;
+}
+
+// updateDock shows what Start will make, and Start, floating above the
+// sections, while a project is being set up from a file.
+function updateDock() {
+  const view = location.hash.slice(1) || "tasks";
+  const on = view === "projects" && $("project-source").value !== "disc" && Boolean($("project-source").value);
+  $("project-dock").hidden = !on;
+  document.body.classList.toggle("docked", on);
 }
 
 function containerChoice() {
@@ -2024,7 +2043,7 @@ async function fillProject() {
 }
 
 function renderProject() {
-  show("project-stretch", part());
+  $("lab-at").disabled = !part();
   const box = $("project-editor");
   if (pkg) {
     pkg.length = part() ? Number($("lab-length").value) * 1e9 : 0;
@@ -2048,8 +2067,16 @@ function renderProject() {
   describeProject();
 }
 
+// renderName shows the name the project's files will have, as it is typed.
+function renderName() {
+  const name = projectName();
+  $("project-name").textContent = name ? `Named ${name}` : "";
+}
+
 // describeProject says what pressing Start will make, and where it goes.
 function describeProject() {
+  renderName();
+  updateDock();
   const say = (text, ready) => {
     $("project-destination").textContent = text;
     $("project-run").disabled = !ready;
@@ -2082,7 +2109,7 @@ function describeProject() {
     if (read) files.push(`${plural(read, "subtitle file")} read into text`);
     text = `${files.join(" and ")}, of ${much}`;
   }
-  say(`${text}, in the film's folder in your library.`, true);
+  say(`${text}.`, true);
 }
 
 // renderProjectEditor lays out a project's line items, section by section,
@@ -3042,6 +3069,7 @@ function showView() {
   const name = views.some((v) => v.dataset.view === wanted) ? wanted : "tasks";
 
   for (const view of views) view.hidden = view.dataset.view !== name;
+  updateDock();
   for (const tab of document.querySelectorAll(".tabbar a")) {
     if (tab.dataset.tab === name) tab.setAttribute("aria-current", "page");
     else tab.removeAttribute("aria-current");
@@ -3197,13 +3225,14 @@ function wireButtons() {
 
   on("lab-at", "input", rememberStretch);
   on("project-source", "change", sourceChanged);
-  for (const radio of document.querySelectorAll('input[name="project-much"], input[name="project-container"]')) {
+  for (const radio of document.querySelectorAll('input[name="project-container"]')) {
     radio.addEventListener("change", renderProject);
   }
   on("project-read-disc", "click", (e) => readDisc(e.target));
   on("project-fill", "click", fillProject);
   on("project-edition", "input", (e) => {
     if (pkg) pkg.edition = e.target.value.trim();
+    renderName();
   });
 
   on("blueprint-new", "click", () => openBlueprintEditor({ name: "" }));
