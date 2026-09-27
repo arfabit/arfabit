@@ -290,7 +290,7 @@ func TestBlueprintDescribe(t *testing.T) {
 	p := Defaults().Defaults
 	got := p.Describe()
 
-	for _, want := range []string{"quality 20", "slow", "Dolby"} {
+	for _, want := range []string{"quality 20", "slow", "audio as it is", "subtitles as text", "MKV"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the description %q is missing %q", got, want)
 		}
@@ -344,5 +344,20 @@ edition = ""
 	}
 	if cfg.Plain().Edition != "" {
 		t.Errorf("the defaults have edition %q, want none", cfg.Plain().Edition)
+	}
+}
+
+// The annotated example is a real settings file: it loads, and every value
+// in it is one ARFABIT accepts.
+func TestExampleSettingsLoad(t *testing.T) {
+	cfg, err := Load("../../config.example.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if d := cfg.Defaults; d.Video != VideoConvert || d.Audio != AudioCopy || d.Subtitles != SubtitlesText || d.Container != "mkv" {
+		t.Errorf("defaults = %+v", d)
 	}
 }

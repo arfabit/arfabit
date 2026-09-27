@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -91,17 +92,31 @@ type MakeMKV struct {
 // override the defaults. Applying one copies its values into a Plan; a job
 // never refers back to the blueprint it came from.
 type Blueprint struct {
-	Name string
+	Name string `json:"name"`
 
 	// Edition is what a Plan filled in from this blueprint puts in its
 	// edition. It starts as the blueprint's name and may be changed or left
 	// blank.
-	Edition string
+	Edition string `json:"edition"`
 
 	Settings
 }
 
-// Settings are what fills in a Plan.
+// The choices for video, audio and subtitles.
+const (
+	VideoConvert = "convert"
+	VideoCopy    = "copy"
+	VideoNone    = "none"
+
+	AudioCopy    = "copy"
+	AudioConvert = "convert"
+	AudioNone    = "none"
+
+	SubtitlesText     = "text"
+	SubtitlesPictures = "pictures"
+	SubtitlesNone     = "none"
+)
+
 // The choices for TrueHD.
 const (
 	TrueHDKeep = "keep"
@@ -147,59 +162,52 @@ const (
 )
 
 type Settings struct {
-	// CRF per source type. Lower means higher quality and larger files.
-	CRFUHD    int
-	CRFBluray int
-	CRFDVD    int
+	// Video is what becomes of the video: VideoConvert (to HEVC, at the
+	// quality for its disc and the speed), VideoCopy (exactly as it is) or
+	// VideoNone (left out).
+	Video     string `json:"video"`
+	CRFUHD    int    `json:"crf_uhd"`
+	CRFBluray int    `json:"crf_bluray"`
+	CRFDVD    int    `json:"crf_dvd"`
+	Preset    string `json:"preset"`
 
-	Preset string
+	// AllowUHDCopy keeps a UHD disc's video as it is even when converting,
+	// since it is already HEVC.
+	AllowUHDCopy bool `json:"allow_uhd_copy"`
 
-	// AudioBitrate for the stereo fallback track.
-	AudioBitrate string
+	// Audio is what becomes of the audio: AudioCopy (exactly as it is),
+	// AudioConvert (lossless to FLAC, lossy by width, §9) or AudioNone.
+	Audio string `json:"audio"`
 
-	// CopyNativeAudio passes sound that plays directly through untouched
-	// (§4). Off, lossy sound is converted as well.
-	CopyNativeAudio bool
+	// AudioBitrate is for the stereo track ARFABIT makes, and lossy stereo
+	// converted.
+	AudioBitrate string `json:"audio_bitrate"`
 
-	// AllowUHDCopy offers a direct copy for UHD discs, which are already HEVC.
-	AllowUHDCopy bool
+	// TrueHD is what to do with Dolby TrueHD, which Plex converts every
+	// time it plays on an Apple TV (§4): TrueHDKeep, TrueHDFLAC, or
+	// TrueHDBoth for one of each. Keeping it is the default; changing it is
+	// the user's choice to make.
+	TrueHD string `json:"truehd"`
 
-	// KeepPicture keeps every picture exactly as it is, whatever the disc.
-	// It plays directly (§4) and takes minutes rather than hours, but a
-	// Blu-ray's picture stays the size it is on the disc.
-	KeepPicture bool
-
-	// TrueHD is what to do with Dolby TrueHD sound, which Plex converts every
-	// time it plays on an Apple TV (§4): TrueHDKeep, TrueHDFLAC, or TrueHDBoth
-	// for one of each. Keeping it is the default; changing it is the user's
-	// choice to make.
-	TrueHD string
-
-	// Subtitles selects which subtitle tracks to carry.
-	IncludeForcedSubs bool
-	IncludeFullSubs   bool
-	SubLanguages      []string
-
-	// KeepSubtitlePictures copies a Blu-ray's picture subtitles as they are.
-	// Off, they are read into text (SRT) wherever the computer can (§10),
-	// since showing pictures makes Plex convert the whole picture (§4).
-	KeepSubtitlePictures bool
-
-	// Sound, when set, chooses which sound tracks a transcode keeps, by what
-	// they are rather than where they sit on one particular disc. When it is
-	// not set, the stereo-first choice described in §9 is made instead.
+	// Sound, when set, chooses which audio tracks to keep, by what they are
+	// rather than where they sit on one particular disc. When it is not
+	// set, the stereo-first choice of §9 is made instead.
 	//
 	// Sound rules are made on the page and kept in blueprints.json. The
 	// settings file cannot hold them: its reader is a small stand-in that is
 	// not to be extended (§16).
-	Sound *SoundRules
+	Sound *SoundRules `json:"sound"`
 
-	// ConvertAfterRip decides whether a disc becomes a film straight away, or
-	// stops at the copy.
-	//
-	// Stopping at the copy is the fast way through a stack of discs: only the
-	// copy needs the drive, and converting can be done later from the copy.
-	ConvertAfterRip bool
+	// Subtitles is what becomes of the subtitles in SubLanguages:
+	// SubtitlesText (a Blu-ray's pictures read into text wherever the
+	// computer can, §10), SubtitlesPictures (copied as they are) or
+	// SubtitlesNone. SubLanguages also puts audio in those languages first.
+	Subtitles    string   `json:"subtitles"`
+	SubLanguages []string `json:"sub_languages"`
+
+	// Container is what a file with video or audio is made as: "mkv" or
+	// "mp4" (§8).
+	Container string `json:"container"`
 }
 
 // Defaults returns the built-in settings, before any file is read.
@@ -224,18 +232,18 @@ func Defaults() Config {
 		Machine: Machine{MaxConversions: 1},
 		MakeMKV: MakeMKV{MinTitleLength: 120 * time.Second},
 		Defaults: Settings{
-			CRFUHD:            20,
-			CRFBluray:         20,
-			CRFDVD:            18,
-			Preset:            "slow",
-			AudioBitrate:      "256k",
-			CopyNativeAudio:   true,
-			AllowUHDCopy:      true,
-			TrueHD:            TrueHDKeep,
-			IncludeForcedSubs: true,
-			IncludeFullSubs:   true,
-			SubLanguages:      []string{"eng"},
-			ConvertAfterRip:   true,
+			Video:        VideoConvert,
+			CRFUHD:       20,
+			CRFBluray:    20,
+			CRFDVD:       18,
+			Preset:       "slow",
+			AllowUHDCopy: true,
+			Audio:        AudioCopy,
+			AudioBitrate: "256k",
+			TrueHD:       TrueHDKeep,
+			Subtitles:    SubtitlesText,
+			SubLanguages: []string{"eng"},
+			Container:    "mkv",
 		},
 		Blueprints: map[string]Blueprint{},
 		Sources:    map[string]string{},
@@ -256,17 +264,38 @@ func (c Config) Plain() Blueprint {
 
 // Describe summarises settings in one line, for choosing between them.
 func (p Settings) Describe() string {
-	picture := fmt.Sprintf("HEVC quality %d, %s", p.CRFBluray, p.Preset)
-	if p.AllowUHDCopy {
-		picture += "; 4K kept as-is"
+	video := "video as it is"
+	switch p.Video {
+	case VideoNone:
+		video = "no video"
+	case VideoConvert:
+		video = fmt.Sprintf("HEVC quality %d, %s", p.CRFBluray, p.Preset)
+		if p.AllowUHDCopy {
+			video += "; 4K as it is"
+		}
 	}
+	audio := map[string]string{AudioCopy: "audio as it is", AudioConvert: "audio converted", AudioNone: "no audio"}[p.Audio]
+	subtitles := map[string]string{SubtitlesText: "subtitles as text", SubtitlesPictures: "subtitles as pictures", SubtitlesNone: "no subtitles"}[p.Subtitles]
+	return strings.Join([]string{video, audio, subtitles, strings.ToUpper(p.Container)}, " · ")
+}
 
-	sound := "audio converted"
-	if p.CopyNativeAudio {
-		sound = "Dolby kept as-is"
+// Check refuses settings that would fail part way through something.
+func (p Settings) Check() error {
+	for _, c := range []struct {
+		name, value string
+		allowed     []string
+	}{
+		{"video", p.Video, []string{VideoConvert, VideoCopy, VideoNone}},
+		{"audio", p.Audio, []string{AudioCopy, AudioConvert, AudioNone}},
+		{"subtitles", p.Subtitles, []string{SubtitlesText, SubtitlesPictures, SubtitlesNone}},
+		{"container", p.Container, []string{"mkv", "mp4"}},
+		{"truehd", p.TrueHD, []string{TrueHDKeep, TrueHDFLAC, TrueHDBoth}},
+	} {
+		if !slices.Contains(c.allowed, c.value) {
+			return fmt.Errorf("%s is %q; it should be one of %s", c.name, c.value, strings.Join(c.allowed, ", "))
+		}
 	}
-
-	return picture + " · " + sound
+	return nil
 }
 
 // Load reads the layered configuration.
@@ -446,9 +475,13 @@ func applySettings(doc document, section string, p *Settings, noted func(key str
 		key string
 		dst *string
 	}{
+		{"video", &p.Video},
 		{"preset", &p.Preset},
+		{"audio", &p.Audio},
 		{"audio_bitrate", &p.AudioBitrate},
 		{"truehd", &p.TrueHD},
+		{"subtitles", &p.Subtitles},
+		{"container", &p.Container},
 	} {
 		if v, ok := doc.lookup(section, t.key); ok {
 			*t.dst = v.asString()
@@ -476,28 +509,13 @@ func applySettings(doc document, section string, p *Settings, noted func(key str
 		noted(n.key)
 	}
 
-	for _, b := range []struct {
-		key string
-		dst *bool
-	}{
-		{"copy_native_audio", &p.CopyNativeAudio},
-		{"allow_uhd_copy", &p.AllowUHDCopy},
-		{"keep_picture", &p.KeepPicture},
-		{"include_forced_subs", &p.IncludeForcedSubs},
-		{"include_full_subs", &p.IncludeFullSubs},
-		{"keep_subtitle_pictures", &p.KeepSubtitlePictures},
-		{"convert_after_rip", &p.ConvertAfterRip},
-	} {
-		v, ok := doc.lookup(section, b.key)
-		if !ok {
-			continue
-		}
+	if v, ok := doc.lookup(section, "allow_uhd_copy"); ok {
 		value, err := v.asBool()
 		if err != nil {
-			return fmt.Errorf("line %d: %s.%s should be true or false", v.line, section, b.key)
+			return fmt.Errorf("line %d: %s.allow_uhd_copy should be true or false", v.line, section)
 		}
-		*b.dst = value
-		noted(b.key)
+		p.AllowUHDCopy = value
+		noted("allow_uhd_copy")
 	}
 
 	if v, ok := doc.lookup(section, "sub_languages"); ok {
@@ -517,10 +535,8 @@ func (c Config) Validate() error {
 	if !validPresets[c.Defaults.Preset] {
 		return fmt.Errorf("defaults.preset is %q; it should be one of superfast, medium, slow, slower, veryslow", c.Defaults.Preset)
 	}
-	switch c.Defaults.TrueHD {
-	case TrueHDKeep, TrueHDFLAC, TrueHDBoth:
-	default:
-		return fmt.Errorf("defaults.truehd is %q; it should be keep, flac or both", c.Defaults.TrueHD)
+	if err := c.Defaults.Check(); err != nil {
+		return fmt.Errorf("defaults.%w", err)
 	}
 
 	for _, crf := range []struct {

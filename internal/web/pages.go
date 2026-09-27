@@ -159,82 +159,39 @@ func (s *Server) handleSources(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"sources": s.sources()})
 }
 
+// blueprintReply is a blueprint as the page shows it: its settings, and
+// where it came from.
+type blueprintReply struct {
+	config.Blueprint
+	Description string `json:"description"`
+	Default     bool   `json:"default"`
+	Editable    bool   `json:"editable"`
+	Source      string `json:"source"`
+}
+
 // handleBlueprints lists the named settings available to choose between.
 func (s *Server) handleBlueprints(w http.ResponseWriter, r *http.Request) {
-	type reply struct {
-		Name        string `json:"name"`
-		Edition     string `json:"edition"`
-		Description string `json:"description"`
-		Default     bool   `json:"default"`
-		Editable    bool   `json:"editable"`
-		Source      string `json:"source"`
-
-		// The settings themselves, so the form can be filled in from one.
-		Preset          string `json:"preset"`
-		CRFUHD          int    `json:"crf_uhd"`
-		CRFBluray       int    `json:"crf_bluray"`
-		CRFDVD          int    `json:"crf_dvd"`
-		AudioBitrate    string `json:"audio_bitrate"`
-		AllowUHDCopy    bool   `json:"allow_uhd_copy"`
-		CopyNativeAudio bool   `json:"copy_native_audio"`
-
-		// Sound is the blueprint's sound rules, or null for the usual
-		// stereo-first choice.
-		Sound *config.SoundRules `json:"sound"`
-
-		KeepPicture bool   `json:"keep_picture"`
-		TrueHD      string `json:"truehd"`
-
-		KeepSubtitlePictures bool `json:"keep_subtitle_pictures"`
-	}
-
 	all := s.Blueprints.All(s.Config)
-	out := make([]reply, 0, len(all))
-
+	out := make([]blueprintReply, 0, len(all))
 	for _, p := range all {
-		out = append(out, reply{
-			Name:            p.Name,
-			Edition:         p.Edition,
-			Description:     p.Describe(),
-			Default:         p.Name == s.Blueprints.DefaultName(s.Config),
-			Editable:        p.Editable,
-			Source:          p.Source,
-			Preset:          p.Preset,
-			CRFUHD:          p.CRFUHD,
-			CRFBluray:       p.CRFBluray,
-			CRFDVD:          p.CRFDVD,
-			AudioBitrate:    p.AudioBitrate,
-			AllowUHDCopy:    p.AllowUHDCopy,
-			CopyNativeAudio: p.CopyNativeAudio,
-			Sound:           p.Sound,
-			KeepPicture:     p.KeepPicture,
-			TrueHD:          orKeep(p.TrueHD),
-
-			KeepSubtitlePictures: p.KeepSubtitlePictures,
+		out = append(out, blueprintReply{
+			Blueprint:   p.Blueprint,
+			Description: p.Describe(),
+			Default:     p.Name == s.Blueprints.DefaultName(s.Config),
+			Editable:    p.Editable,
+			Source:      p.Source,
 		})
 	}
 
 	// The defaults are always there to choose, blueprint or not. They are
 	// used by default when no blueprint is.
-	def := s.Config.Defaults
 	writeJSON(w, map[string]any{
 		"blueprints": out,
-		"defaults": reply{
-			Description:     def.Describe(),
-			Default:         s.Blueprints.DefaultName(s.Config) == "",
-			Source:          "your settings file",
-			Preset:          def.Preset,
-			CRFUHD:          def.CRFUHD,
-			CRFBluray:       def.CRFBluray,
-			CRFDVD:          def.CRFDVD,
-			AudioBitrate:    def.AudioBitrate,
-			AllowUHDCopy:    def.AllowUHDCopy,
-			CopyNativeAudio: def.CopyNativeAudio,
-			Sound:           def.Sound,
-			KeepPicture:     def.KeepPicture,
-			TrueHD:          orKeep(def.TrueHD),
-
-			KeepSubtitlePictures: def.KeepSubtitlePictures,
+		"defaults": blueprintReply{
+			Blueprint:   s.Config.Plain(),
+			Description: s.Config.Defaults.Describe(),
+			Default:     s.Blueprints.DefaultName(s.Config) == "",
+			Source:      "your settings file",
 		},
 	})
 }
@@ -287,31 +244,18 @@ func (s *Server) handleDeleteBlueprint(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]bool{"removed": true})
 }
 
-// readBlueprintForm reads a blueprint from a request, filling in anything not
-// given from the default.
-//
-// Starting from the default rather than from nothing means a form that asks
-// about quality does not silently turn off subtitles.
+// readBlueprintForm reads a blueprint from a request, over a starting point:
+// anything the form leaves out keeps its value there, so a form about quality
+// does not silently turn off subtitles.
 func readBlueprintForm(r *http.Request, base config.Blueprint) (config.Blueprint, error) {
-	var form struct {
-		Name            string  `json:"name"`
-		Edition         *string `json:"edition"`
-		Preset          *string `json:"preset"`
-		CRFUHD          *int    `json:"crf_uhd"`
-		CRFBluray       *int    `json:"crf_bluray"`
-		CRFDVD          *int    `json:"crf_dvd"`
-		AudioBitrate    *string `json:"audio_bitrate"`
-		AllowUHDCopy    *bool   `json:"allow_uhd_copy"`
-		CopyNativeAudio *bool   `json:"copy_native_audio"`
+	form := struct {
+		config.Blueprint
 
-		// Sound replaces whatever rules there were. Null means none.
-		Sound *config.SoundRules `json:"sound"`
-
-		KeepPicture *bool   `json:"keep_picture"`
-		TrueHD      *string `json:"truehd"`
-
-		KeepSubtitlePictures *bool `json:"keep_subtitle_pictures"`
-	}
+		// An edition left out starts as the name. One given, even blank, is
+		// kept as given: a blank edition is a choice.
+		Edition *string `json:"edition"`
+	}{Blueprint: base}
+	form.Sound = nil
 	if err := json.NewDecoder(r.Body).Decode(&form); err != nil {
 		return base, err
 	}
@@ -319,33 +263,13 @@ func readBlueprintForm(r *http.Request, base config.Blueprint) (config.Blueprint
 		return base, err
 	}
 
-	p := applyBlueprintForm(base, form.Name, form.Edition, form.Preset, form.CRFUHD, form.CRFBluray,
-		form.CRFDVD, form.AudioBitrate, form.AllowUHDCopy, form.CopyNativeAudio)
-	p.Sound = form.Sound
-	if form.KeepPicture != nil {
-		p.KeepPicture = *form.KeepPicture
+	p := form.Blueprint
+	p.Name = strings.TrimSpace(p.Name)
+	p.Edition = p.Name
+	if form.Edition != nil {
+		p.Edition = strings.TrimSpace(*form.Edition)
 	}
-	if form.KeepSubtitlePictures != nil {
-		p.KeepSubtitlePictures = *form.KeepSubtitlePictures
-	}
-	if form.TrueHD != nil {
-		switch *form.TrueHD {
-		case config.TrueHDKeep, config.TrueHDFLAC, config.TrueHDBoth:
-			p.TrueHD = *form.TrueHD
-		default:
-			return base, fmt.Errorf("%q is not a choice for TrueHD", *form.TrueHD)
-		}
-	}
-	return p, nil
-}
-
-// orKeep reads a blueprint saved before the TrueHD choice existed as keeping
-// it, which is what those blueprints did.
-func orKeep(truehd string) string {
-	if truehd == "" {
-		return config.TrueHDKeep
-	}
-	return truehd
+	return p, p.Check()
 }
 
 // checkSoundRules refuses rules the matching would misread, rather than
@@ -374,51 +298,6 @@ func checkSoundRules(rules *config.SoundRules) error {
 		}
 	}
 	return nil
-}
-
-// applyBlueprintForm lays whatever was given over a starting point.
-func applyBlueprintForm(
-	base config.Blueprint,
-	name string,
-	edition *string,
-	preset *string,
-	crfUHD, crfBluray, crfDVD *int,
-	bitrate *string,
-	allowUHDCopy, copyNativeAudio *bool,
-) config.Blueprint {
-	p := base
-	if name != "" {
-		p.Name = name
-	}
-
-	// An edition left out starts as the name. One given, even blank, is kept
-	// as given: a blank edition is a choice.
-	p.Edition = p.Name
-	if edition != nil {
-		p.Edition = strings.TrimSpace(*edition)
-	}
-	if preset != nil {
-		p.Preset = *preset
-	}
-	if crfUHD != nil {
-		p.CRFUHD = *crfUHD
-	}
-	if crfBluray != nil {
-		p.CRFBluray = *crfBluray
-	}
-	if crfDVD != nil {
-		p.CRFDVD = *crfDVD
-	}
-	if bitrate != nil {
-		p.AudioBitrate = *bitrate
-	}
-	if allowUHDCopy != nil {
-		p.AllowUHDCopy = *allowUHDCopy
-	}
-	if copyNativeAudio != nil {
-		p.CopyNativeAudio = *copyNativeAudio
-	}
-	return p
 }
 
 // handleResume starts an interrupted job again from its copy.

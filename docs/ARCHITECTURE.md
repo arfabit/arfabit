@@ -415,9 +415,10 @@ Every Plan is filled in at PLAN from one of two things:
 
 - **The defaults**, `[defaults]` in the settings file. They always exist, since
   ARFABIT has built-in values for every one.
-- **A blueprint**: a starter template for planning a job to rip or transcode. It
-  has a name and overrides some of the defaults. A blueprint that differs only in
-  quality says only that.
+- **A blueprint**: a named recipe for what to make, in the same sections as a
+  Project — Video, Audio, Subtitles — and as what, MKV or MP4. It overrides
+  some of the defaults; a blueprint that differs only in quality says only
+  that.
 
 Blueprints are optional. With none at all, every Plan starts from the defaults
 and ARFABIT works the same. When there are several, one of them may be chosen on
@@ -425,9 +426,13 @@ the page to be **used by default**, and every new Plan then starts from it witho
 asking. Choosing none, or removing the one chosen, returns new Plans to the
 defaults.
 
-Either way, the values are **copied** into the Plan: quality per disc type,
-preset, whether to copy UHD video, audio choices, subtitle choices, whether to
-convert after ripping. From then on they are the Plan's own settings. The user
+Either way, the values are **copied** into the Plan, as the line items of its
+project: the video converted (at the quality for its disc, and the speed),
+kept as it is, or left out; the audio kept, converted, or left out, and which
+tracks; the subtitles read into text, kept as pictures, or left out, and in
+which languages; and MKV or MP4. From then on they are the Plan's own
+settings. Whether to make a file from the disc at all is not a blueprint's:
+it is ticked on the Plan, and set for a drive by *When a disc goes in* (§14). The user
 can change any of them for this job, and changing, renaming or removing a
 blueprint afterwards has no effect on a job that already has a Plan. The job
 record holds everything needed to run or re-run it and never looks anything up
@@ -462,20 +467,23 @@ edition alone.
   and not kept. Trying something once should not mean naming it and remembering
   it forever.
 
+The defaults and every blueprint are in the same three sections as a Project,
+and say what to make as well:
+
 ```toml
 [defaults]
+video = "convert"          # or "copy", or "none"
 crf_uhd = 20
 crf_bluray = 20
 crf_dvd = 18
 preset = "slow"
-allow_uhd_copy = true
-copy_native_audio = true
+allow_uhd_copy = true      # a 4K disc's HEVC kept as it is, even converting
+audio = "copy"             # or "convert" (§9), or "none"
 audio_bitrate = "256k"
-include_forced_subs = true
-include_full_subs = true
-sub_languages = ["eng"]
-keep_subtitle_pictures = false  # read picture subtitles into text where possible (§10)
-convert_after_rip = true
+truehd = "keep"            # or "flac", or "both"
+subtitles = "text"         # read into text where possible (§10); "pictures"; "none"
+sub_languages = ["eng"]    # empty for every language
+container = "mkv"          # or "mp4" (§8)
 
 [blueprint.Small]
 crf_bluray = 24
@@ -584,8 +592,8 @@ guessed: no sound line items are made, and the Plan says so. A stereo track ARFA
 would make itself counts as lossy, and comes after the disc's own. Rules apply to
 projects only; the original always keeps every track.
 
-A blueprint also says whether to keep the picture exactly as it is
-(`keep_picture`), and what to do with Dolby TrueHD (`truehd = "keep" | "flac" |
+A blueprint also says whether to keep the video exactly as it is
+(`video = "copy"`), and what to do with Dolby TrueHD (`truehd = "keep" | "flac" |
 "both"`; keep by default). Changing TrueHD is the user's choice, made here once or
 per project, never ARFABIT's.
 
@@ -871,7 +879,7 @@ instead would need the piece's true start found every time; reading a few
 lines again costs seconds.
 
 **Blueprints.** A Blu-ray's picture subtitles are converted to text wherever the
-computer can read them, unless the blueprint says `keep_subtitle_pictures`. Where
+computer can read them, when the blueprint says `subtitles = "text"`. Where
 it cannot, they are copied, and the line says why.
 
 **Checking them.** Every OCR task has a tag in Recent tasks: **green** when

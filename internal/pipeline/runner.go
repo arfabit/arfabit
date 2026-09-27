@@ -693,6 +693,28 @@ func (r *Runner) placeOriginal(job *Job, copied, folder string, madeFolder bool)
 	return original
 }
 
+// summarise puts what a Plan's project makes where the estimate reads it: its
+// video, and its audio, copied or converted. It reports whether there is no
+// video.
+func summarise(plan *store.Plan) (noVideo bool) {
+	noVideo = true
+	plan.Audio = nil
+	if plan.Project == nil {
+		return noVideo
+	}
+	if videos := plan.Project.ItemsOf(store.KindVideo); len(videos) == 1 {
+		noVideo = false
+		plan.VideoCopy = videos[0].Action == store.ActionCopy
+		if !plan.VideoCopy {
+			plan.CRF, plan.Preset = videos[0].CRF, videos[0].Preset
+		}
+	}
+	for _, it := range plan.Project.ItemsOf(store.KindAudio) {
+		plan.Audio = append(plan.Audio, store.PlannedAudio{Selected: true, Copy: it.Action == store.ActionCopy})
+	}
+	return noVideo
+}
+
 // nameOriginal renames the file MakeMKV made to the original's own name, beside
 // the films made from it, and returns where it is. A rename, never a
 // removal: if something already has that name, the copy keeps MakeMKV's.
@@ -719,18 +741,16 @@ func (r *Runner) Reestimate(job *Job) {
 		return
 	}
 
-	if plan.Project != nil {
-		if videos := plan.Project.ItemsOf(store.KindVideo); len(videos) == 1 {
-			plan.VideoCopy = videos[0].Action == store.ActionCopy
-			if !plan.VideoCopy {
-				plan.CRF, plan.Preset = videos[0].CRF, videos[0].Preset
-			}
-		}
-	}
+	noVideo := summarise(plan)
 
 	var packEst Estimate
 	if plan.Convert && plan.Seconds > 0 {
-		packEst = r.Calibration.EstimatePackage(plan, time.Duration(plan.Seconds)*time.Second)
+		duration := time.Duration(plan.Seconds) * time.Second
+		if noVideo {
+			packEst = Estimate{Size: audioBytes(plan, duration), Time: duration / 20}
+		} else {
+			packEst = r.Calibration.EstimatePackage(plan, duration)
+		}
 	}
 	plan.EstimatedSize = packEst.Size
 	plan.EstimatedTime = plan.RipTime + packEst.Time

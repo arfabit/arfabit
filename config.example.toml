@@ -61,14 +61,17 @@ max_conversions = 1
 # something.
 min_title_seconds = 120
 
-# What every plan starts from, for ripping and transcoding alike. When a disc
-# is read these are copied into its plan, and you can change them there for
-# that disc alone.
+# What every project starts from, disc or file, unless a blueprint is used:
+# what to make of the video, the audio and the subtitles, and as what. They
+# fill in the line items, which you can then change for that project alone.
 [defaults]
 
-# Picture quality, per kind of disc. Lower numbers mean better quality and
-# bigger files. 20 is close to indistinguishable from the disc; below about 16
-# you are mostly storing the disc's own compression noise.
+# --- Video: "convert" to HEVC, "copy" exactly as it is, or "none".
+video = "convert"
+
+# Quality, per kind of disc. Lower numbers mean better quality and bigger
+# files. 20 is close to indistinguishable from the disc; below about 16 you
+# are mostly storing the disc's own compression noise.
 crf_uhd = 20
 crf_bluray = 20
 crf_dvd = 18
@@ -77,42 +80,41 @@ crf_dvd = 18
 # One of: superfast, medium, slow, slower, veryslow
 preset = "slow"
 
-# 4K discs are already in the format an Apple TV wants, so ARFABIT can copy
-# the picture exactly instead of converting it. Much faster, and nothing is
-# lost, but the file stays as large as the disc.
+# 4K discs are already HEVC, so even when converting, their video can be kept
+# exactly as it is. Much faster, and nothing is lost, but the file stays as
+# large as the disc.
 allow_uhd_copy = true
 
-# Sound that plays directly (docs/ARCHITECTURE.md §4) is copied across
-# untouched, which is instant and loses nothing. Dolby TrueHD, which does not,
-# is made into FLAC, which is still lossless. Turning this off converts lossy
-# sound too.
-copy_native_audio = true
+# --- Audio: "copy" exactly as it is, "convert" (lossless to FLAC, lossy by
+# how wide it is), or "none". A stereo track is added when the disc has none.
+audio = "copy"
 audio_bitrate = "256k"
 
-# Subtitles. Forced subtitles are the ones that appear on their own when
-# somebody speaks another language.
-include_forced_subs = true
-include_full_subs = true
+# Dolby TrueHD, which Plex converts every time it plays on an Apple TV:
+# "keep" it, make it "flac" (still lossless), or "both".
+truehd = "keep"
+
+# --- Subtitles: "text" reads a Blu-ray's picture subtitles into text where
+# this computer can (pictures make Plex convert the whole video to show
+# them), "pictures" keeps them as they are, "none" leaves them out.
+subtitles = "text"
+# Which languages, for subtitles; audio in them comes first too. Leave it
+# empty for every language.
 sub_languages = ["eng"]
-# A Blu-ray's subtitles are pictures, which make Plex convert the whole
-# picture to show them. They are read into text where this computer can;
-# turn this on to keep them as pictures instead.
-keep_subtitle_pictures = false
 
-# Converting after the copy is made. Turn this off to stop at the copy, which
-# is the fast way through a stack of discs; convert later from the copy.
-convert_after_rip = true
+# --- As what: "mkv", or "mp4", which has not been tried on an Apple TV.
+container = "mkv"
 
-# Blueprints: starter templates for planning a job to rip or transcode.
+# Blueprints: named recipes for what to make.
 #
 # Each one starts from the defaults above and changes only what it names, so a
 # blueprint that differs in quality alone says only that. You need none at all.
 # They can also be made on the web page, where one can be chosen to be used by
-# default, and several can be ticked in the Transcode section to compare.
+# default, and where audio can be chosen by rule.
 #
 # A blueprint's edition is what Plex shows as the name of that version, and
 # goes in the filename as {edition-...}. It is the blueprint's name unless you
-# give one; edition = "" means none. It can still be changed on each plan.
+# give one; edition = "" means none. It can still be changed on each project.
 #
 # [blueprint.Small]
 # crf_bluray = 24
@@ -122,5 +124,5 @@ convert_after_rip = true
 # edition = "Director's Cut"
 #
 # [blueprint.Exact]
-# allow_uhd_copy = true
-# copy_native_audio = true
+# video = "copy"
+# audio = "copy"

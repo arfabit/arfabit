@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/arfabit/arfabit/internal/config"
-	"github.com/arfabit/arfabit/internal/disc"
 	"github.com/arfabit/arfabit/internal/ffmpeg"
 	"github.com/arfabit/arfabit/internal/store"
 )
@@ -84,106 +83,6 @@ var friendlyLanguage = map[string]string{
 	"deu": "German", "ger": "German", "ita": "Italian", "jpn": "Japanese",
 	"nld": "Dutch", "dut": "Dutch", "por": "Portuguese", "rus": "Russian",
 	"kor": "Korean", "zho": "Chinese", "chi": "Chinese", "und": "Unknown",
-}
-
-// planAudio decides which sound tracks to offer and what each would become.
-//
-// Tracks are grouped by language, the wanted languages first, and ordered
-// widest first inside each group, so the list reads the way the disc's own
-// menu would.
-func planAudio(title disc.Title, blueprint config.Blueprint) []store.PlannedAudio {
-	var tracks []store.PlannedAudio
-
-	for _, s := range title.Streams {
-		if s.Kind != disc.StreamAudio {
-			continue
-		}
-		tracks = append(tracks, describeTrack(s, blueprint))
-	}
-
-	sortByLanguageThenWidth(tracks, blueprint.SubLanguages)
-	selectDefaults(tracks, blueprint)
-
-	return addStereoOptions(tracks, blueprint)
-}
-
-// describeTrack works out what one source track becomes.
-func describeTrack(s disc.Stream, blueprint config.Blueprint) store.PlannedAudio {
-	source := shortCodec(s.CodecID)
-	track := store.PlannedAudio{
-		SourceIndex: s.Index,
-		Lang:        s.Lang,
-		Layout:      layoutName(s.Channels, s.Layout),
-		Channels:    s.Channels,
-		SourceCodec: source,
-		SourceLabel: strings.TrimSpace(s.Summary),
-		Lossless:    isLossless(s.CodecID, s.CodecLong),
-	}
-
-	switch {
-	case blueprint.CopyNativeAudio && ffmpeg.CanCopyAudio(source):
-		// Already plays directly, so it passes through bit-perfect at no cost.
-		track.Copy = true
-		track.Codec = source
-
-	case track.Lossless:
-		// Lossless but not playable as it is, which means TrueHD. FLAC keeps
-		// it bit for bit, every channel, at about the same size (§9).
-		track.Codec = "flac"
-
-	case s.Channels > eac3MaxChannels:
-		// Wider than E-AC-3's encoder manages, so AAC keeps every channel.
-		track.Codec = wideCodec
-		track.Bitrate = wideBitrate
-
-	case s.Channels > 2:
-		track.Codec = surroundCodec
-		track.Bitrate = surroundBitrate
-
-	default:
-		track.Codec = "aac"
-		track.Bitrate = blueprint.AudioBitrate
-	}
-
-	track.Label = trackLabel(track)
-	track.Source = sourceLabel(track)
-	return track
-}
-
-// sourceLabel describes a track as it is on the disc.
-func sourceLabel(t store.PlannedAudio) string {
-	codec := codecName(t.SourceCodec)
-	if t.SourceCodec == "dts" && t.Lossless {
-		codec = "DTS-HD Master Audio"
-	}
-	label := fmt.Sprintf("%s · %s · %s", languageName(t.Lang), t.Layout, codec)
-	if t.Lossless {
-		return label + " · lossless"
-	}
-	return label + " · lossy"
-}
-
-// trackLabel describes a track in one line: what it is, and what becomes of it.
-func trackLabel(t store.PlannedAudio) string {
-	var b strings.Builder
-
-	fmt.Fprintf(&b, "%s · %s · %s", languageName(t.Lang), t.Layout, codecName(t.SourceCodec))
-	if t.Lossless {
-		b.WriteString(" (lossless)")
-	}
-
-	switch {
-	case t.Copy:
-		b.WriteString(" — kept exactly as it is")
-	case t.Codec == "flac":
-		b.WriteString(" — made into FLAC, still lossless, all channels kept")
-	case t.Channels > 2:
-		fmt.Fprintf(&b, " — converted to %s %s, all channels kept", codecName(t.Codec), t.Layout)
-	default:
-		fmt.Fprintf(&b, " — converted to %s", codecName(t.Codec))
-	}
-
-	return b.String()
 }
 
 // sortByLanguageThenWidth groups the list the way a disc menu would.

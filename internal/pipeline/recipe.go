@@ -146,47 +146,57 @@ func heightName(h int) string {
 	return "SD"
 }
 
-// Recipe fills a Project in from a blueprint, against what the tracks are.
+// Recipe fills a Project in from a blueprint, against what the tracks are,
+// in the same three sections a Project has: Video, Audio and Subtitles.
 //
 // It is only where a Project starts. The line items it makes are the same
 // the user would add by hand, and they can be changed like any other. A
 // blueprint asking for something the tracks do not have adds nothing for it,
-// and a blueprint whose rules fit nothing at all adds no sound: the user adds
+// and a blueprint whose rules fit nothing at all adds no audio: the user adds
 // what they want themselves, rather than ARFABIT guessing.
 //
-// canRead says whether this computer can read subtitles into text (§10). A
-// Blu-ray's picture subtitles are converted to text where it can, unless the
-// blueprint keeps them as pictures: the first track of each language, since
-// each becomes a file named by its language. Any others are copied.
+// canRead says whether this computer can read subtitles into text (§10).
+// Subtitles as text read a Blu-ray's pictures into text where it can: the
+// first track of each language, since each becomes a file named by its
+// language. Any others are copied as they are.
 func Recipe(tracks []Track, b config.Blueprint, canRead bool) store.Project {
 	pkg := store.Project{
-		Containers: []string{"mkv"},
+		Containers: []string{b.Container},
 		Edition:    b.Edition,
 		Blueprint:  b.Name,
 	}
+	if b.Container == "" {
+		pkg.Containers = []string{"mkv"}
+	}
 
-	for _, t := range tracks {
-		if t.Kind == store.KindVideo {
-			pkg.Items = append(pkg.Items, videoItem(t, b))
-			break
+	if b.Video != config.VideoNone {
+		for _, t := range tracks {
+			if t.Kind == store.KindVideo {
+				pkg.Items = append(pkg.Items, videoItem(t, b))
+				break
+			}
 		}
 	}
 
-	pkg.Items = append(pkg.Items, soundItems(tracks, b)...)
+	if b.Audio != config.AudioNone {
+		pkg.Items = append(pkg.Items, soundItems(tracks, b)...)
+	}
 
-	converted := map[string]bool{}
-	for _, t := range tracks {
-		if t.Kind != store.KindSubtitle || !b.IncludeFullSubs || !wantLanguage(t.Lang, b.SubLanguages) {
-			continue
+	if b.Subtitles != config.SubtitlesNone {
+		converted := map[string]bool{}
+		for _, t := range tracks {
+			if t.Kind != store.KindSubtitle || !wantLanguage(t.Lang, b.SubLanguages) {
+				continue
+			}
+			if canRead && b.Subtitles != config.SubtitlesPictures && t.Codec == pictureSubtitles && !converted[strings.ToLower(t.Lang)] {
+				converted[strings.ToLower(t.Lang)] = true
+				it := itemFor(t, store.ActionConvert)
+				it.To = "srt"
+				pkg.Items = append(pkg.Items, it)
+				continue
+			}
+			pkg.Items = append(pkg.Items, itemFor(t, store.ActionCopy))
 		}
-		if canRead && !b.KeepSubtitlePictures && t.Codec == pictureSubtitles && !converted[strings.ToLower(t.Lang)] {
-			converted[strings.ToLower(t.Lang)] = true
-			it := itemFor(t, store.ActionConvert)
-			it.To = "srt"
-			pkg.Items = append(pkg.Items, it)
-			continue
-		}
-		pkg.Items = append(pkg.Items, itemFor(t, store.ActionCopy))
 	}
 
 	return pkg
@@ -224,10 +234,10 @@ func bitsOf(rate string) int {
 	return n * 1000
 }
 
-// videoItem keeps the picture or makes HEVC of it, as the blueprint says.
+// videoItem keeps the video or makes HEVC of it, as the blueprint says.
 func videoItem(t Track, b config.Blueprint) store.Item {
 	uhdCopy := t.Height >= 2000 && t.Codec == "hevc" && b.AllowUHDCopy
-	if b.KeepPicture || uhdCopy {
+	if b.Video == config.VideoCopy || uhdCopy {
 		return itemFor(t, store.ActionCopy)
 	}
 
@@ -297,7 +307,7 @@ func soundItems(tracks []Track, b config.Blueprint) []store.Item {
 			it.To = "flac"
 			items = append(items, it)
 
-		case b.CopyNativeAudio:
+		case b.Audio != config.AudioConvert:
 			items = append(items, itemFor(t, store.ActionCopy))
 
 		default:

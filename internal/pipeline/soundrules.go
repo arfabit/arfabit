@@ -8,17 +8,6 @@ import (
 	"github.com/arfabit/arfabit/internal/store"
 )
 
-// applyBlueprintSound applies a blueprint's sound rules to a Plan, if it has
-// any. Without them the Plan keeps the stereo-first choice already made.
-func applyBlueprintSound(plan *store.Plan, blueprint config.Blueprint) {
-	if blueprint.Sound == nil {
-		return
-	}
-	var found bool
-	plan.Sound, found = applySoundRules(plan.Audio, blueprint.Sound)
-	plan.SoundNotFound = !found
-}
-
 // applySoundRules ticks the sound tracks a blueprint's rules ask for, and
 // says what each rule found.
 //

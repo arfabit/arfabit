@@ -99,7 +99,7 @@ func TestRecipePicture(t *testing.T) {
 		t.Errorf("picture = %+v, want HEVC at quality 22, medium", v)
 	}
 
-	b.KeepPicture = true
+	b.Video = config.VideoCopy
 	if v := Recipe(tracks, b, false).ItemsOf(store.KindVideo)[0]; v.Action != store.ActionCopy {
 		t.Errorf("picture = %+v, want it kept as it is", v)
 	}
@@ -180,7 +180,7 @@ func TestRecipeReadsSubtitlesIntoText(t *testing.T) {
 		t.Errorf("subtitles = %q", got)
 	}
 
-	b.KeepSubtitlePictures = true
+	b.Subtitles = config.SubtitlesPictures
 	if got := describe(Recipe(tracks, b, true).ItemsOf(store.KindSubtitle)); got != "subtitle:eng:hdmv_pgs_subtitle:copy subtitle:eng:dvd_subtitle:copy subtitle:eng:hdmv_pgs_subtitle:copy" {
 		t.Errorf("kept as pictures: subtitles = %q", got)
 	}

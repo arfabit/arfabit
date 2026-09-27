@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"github.com/arfabit/arfabit/internal/config"
 	"strings"
 	"testing"
 	"time"
@@ -276,20 +275,3 @@ func TestQueuedStageIsNamedPlainly(t *testing.T) {
 
 // Stopping at the copy is the fast way through a stack of discs: the copy is
 // the only part that needs the drive.
-func TestPlanCanStopAtTheCopy(t *testing.T) {
-	blueprint := config.Defaults().Plain()
-	if !blueprint.ConvertAfterRip {
-		t.Error("converting after a rip should be the default")
-	}
-
-	blueprint.ConvertAfterRip = false
-	d, sel := blurayDisc()
-
-	plan, err := BuildPlan(d, sel, blueprint, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.Convert {
-		t.Error("the Plan converts despite the blueprint saying to stop at the copy")
-	}
-}

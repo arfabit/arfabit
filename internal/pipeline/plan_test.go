@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -43,8 +42,8 @@ func TestBuildPlanVideo(t *testing.T) {
 	if plan.VideoCopy {
 		t.Error("VideoCopy = true for an H.264 Blu-ray")
 	}
-	if plan.VideoCodec != "hevc" || plan.CRF != 20 || plan.Preset != "slow" {
-		t.Errorf("video plan = %s crf=%d preset=%s", plan.VideoCodec, plan.CRF, plan.Preset)
+	if plan.CRF != 20 || plan.Preset != "slow" {
+		t.Errorf("video plan = crf=%d preset=%s", plan.CRF, plan.Preset)
 	}
 	if plan.Resolution != "1920x1080" {
 		t.Errorf("Resolution = %q", plan.Resolution)
@@ -87,53 +86,6 @@ func TestBuildPlanUHDCopyCanBeTurnedOff(t *testing.T) {
 
 // The copy rule: a Dolby track passes through untouched, while TrueHD and DTS
 // must be encoded because Apple TV cannot decode them.
-func TestBuildPlanAudioCopyRule(t *testing.T) {
-	d, sel := blurayDisc()
-	plan, err := BuildPlan(d, sel, config.Defaults().Plain(), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The added stereo downmix shares the primary track's source index, so
-	// it is kept separate here.
-	byIndex := map[int]store.PlannedAudio{}
-	var stereo *store.PlannedAudio
-	for i, a := range plan.Audio {
-		if a.Stereo {
-			stereo = &plan.Audio[i]
-			continue
-		}
-		byIndex[a.SourceIndex] = a
-	}
-
-	if stereo == nil {
-		t.Fatal("no stereo fallback was planned")
-	}
-	if stereo.Copy || stereo.Codec != "aac" || !stereo.Selected {
-		t.Errorf("stereo fallback = %+v, want a selected AAC downmix", *stereo)
-	}
-
-	// Everything is kept as it is unless someone chooses otherwise. TrueHD
-	// included: changing it is the user's choice, with a note saying why
-	// they might (§4, §9).
-	for index, name := range map[int]string{1: "TrueHD", 2: "AC-3", 3: "DTS"} {
-		if !byIndex[index].Copy {
-			t.Errorf("%s was not kept as it is", name)
-		}
-	}
-
-	// Nothing surround is ticked by default: stereo is what arrives without
-	// choosing anything. The surround tracks are listed and one click away.
-	if byIndex[1].Selected || byIndex[2].Selected {
-		t.Error("a surround track was selected by default; the default is stereo")
-	}
-
-	// Multichannel first: Apple TV picks the first track it understands.
-	if plan.Audio[len(plan.Audio)-1].Stereo != true {
-		t.Error("the stereo fallback is not listed last")
-	}
-}
-
 // Forced subtitles default to on; other languages are left unselected.
 // Obfuscation reaches the Plan so the user is told, rather than it being
 // resolved silently.
@@ -317,91 +269,11 @@ func TestSpaceFailsOpen(t *testing.T) {
 // When surround does survive, there is nothing to say.
 // Tracks are grouped the way a disc's own menu reads: wanted languages first,
 // widest first inside each language.
-func TestAudioOrdering(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "spa"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
-		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 8, Lang: "eng"},
-		{Index: 4, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
-		{Index: 5, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 6, Lang: "eng"},
-	}}
-
-	tracks := planAudio(title, config.Defaults().Plain())
-
-	var order []string
-	for _, tr := range tracks {
-		if tr.Stereo {
-			continue
-		}
-		order = append(order, fmt.Sprintf("%s/%d", tr.Lang, tr.Channels))
-	}
-
-	want := []string{"eng/8", "eng/6", "eng/2", "fra/6", "spa/2"}
-	if len(order) != len(want) {
-		t.Fatalf("got %v, want %v", order, want)
-	}
-	for i := range want {
-		if order[i] != want[i] {
-			t.Errorf("position %d = %s, want %s (full order %v)", i, order[i], want[i], order)
-		}
-	}
-}
-
 // Discs often carry two stereo tracks with nothing to tell them apart — one is
 // frequently a commentary. ARFABIT cannot know which, so it keeps both rather
 // than picking wrongly.
-func TestAmbiguousStereoTracksAreBothKept(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 8, Lang: "eng"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
-		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
-	}}
-
-	var stereoSelected int
-	for _, tr := range planAudio(title, config.Defaults().Plain()) {
-		if tr.Channels <= 2 && tr.Selected && !tr.Stereo {
-			stereoSelected++
-		}
-	}
-	if stereoSelected != 2 {
-		t.Errorf("%d of the two stereo tracks were kept, want both", stereoSelected)
-	}
-}
-
 // Labels say what a track is and what becomes of it, in words rather than
 // codec identifiers.
-func TestTrackLabelsAreReadable(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_TRUEHD", Channels: 8, Lang: "eng"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
-	}}
-
-	tracks := planAudio(title, config.Defaults().Plain())
-
-	if got := tracks[0].Label; !strings.Contains(got, "English") ||
-		!strings.Contains(got, "7.1") ||
-		!strings.Contains(got, "Dolby TrueHD") ||
-		!strings.Contains(got, "kept exactly as it is") {
-		t.Errorf("label does not explain the conversion: %q", got)
-	}
-	if got := tracks[0].Label; strings.Contains(got, "truehd") || strings.Contains(got, "eac3") {
-		t.Errorf("label leaks codec identifiers: %q", got)
-	}
-
-	var french string
-	for _, tr := range tracks {
-		if tr.Lang == "fra" {
-			french = tr.Label
-		}
-	}
-	if !strings.Contains(french, "French") || !strings.Contains(french, "kept exactly as it is") {
-		t.Errorf("a copied track is not described as kept: %q", french)
-	}
-}
-
 // MakeMKV reports layouts like "5.1(side)", which is accurate and unhelpful.
 func TestLayoutNames(t *testing.T) {
 	tests := []struct {
@@ -428,147 +300,13 @@ func TestLayoutNames(t *testing.T) {
 // therefore chosen by how wide the source is.
 // Lossy sound is converted only when the blueprint asks for it not to be kept
 // as it is. Then the target follows the width, because the encoders differ.
-func TestSurroundCodecMatchesSourceWidth(t *testing.T) {
-	convert := config.Defaults().Plain()
-	convert.CopyNativeAudio = false
-
-	tests := []struct {
-		channels  int
-		wantCodec string
-	}{
-		{8, wideCodec},     // 7.1 — only AAC keeps all of it
-		{6, surroundCodec}, // 5.1 — E-AC-3, which a receiver can take whole
-		{2, "aac"},
-	}
-
-	for _, tc := range tests {
-		title := disc.Title{Streams: []disc.Stream{
-			{Index: 0, Kind: disc.StreamVideo},
-			{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: tc.channels, Lang: "eng"},
-		}}
-
-		tracks := planAudio(title, convert)
-		if tracks[0].Codec != tc.wantCodec {
-			t.Errorf("%d channels converted to %q, want %q", tc.channels, tracks[0].Codec, tc.wantCodec)
-		}
-	}
-}
-
 // Stereo is what arrives without choosing anything, and every surround track
 // is listed beside it so turning one on is a single click.
-func TestDefaultIsStereoWithSurroundOffered(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_TRUEHD", Channels: 8, Lang: "eng"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "eng"},
-		{Index: 3, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
-	}}
-
-	tracks := planAudio(title, config.Defaults().Plain())
-
-	var selected, surroundOffered int
-	for _, tr := range tracks {
-		if tr.Selected {
-			selected++
-			if tr.Channels > 2 {
-				t.Errorf("surround track %q is on by default", tr.Label)
-			}
-		}
-		if tr.Channels > 2 {
-			surroundOffered++
-		}
-	}
-
-	if selected != 1 {
-		t.Errorf("%d tracks on by default, want just the stereo one", selected)
-	}
-	if surroundOffered != 2 {
-		t.Errorf("%d surround tracks offered, want both listed", surroundOffered)
-	}
-}
-
 // A disc with no stereo track still delivers one, made from its widest.
-func TestStereoIsMadeWhenTheDiscHasNone(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_DTS", Channels: 8, Lang: "eng"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "fra"},
-	}}
-
-	tracks := planAudio(title, config.Defaults().Plain())
-
-	var made *store.PlannedAudio
-	for i := range tracks {
-		if tracks[i].Stereo {
-			made = &tracks[i]
-		}
-	}
-	if made == nil {
-		t.Fatal("no stereo track was made for a disc that has none")
-	}
-	if !made.Selected {
-		t.Error("the made stereo track is not on by default")
-	}
-	// Made from the English track, not the French one.
-	if made.Lang != "eng" {
-		t.Errorf("stereo was made from the %q track, want eng", made.Lang)
-	}
-}
-
 // A disc's own stereo track is a purpose-made mix, but it is usually Dolby at
 // a few hundred kilobits while the surround track beside it is lossless. Both
 // routes to stereo are offered, and the disc's own is the one ticked.
-func TestLosslessStereoOptionIsOffered(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_TRUEHD", CodecLong: "TrueHD Atmos", Channels: 8, Lang: "eng"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
-	}}
-
-	tracks := planAudio(title, config.Defaults().Plain())
-
-	var discStereo, madeStereo *store.PlannedAudio
-	for i := range tracks {
-		switch {
-		case tracks[i].Stereo:
-			madeStereo = &tracks[i]
-		case tracks[i].Channels <= 2:
-			discStereo = &tracks[i]
-		}
-	}
-
-	if discStereo == nil || madeStereo == nil {
-		t.Fatal("both stereo routes should be offered")
-	}
-	if !discStereo.Selected {
-		t.Error("the disc's own stereo mix is not the one ticked")
-	}
-	if madeStereo.Selected {
-		t.Error("the made stereo track is ticked; it is an alternative, not the default")
-	}
-	if !madeStereo.Lossless {
-		t.Error("the made stereo track does not record that its source was lossless")
-	}
-	if !strings.Contains(madeStereo.Label, "lossless") {
-		t.Errorf("the label does not say where it came from: %q", madeStereo.Label)
-	}
-}
-
 // With no lossless track there is nothing better to offer, so nothing is.
-func TestNoExtraStereoWhenNothingIsLossless(t *testing.T) {
-	title := disc.Title{Streams: []disc.Stream{
-		{Index: 0, Kind: disc.StreamVideo},
-		{Index: 1, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 6, Lang: "eng"},
-		{Index: 2, Kind: disc.StreamAudio, CodecID: "A_AC3", Channels: 2, Lang: "eng"},
-	}}
-
-	for _, tr := range planAudio(title, config.Defaults().Plain()) {
-		if tr.Stereo {
-			t.Errorf("a made stereo track was offered with no lossless source: %q", tr.Label)
-		}
-	}
-}
-
 // DTS-HD Master Audio shares its codec id with ordinary DTS and is told apart
 // only by the long name.
 func TestLosslessDetection(t *testing.T) {

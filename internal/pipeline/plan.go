@@ -24,7 +24,7 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 	plan := &store.Plan{
 		Blueprint:  blueprint.Name,
 		Edition:    blueprint.Edition,
-		Convert:    blueprint.ConvertAfterRip,
+		Convert:    true,
 		TitleIndex: title.Index,
 		RipName:    title.OutputName,
 		Duration:   formatDuration(title.Duration),
@@ -40,14 +40,21 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 
 	plan.SourceCodec = video.CodecLong
 	plan.Resolution = fmt.Sprintf("%dx%d", video.Width, video.Height)
-	planVideo(plan, d.Kind, video, blueprint)
-	plan.Audio = planAudio(title, blueprint)
-	applyBlueprintSound(plan, blueprint)
 
 	// What the Original will hold, and the package the blueprint makes of it.
 	plan.Tracks = DiscTracks(title)
 	pkg := Recipe(plan.Tracks, blueprint, canRead)
 	plan.Project = &pkg
+
+	// Rules that fit none of the disc's audio leave the choice to the user,
+	// and the Plan says so.
+	hasAudio := false
+	for _, t := range plan.Tracks {
+		hasAudio = hasAudio || t.Kind == store.KindAudio
+	}
+	summarise(plan)
+	plan.SoundNotFound = blueprint.Sound != nil && blueprint.Audio != config.AudioNone &&
+		hasAudio && len(pkg.ItemsOf(store.KindAudio)) == 0
 
 	// The subtitles read with the copy start as those the film converts to
 	// text, and can be changed apart from it.
@@ -59,24 +66,6 @@ func BuildPlan(d *disc.Disc, sel disc.Selection, blueprint config.Blueprint, can
 	plan.Seconds = int(title.Duration.Seconds())
 
 	return plan, nil
-}
-
-// planVideo decides whether to copy or re-encode the picture.
-func planVideo(plan *store.Plan, kind disc.Kind, video *disc.Stream, blueprint config.Blueprint) {
-	plan.VideoCodec = "hevc"
-	plan.CRF = blueprint.CRFFor(string(kind))
-	plan.Preset = blueprint.Preset
-
-	// A UHD disc is already HEVC, so copying it is free and bit-perfect.
-	// Re-encoding it is lossy-to-lossy, which is offered but not assumed.
-	if kind == disc.KindUHD && blueprint.AllowUHDCopy && isHEVC(video.CodecID) {
-		plan.VideoCopy = true
-	}
-}
-
-func isHEVC(codecID string) bool {
-	id := strings.ToUpper(codecID)
-	return strings.Contains(id, "HEVC") || strings.Contains(id, "H265") || strings.Contains(id, "MPEGH")
 }
 
 // wantLanguage reports whether a track's language is one the user asked for.

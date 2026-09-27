@@ -2655,7 +2655,7 @@ function soundEditor(initial) {
 
   const draw = () => {
     const heading = document.createElement("h4");
-    heading.textContent = "Audio";
+    heading.textContent = "Which tracks";
 
     const mode = select([["usual", "The usual choice"], ["rules", "Choose by rule"]],
       rules ? "rules" : "usual", (v) => {
@@ -2753,10 +2753,13 @@ function soundEditor(initial) {
 function blueprintForm(values, options) {
   const box = document.createElement("div");
 
-  const fields = document.createElement("div");
-  fields.className = "fields";
-
-  const field = (label, input) => {
+  // A row of labelled inputs, as a section of the form.
+  const row = () => {
+    const fields = document.createElement("div");
+    fields.className = "fields";
+    return fields;
+  };
+  const field = (fields, label, input) => {
     const wrap = document.createElement("label");
     const text = document.createElement("span");
     text.textContent = label;
@@ -2764,28 +2767,63 @@ function blueprintForm(values, options) {
     fields.append(wrap);
     return input;
   };
-
-  const number = (label, key, value) => {
+  const choice = (key, options, value) => {
+    const el = document.createElement("select");
+    el.dataset.key = key;
+    for (const [v, text] of options) el.append(new Option(text, v, false, v === value));
+    return el;
+  };
+  const number = (fields, label, key, value) => {
     const input = document.createElement("input");
     input.type = "number";
     input.min = "0";
     input.max = "51";
     input.value = value;
     input.dataset.key = key;
-    return field(label, input);
+    return field(fields, label, input);
+  };
+  const tick = (parent, label, key, checked) => {
+    const wrap = document.createElement("label");
+    wrap.className = "inline";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    input.dataset.key = key;
+    const text = document.createElement("span");
+    text.textContent = label;
+    wrap.append(input, text);
+    parent.append(wrap);
+  };
+  // A section headed as a project's are, whose details show only while its
+  // choice asks for them.
+  const section = (title, chooser, detailsFor) => {
+    const part = document.createElement("div");
+    part.className = "project-section";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const top = row();
+    top.append(chooser);
+    const details = document.createElement("div");
+    const show = () => { details.hidden = !detailsFor(chooser.value); };
+    chooser.addEventListener("change", show);
+    show();
+    part.append(heading, top, details);
+    box.append(part);
+    return details;
   };
 
+  const top = row();
   if (options.named) {
     const name = document.createElement("input");
     name.type = "text";
     name.value = values.name || "";
     name.dataset.key = "name";
     name.placeholder = "A name";
-    field("Name", name);
+    field(top, "Name", name);
 
     // The edition starts as the name, and follows it while the name is
     // typed, until somebody changes the edition itself. Clearing it is a
-    // choice: that blueprint's films then have no edition.
+    // choice: what is made from it then has no edition.
     const edition = document.createElement("input");
     edition.type = "text";
     edition.value = values.edition ?? values.name ?? "";
@@ -2796,72 +2834,59 @@ function blueprintForm(values, options) {
       if (following) edition.value = name.value;
     });
     edition.addEventListener("input", () => { following = false; });
-    field("Edition", edition);
+    field(top, "Edition", edition);
   }
+  field(top, "As", choice("container", [["mkv", "MKV"], ["mp4", "MP4"]], values.container || "mkv"));
+  box.append(top);
 
-  const preset = document.createElement("select");
-  preset.dataset.key = "preset";
-  for (const speed of ["superfast", "medium", "slow", "slower", "veryslow"]) {
-    const option = new Option(speed, speed);
-    option.selected = speed === (values.preset || "slow");
-    preset.append(option);
-  }
-  field("Speed", preset);
+  // Video: converted, as it is, or none.
+  const video = section("Video", choice("video",
+    [["convert", "Convert to HEVC"], ["copy", "Keep as it is"], ["none", "None"]], values.video || "convert"),
+  (v) => v === "convert");
+  const quality = row();
+  const preset = choice("preset", ["superfast", "medium", "slow", "slower", "veryslow"].map((p) => [p, p]), values.preset || "slow");
+  field(quality, "Speed", preset);
+  number(quality, "4K quality", "crf_uhd", values.crf_uhd ?? 20);
+  number(quality, "Blu-ray quality", "crf_bluray", values.crf_bluray ?? 20);
+  number(quality, "DVD quality", "crf_dvd", values.crf_dvd ?? 18);
+  video.append(quality);
+  tick(video, "Keep a 4K disc's video as it is: it is HEVC already", "allow_uhd_copy", values.allow_uhd_copy !== false);
+  const note = document.createElement("p");
+  note.className = "muted small";
+  note.textContent = "Lower numbers mean better video and bigger files. 20 is close to indistinguishable from the disc.";
+  video.append(note);
 
-  number("4K quality", "crf_uhd", values.crf_uhd ?? 20);
-  number("Blu-ray quality", "crf_bluray", values.crf_bluray ?? 20);
-  number("DVD quality", "crf_dvd", values.crf_dvd ?? 18);
-
+  // Audio: as it is, converted, or none, with which tracks by the rules.
+  const audio = section("Audio", choice("audio",
+    [["copy", "Keep as it is"], ["convert", "Convert"], ["none", "None"]], values.audio || "copy"),
+  (v) => v !== "none");
+  const audioRow = row();
   const bitrate = document.createElement("input");
   bitrate.type = "text";
   bitrate.value = values.audio_bitrate || "256k";
   bitrate.dataset.key = "audio_bitrate";
-  field("Stereo audio", bitrate);
-
-  box.append(fields);
-
-  const tick = (label, key, checked) => {
-    const wrap = document.createElement("label");
-    wrap.className = "inline";
-
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = checked;
-    input.dataset.key = key;
-
-    const text = document.createElement("span");
-    text.textContent = label;
-
-    wrap.append(input, text);
-    box.append(wrap);
-  };
-
-  tick("Keep 4K pictures exactly as they are", "allow_uhd_copy", values.allow_uhd_copy !== false);
-  tick("Keep the video exactly as it is", "keep_picture", values.keep_picture === true);
-  tick("Keep audio exactly as it is", "copy_native_audio", values.copy_native_audio !== false);
-  // Picture subtitles make Plex convert the whole picture to show them (§4),
-  // so they are read into text, where this computer can (§10), unless kept.
-  tick("Keep subtitles as pictures, rather than reading them into text", "keep_subtitle_pictures",
-    values.keep_subtitle_pictures === true);
-
+  field(audioRow, "Stereo bitrate", bitrate);
   // TrueHD plays on Apple TV only by Plex converting it every time (§4), so
   // what to do with it is a choice worth making once, here.
-  const truehd = document.createElement("label");
-  truehd.className = "inline";
-  const truehdChoice = document.createElement("select");
-  truehdChoice.dataset.key = "truehd";
-  for (const [v, text] of [["keep", "Keep it as it is"], ["flac", "Convert it to FLAC"], ["both", "Both"]]) {
-    truehdChoice.append(new Option(text, v, false, v === (values.truehd || "keep")));
-  }
-  truehd.append(document.createTextNode("Dolby TrueHD audio: "), truehdChoice);
-  box.append(truehd);
+  field(audioRow, "Dolby TrueHD", choice("truehd",
+    [["keep", "Keep it as it is"], ["flac", "Convert it to FLAC"], ["both", "Both"]], values.truehd || "keep"));
+  audio.append(audioRow, soundEditor(values.sound || null));
 
-  box.append(soundEditor(values.sound || null));
-
-  const note = document.createElement("p");
-  note.className = "muted small";
-  note.textContent = "Lower numbers mean better pictures and bigger files. 20 is close to indistinguishable from the disc.";
-  box.append(note);
+  // Subtitles: read into text, as pictures, or none, in which languages.
+  const subtitles = section("Subtitles", choice("subtitles",
+    // Picture subtitles make Plex convert the whole video to show them
+    // (§4), so they are read into text where this computer can (§10).
+    [["text", "Read into text"], ["pictures", "Keep as pictures"], ["none", "None"]], values.subtitles || "text"),
+  (v) => v !== "none");
+  const languages = document.createElement("input");
+  languages.type = "text";
+  languages.value = (values.sub_languages || []).join(", ");
+  languages.placeholder = "Every language";
+  languages.dataset.key = "sub_languages";
+  languages.dataset.list = "true";
+  const langRow = row();
+  field(langRow, "Languages, such as eng, fra", languages);
+  subtitles.append(langRow);
 
   return box;
 }
@@ -2876,6 +2901,8 @@ function readBlueprintForm(box) {
       values[key] = input.checked;
     } else if (input.type === "number") {
       values[key] = Number(input.value);
+    } else if (input.dataset.list) {
+      values[key] = input.value.split(/[\s,]+/).filter(Boolean);
     } else {
       values[key] = input.value;
     }
@@ -2886,9 +2913,6 @@ function readBlueprintForm(box) {
 
   return values;
 }
-
-
-
 
 // renderBlueprintManager lists the blueprints with a way to change them.
 function renderBlueprintManager(blueprints, defaults) {

@@ -233,11 +233,11 @@ const answers = {
   },
   "/api/blueprints": {
     blueprints: [
-      { name: "Archive", description: "HEVC quality 20, slow", default: true, editable: true, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, copy_native_audio: true },
-      { name: "Small", description: "HEVC quality 24, medium", default: false, editable: true, source: "made here", preset: "medium", crf_uhd: 24, crf_bluray: 24, crf_dvd: 22, audio_bitrate: "192k", allow_uhd_copy: false, copy_native_audio: true,
+      { name: "Archive", description: "HEVC quality 20, slow", default: true, editable: true, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, video: "convert", audio: "copy", subtitles: "text", sub_languages: ["eng"], container: "mkv" },
+      { name: "Small", description: "HEVC quality 24, medium", default: false, editable: true, source: "made here", preset: "medium", crf_uhd: 24, crf_bluray: 24, crf_dvd: 22, audio_bitrate: "192k", allow_uhd_copy: false, video: "convert", audio: "copy", subtitles: "text", sub_languages: ["eng"], container: "mkv",
         sound: { languages: ["eng", "fra"], language_mode: "all", choices: [{ mode: "one", layouts: ["7.1", "5.1"], quality: "lossless" }, { mode: "one", layouts: ["stereo"], quality: "" }] } },
     ],
-    defaults: { name: "", description: "HEVC quality 20, slow", default: false, editable: false, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, copy_native_audio: true },
+    defaults: { name: "", description: "HEVC quality 20, slow", default: false, editable: false, source: "your settings file", preset: "slow", crf_uhd: 20, crf_bluray: 20, crf_dvd: 18, audio_bitrate: "256k", allow_uhd_copy: true, video: "convert", audio: "copy", subtitles: "text", sub_languages: ["eng"], container: "mkv" },
   },
   "/api/drive-health": {
     drives: [{

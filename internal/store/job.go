@@ -205,7 +205,6 @@ type Plan struct {
 	SourceSize int64  `json:"source_size"`
 
 	VideoCopy   bool   `json:"video_copy"`
-	VideoCodec  string `json:"video_codec"`
 	CRF         int    `json:"crf,omitempty"`
 	Preset      string `json:"preset,omitempty"`
 	SourceCodec string `json:"source_codec"`

@@ -241,6 +241,9 @@ func (s *Store) Named(cfg config.Config, name string) (config.Blueprint, bool) {
 // validate refuses settings that would fail much later, when a film is already
 // half converted.
 func validate(p config.Blueprint) error {
+	if err := p.Check(); err != nil {
+		return err
+	}
 	valid := map[string]bool{
 		"superfast": true, "medium": true, "slow": true, "slower": true, "veryslow": true,
 	}
