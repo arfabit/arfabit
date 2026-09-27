@@ -58,6 +58,7 @@ global.document = {
   createElement: (tag) => element(tag),
   createElementNS: (ns, tag) => element(tag),
   createTextNode: (text) => ({ textContent: text }),
+  querySelector: () => null,
   querySelectorAll: () => [],
   body: element("body"),
 };
@@ -247,6 +248,7 @@ const answers = {
   },
 };
 
+global.AbortController = function () { return { signal: {}, abort() {} }; };
 global.fetch = async (path) => ({
   ok: true,
   json: async () => answers[path.split("?")[0]] ?? {},

@@ -2005,46 +2005,98 @@ function hasAV(p) {
 // from whatever "Start from" shows, as a Plan starts from the defaults.
 async function loadSource() {
   const path = $("project-source").value;
+  const asked = ++sourceAsked;
   sourceInfo = { tracks: [], duration: 0 };
   pkg = null;
   renderProject();
   if (!path || path === "disc") return;
+  editorSays("Reading what this file holds\u2026");
 
   let reply;
   try {
-    reply = await fetch(`/api/source?path=${encodeURIComponent(path)}`).then((r) => r.json());
+    reply = await askWithin(`/api/source?path=${encodeURIComponent(path)}`);
   } catch (err) {
-    $("project-editor").textContent = String(err);
+    if (asked === sourceAsked) editorSays(String(err.message || err), null, true);
     return;
   }
+  // Another file was chosen while this one was being read.
+  if (asked !== sourceAsked) return;
   if (!reply.tracks) {
-    // The raw account is always one click away (§15).
-    const box = $("project-editor");
-    box.replaceChildren(document.createTextNode(reply.message || "That file could not be read."));
-    if (reply.detail) {
-      const details = document.createElement("details");
-      const summary = document.createElement("summary");
-      summary.textContent = "Technical details";
-      const pre = document.createElement("pre");
-      pre.textContent = reply.detail;
-      details.append(summary, pre);
-      box.append(details);
-    }
+    editorSays(reply.message || "That file could not be read.", reply.detail, true);
     return;
   }
   sourceInfo = reply;
-  await fillProject();
+  await fillProject(asked);
+}
+
+// sourceAsked counts the files asked about, so an answer about one no longer
+// chosen is ignored rather than drawn over the one that is.
+let sourceAsked = 0;
+
+// askWithin fetches a page of ARFABIT's answers, and gives up after 15
+// seconds with a sentence saying so, rather than leaving the page waiting
+// with nothing to show for it.
+async function askWithin(path, options) {
+  const stop = new AbortController();
+  const timer = setTimeout(() => stop.abort(), 15000);
+  try {
+    const res = await fetch(path, { ...options, signal: stop.signal });
+    return await res.json();
+  } catch (err) {
+    if (stop.signal.aborted) throw new Error("ARFABIT did not answer within 15 seconds.");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// editorSays puts a line where the line items go: what is happening, or what
+// went wrong with its raw account one click away (§15), and a way to try
+// again.
+function editorSays(text, detail, again) {
+  const box = $("project-editor");
+  const line = document.createElement("p");
+  line.className = "muted";
+  line.textContent = text;
+  box.replaceChildren(line);
+  if (detail) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Technical details";
+    const pre = document.createElement("pre");
+    pre.textContent = detail;
+    details.append(summary, pre);
+    box.append(details);
+  }
+  if (again) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Try again";
+    button.addEventListener("click", loadSource);
+    box.append(button);
+  }
 }
 
 // fillProject starts the project again from a blueprint, or from the defaults.
-async function fillProject() {
+async function fillProject(asked = sourceAsked) {
   const path = $("project-source").value;
   if (!path || path === "disc") return;
-  const reply = await post("/api/project/fill", {
-    source: path,
-    blueprint: $("project-blueprint").value,
-  });
-  if (!reply) return;
+  let reply;
+  try {
+    reply = await askWithin("/api/project/fill", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: path, blueprint: $("project-blueprint").value }),
+    });
+  } catch (err) {
+    if (asked === sourceAsked) editorSays(String(err.message || err), null, true);
+    return;
+  }
+  if (asked !== sourceAsked) return;
+  if (!reply.project) {
+    editorSays(reply.message || "ARFABIT could not fill this in.", reply.detail, true);
+    return;
+  }
   pkg = reply.project;
   pkg.items = pkg.items || [];
   renderProject();
@@ -3284,7 +3336,7 @@ function wireButtons() {
     radio.addEventListener("change", renderProject);
   }
   on("project-read-disc", "click", (e) => readDisc(e.target));
-  on("project-fill", "click", fillProject);
+  on("project-fill", "click", () => fillProject());
   on("project-edition", "input", (e) => {
     if (pkg) pkg.edition = e.target.value.trim();
     describeProject();
