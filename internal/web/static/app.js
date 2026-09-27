@@ -1670,7 +1670,41 @@ function clockText(ns) {
   return `${h}:${m}:${sec}`;
 }
 
-async function refresh() {
+// refresh asks ARFABIT for the whole picture and draws it. Live updates can
+// come several times a second while a task works, and a request for each
+// piled up faster than they were answered, until anything else the page asked
+// for, such as a file's tracks, waited behind the pile and never came. So only
+// one is ever in flight: asking again while one is means once more after it,
+// however many times it was asked.
+let refreshing = null;
+let refreshAgain = false;
+
+function refresh() {
+  if (refreshing) {
+    refreshAgain = true;
+    return refreshing;
+  }
+  refreshing = (async () => {
+    try {
+      do {
+        refreshAgain = false;
+        await refreshOnce();
+      } while (refreshAgain);
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+// loadLog fetches every line of the jobs in hand, for a page just opened or
+// reconnected. Lines after that arrive one at a time over the event stream.
+async function loadLog() {
+  const log = await fetch("/api/log").then((r) => r.json());
+  appendLog(log);
+}
+
+async function refreshOnce() {
   const state = await fetch("/api/state").then((r) => r.json());
   if (state.now) clockOffset = Date.now() - new Date(state.now).getTime();
 
@@ -1691,9 +1725,6 @@ async function refresh() {
   // The drive is free to be asked again, and a disc has just been through
   // it, so the measured speed has probably changed.
   if (wasBusy && !driveBusy) loadDriveHealth();
-
-  const log = await fetch("/api/log").then((r) => r.json());
-  appendLog(log);
 }
 
 // --- doctor ---------------------------------------------------------------
@@ -3186,25 +3217,58 @@ function showView() {
 
 // --- wiring ---------------------------------------------------------------
 
+// connect listens for ARFABIT's live updates.
+//
+// A browser keeps at most six connections open to one address, shared by
+// every tab, and each live stream holds one for as long as its page is open.
+// Six ARFABIT tabs used all of them, and nothing else any tab asked for was
+// ever answered. So only one tab holds the stream, and passes what it hears
+// to the others through the browser (a lock says which; when that tab closes,
+// the next takes it over). Where a browser offers neither, each tab has its
+// own, as before.
 function connect() {
-  events = new EventSource("/events");
+  const handle = (name, data) => {
+    switch (name) {
+      // Any job change may add or remove a card, so the whole picture is
+      // refreshed rather than patched.
+      case "job": refresh(); break;
+      case "log": appendLog([JSON.parse(data)]); break;
+      case "index": renderIndexStatus(JSON.parse(data)); break;
+      case "drives": renderDrives(JSON.parse(data)); break;
+      case "connection": $("connection").hidden = data; break;
+    }
+  };
 
-  // Any job change may add or remove a card, so the whole picture is
-  // refreshed rather than patched.
-  events.addEventListener("job", () => refresh());
-  events.addEventListener("log", (e) => appendLog([JSON.parse(e.data)]));
-  events.addEventListener("index", (e) => renderIndexStatus(JSON.parse(e.data)));
+  const shared = typeof BroadcastChannel !== "undefined" && typeof navigator !== "undefined" && navigator.locks;
+  const channel = shared ? new BroadcastChannel("arfabit-events") : null;
+  if (channel) channel.onmessage = (e) => handle(e.data.name, e.data.data);
 
-  events.addEventListener("drives", (e) => {
-    renderDrives(JSON.parse(e.data));
-  });
-
-  events.addEventListener("error", () => {
+  const listen = () => {
+    events = new EventSource("/events");
+    const pass = (name, data) => {
+      handle(name, data);
+      if (channel) channel.postMessage({ name, data });
+    };
+    for (const name of ["job", "log", "index", "drives"]) {
+      events.addEventListener(name, (e) => pass(name, e.data));
+    }
     // EventSource reconnects on its own; a brief drop is not worth reporting.
-    $("connection").hidden = events.readyState !== EventSource.CLOSED;
-  });
+    events.addEventListener("error", () => pass("connection", events.readyState !== EventSource.CLOSED));
+    // Opened, or opened again after a drop: lines written meanwhile are
+    // fetched whole, and already-seen ones are skipped by their ids.
+    events.addEventListener("open", () => {
+      pass("connection", true);
+      pass("job", "");
+      loadLog();
+    });
+  };
 
-  events.addEventListener("open", () => { $("connection").hidden = true; });
+  if (!shared) {
+    listen();
+    return;
+  }
+  // Held for as long as this tab is open, once it has it.
+  navigator.locks.request("arfabit-events", () => new Promise(() => listen()));
 }
 
 // on attaches a handler, and says so rather than throwing when the element is
@@ -3374,6 +3438,7 @@ function start() {
   wireButtons();
   connect();
   refresh();
+  loadLog();
   runDoctor();
   loadAutostart();
   loadIndexStatus();

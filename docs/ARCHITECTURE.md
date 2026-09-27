@@ -1096,6 +1096,13 @@ record of what was done.
 
 ### Logging is a feature, not an afterthought
 
+- **One stream for every tab.** A browser keeps at most six connections open
+  to one address, shared by all its tabs, and a live stream holds one for as
+  long as its page is open: six ARFABIT tabs once left nothing for anything
+  else, and the page waited forever. So one tab holds the stream and passes
+  what it hears to the others inside the browser (a Web Lock says which, and
+  the next tab takes over when it closes). Only one refresh of the whole
+  picture is in flight at a time, however fast updates come.
 - **Append-only over SSE.** The page never reloads. New lines are appended, so
   scroll position, text selection, and filtering are never disturbed.
 - **Follow toggle**, on by default, disengages when you scroll up and re-engages
