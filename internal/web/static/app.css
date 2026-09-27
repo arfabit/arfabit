@@ -42,6 +42,10 @@ h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
 h3 { margin: 0 0 0.4rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 
 main { max-width: 60rem; margin: 0 auto; display: grid; gap: 1rem; }
+/* A box never grows past the page to fit a long line: long lines wrap. */
+main > *, .view > * { min-width: 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#project-editor pre { color: var(--muted); font-size: 0.8rem; }
 
 .card {
   background: var(--card);
