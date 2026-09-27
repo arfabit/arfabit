@@ -4,6 +4,7 @@ package ffmpeg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -99,6 +100,11 @@ func Probe(ctx context.Context, path string) (*MediaInfo, error) {
 
 	out, err := cmd.Output()
 	if err != nil {
+		// What ffprobe said is the account worth having (§15).
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && len(exit.Stderr) > 0 {
+			return nil, fmt.Errorf("ffprobe %s: %w\n%s", path, err, strings.TrimSpace(string(exit.Stderr)))
+		}
 		return nil, fmt.Errorf("ffprobe %s: %w", path, err)
 	}
 

@@ -1931,7 +1931,6 @@ function rememberStretch() {
   try {
     localStorage.setItem(REMEMBERED, JSON.stringify({
       at: $("lab-at").value,
-      length: $("lab-length").value,
     }));
   } catch {
     // Private windows and cleared storage are ordinary; there is simply
@@ -1945,7 +1944,6 @@ function recallStretch() {
     if (!saved) return;
 
     if (saved.at) $("lab-at").value = saved.at;
-    if (saved.length !== undefined) $("lab-length").value = String(saved.length);
   } catch {
     // Anything unreadable simply leaves the defaults in place.
   }
@@ -2020,7 +2018,18 @@ async function loadSource() {
     return;
   }
   if (!reply.tracks) {
-    $("project-editor").textContent = reply.message || "That file could not be read.";
+    // The raw account is always one click away (§15).
+    const box = $("project-editor");
+    box.replaceChildren(document.createTextNode(reply.message || "That file could not be read."));
+    if (reply.detail) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Technical details";
+      const pre = document.createElement("pre");
+      pre.textContent = reply.detail;
+      details.append(summary, pre);
+      box.append(details);
+    }
     return;
   }
   sourceInfo = reply;
