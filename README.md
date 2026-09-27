@@ -16,7 +16,7 @@ When you first open ARFABIT, it checks all of this and tells you what's missing 
 
 ## Getting started
 
-1. **Download ARFABIT** for your computer and open it.
+1. **Build and run ARFABIT.** There are no downloads yet. With Go 1.27 or later: `go build ./cmd/arfabit && ./arfabit`
 2. **Your browser opens** to the ARFABIT page.
 3. **Follow the checklist** at the top, if there is one.
 4. **Put a disc in.**
