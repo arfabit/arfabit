@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds ARFABIT.app, one universal app for Apple silicon and Intel Macs, and
 # ARFABIT.dmg holding it beside an Applications shortcut (docs/RELEASE.md §3,
-# §5). Run from anywhere, on a Mac with Go and the Xcode command line tools:
+# §5). Run from anywhere, on a Mac with Go and Xcode, whose asset compiler
+# makes the icon:
 #
 #   shell/macos/build.sh            a "dev" build
 #   shell/macos/build.sh v0.1.0     a release
@@ -56,9 +57,21 @@ sed -e "s/__VERSION__/$VERSION/g" -e "s/__SHORT_VERSION__/$SHORT/g" \
 cp "$WORK/shell" "$APP/Contents/MacOS/ARFABIT"
 cp "$WORK/core" "$APP/Contents/Resources/arfabit"
 
-# The icon, drawn by a small program of its own.
-swiftc -O -module-cache-path "$WORK/module-cache" -o "$WORK/make-icon" shell/macos/icon/make-icon.swift
-"$WORK/make-icon" "$APP/Contents/Resources/AppIcon.icns"
+# The icon, made in Icon Composer. Xcode's asset compiler turns it into
+# Assets.car for current macOS and ARFABIT.icns for older versions, and says
+# which Info.plist keys name them.
+ICON=shell/macos/icon/ARFABIT.icon
+if [ -d "$ICON" ]; then
+  xcrun actool "$ICON" --compile "$APP/Contents/Resources" \
+    --app-icon ARFABIT --platform macosx --target-device mac \
+    --minimum-deployment-target 13.0 \
+    --output-partial-info-plist "$WORK/icon.plist" \
+    --output-format human-readable-text --errors --warnings > "$WORK/actool.txt" 2>&1 \
+    || { cat "$WORK/actool.txt" >&2; exit 1; }
+  /usr/libexec/PlistBuddy -c "Merge $WORK/icon.plist" "$APP/Contents/Info.plist" > /dev/null
+else
+  echo "No icon: $ICON is missing, so the app has the generic one."
+fi
 plutil -lint "$APP/Contents/Info.plist" > /dev/null
 
 # Signing: ARFABIT inside first, then the app around it.

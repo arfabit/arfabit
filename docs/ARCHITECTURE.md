@@ -271,7 +271,7 @@ arfabit/
       server.go  pages.go  events.go  drives.go
       templates/  static/
   shell/                       the macOS and Windows shells
-    macos/                     the Swift menu bar app, Info.plist, its icon, build.sh for the .app and .dmg
+    macos/                     the Swift menu bar app, Info.plist, its Icon Composer icon, build.sh for the .app and .dmg
     windows/                   the C# notification area app (.NET Framework 4.8)
   packaging/
     windows/                   Inno Setup script, build.ps1 for the shell and installer
