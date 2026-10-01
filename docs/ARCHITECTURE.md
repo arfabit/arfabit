@@ -272,9 +272,10 @@ arfabit/
       templates/  static/
   shell/                       the macOS and Windows shells
     macos/                     the Swift menu bar app, Info.plist, build.sh for the .app and .dmg
-    windows/                   not built
-  packaging/                   not built: Inno Setup script; systemd unit and nfpm config
-    windows/  linux/
+    windows/                   the C# notification area app (.NET Framework 4.8)
+  packaging/
+    windows/                   Inno Setup script, build.ps1 for the shell and installer
+    linux/                     not built: systemd unit and nfpm config
   docs/
   temp/                        reference clones (gitignored)
 ```
@@ -1328,7 +1329,8 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Autostart on all three platforms | built; to be replaced by the shells and the Linux package (§13) |
 | Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
 | The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built, signed ad hoc; not yet run, and not signed with the self-made certificate |
-| Releases: the Windows shell, packages, updates (`docs/RELEASE.md`) | not built |
+| The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | written; never built or run |
+| Releases: Linux packages, updates (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 

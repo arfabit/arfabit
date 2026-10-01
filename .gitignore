@@ -23,6 +23,10 @@ config.toml
 /internal/subs/models/
 /internal/meta/index/
 
+# The Windows shell's own build folders
+/shell/windows/bin/
+/shell/windows/obj/
+
 # Go
 *.test
 *.out

@@ -3195,7 +3195,16 @@ function loginWords(shell, mac) {
   }
 
   if (!mac) {
-    return login.enabled ? "ARFABIT starts when you log in." : "";
+    switch (login.state) {
+      case "enabled":
+        return "ARFABIT starts when you log in. It is also listed in Task Manager → Startup apps.";
+      case "disabled":
+        return "ARFABIT is switched off in Windows's startup apps. Switch it on in Task Manager → Startup apps.";
+      case "notRegistered":
+        return shell.start_at_login ? "Windows did not add ARFABIT to its startup apps." : "";
+      default:
+        return `Windows reports: ${login.state}.`;
+    }
   }
   switch (login.state) {
     case "enabled":

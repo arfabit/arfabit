@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    ARFABIT.exe: the notification area app around ARFABIT, the Go program
+    (docs/RELEASE.md §3). .NET Framework 4.8 is part of Windows 10 and 11, so
+    there is nothing to install or bundle. Built with the .NET SDK:
+
+      dotnet build -c Release shell/windows/ARFABIT.csproj
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>ARFABIT</AssemblyName>
+    <RootNamespace>Arfabit.Shell</RootNamespace>
+    <Product>ARFABIT</Product>
+    <Version>0.0.0</Version>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets the SDK build for .NET Framework 4.8 without Visual Studio. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+
+</Project>

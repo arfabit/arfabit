@@ -20,8 +20,9 @@ import (
 // LoginReport is what the app says the system did with Start at login.
 //
 // On macOS State is SMAppService's own status, by its Swift name: "enabled",
-// "requiresApproval", "notRegistered" or "notFound". Detail is any error the
-// system gave, verbatim.
+// "requiresApproval", "notRegistered" or "notFound". On Windows it is
+// "enabled", "disabled" (switched off in Startup apps) or "notRegistered".
+// Detail is any error the system gave, verbatim.
 type LoginReport struct {
 	Enabled bool   `json:"enabled"`
 	State   string `json:"state"`
