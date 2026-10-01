@@ -7,13 +7,16 @@ the disc, encodes it for native Apple TV 4K playback, and files it for Plex.
 decisions. They are not open questions. If a task seems to require breaking one,
 stop and say so rather than working around it.
 
+**Building, packaging, installing, starting at login, and updating** are in
+`docs/RELEASE.md`. Read its §0 goals before touching any of them.
+
 ---
 
 ## The short version
 
 | | |
 |---|---|
-| Language | Go. One static binary. No Python, Node, Docker, or runtime deps. |
+| Language | Go. One static binary. No Python, Node, Docker, or runtime deps. The per-platform shells in `docs/RELEASE.md` (Swift on macOS, C# on Windows) are packaging around that binary, the one exception. |
 | External tools | `makemkvcon` and `ffmpeg`, driven with `os/exec`. No wrapper libs. |
 | Output | MKV (MP4 only when a project asks, untested) · video and audio copied or converted as the user chooses · SRT sidecars + embedded SRT |
 | State | Plain JSON/JSONL files. No database. |

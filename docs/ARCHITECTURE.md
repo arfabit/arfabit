@@ -12,6 +12,9 @@ If you read nothing else in this document, read this. These are settled decision
 Do not re-litigate them, work around them, or "improve" them without being asked.
 
 1. **Go. One static binary.** No Python, no Node, no Docker, no runtime dependency.
+   On macOS and Windows a release wraps it in a small shell, Swift and C#, that
+   is packaging only: the icon, starting at login, installing updates
+   (`docs/RELEASE.md`).
 2. **Output is MKV / HEVC main10 / sound that plays directly / SRT.** Direct play in
    the Plex app on an Apple TV 4K is the target that matters, as tested (§4). MP4 is
    made only when a project asks for one, for players that cannot open MKV, and
@@ -40,6 +43,7 @@ Do not re-litigate them, work around them, or "improve" them without being asked
 | Naming / metadata       | §6, §11             |
 | Web UI                  | §14, §15            |
 | Files, config, state    | §6, §7              |
+| Releases, shells, updates, starting at login | `docs/RELEASE.md`, §13 |
 
 ### Highest-consequence code
 
@@ -177,7 +181,9 @@ keeps the drive spinning.
 | Encode    | `ffmpeg` + `libx265` via `os/exec`    | `-progress pipe:1` gives structured progress.                                                   |
 | OCR       | A reader the computer already has     | Vision on macOS, Windows.Media.Ocr on Windows, Tesseract elsewhere if installed. See §10.       |
 | Metadata  | **Offline IMDb index**                | No network at rip time. See §11.                                                                |
-| Autostart | Written by the binary itself          | LaunchAgent / Task Scheduler / systemd user unit. See §13.                                      |
+| Shell     | Swift on macOS, C# on Windows, none on Linux | Packaging around the Go binary: icon, starting at login, installing updates. Talks to ARFABIT as the page does. See `docs/RELEASE.md`. |
+| Autostart | The shell; on Linux, the package      | `SMAppService` / a scheduled task / a systemd system service. See §13.                          |
+| Release   | `.dmg`, Inno Setup installer, `.deb` and `.rpm` | Built by GitHub Actions on a tag. See `docs/RELEASE.md`.                             |
 | Docker    | **Not used**                          | Cannot pass an optical drive through Docker Desktop on macOS or Windows.                        |
 
 ---
@@ -256,11 +262,18 @@ arfabit/
     store/                     file-backed state (§6)
     config/                    layered TOML (§7)
     doctor/                    dependency checks
-    autostart/                 per-platform service install
-    restart/                   restarting ARFABIT in place, from the page
+    autostart/                 per-platform service install; goes once the shells
+                               and the Linux package do this (docs/RELEASE.md)
+    restart/                   restarting ARFABIT in place, from the page; on Linux,
+                               also into a newly installed version
+    update/                    not built: check, download, verify, stage (docs/RELEASE.md §6)
     web/
       server.go  pages.go  events.go  drives.go
       templates/  static/
+  shell/                       not built: the macOS and Windows shells
+    macos/  windows/
+  packaging/                   not built: Inno Setup script; systemd unit and nfpm config
+    windows/  linux/
   docs/
   temp/                        reference clones (gitignored)
 ```
@@ -275,7 +288,8 @@ Files are the source of truth. Any index is a disposable cache.
 No locking, no SQLite-over-NFS corruption, no coordination.
 
 ```
-<data-dir>/                       # default ~/Library/Application Support/arfabit
+<data-dir>/                       # default ~/Library/Application Support/arfabit;
+                                  # for the Linux service, /var/lib/arfabit
   config.toml                     # shared settings (may live on a NAS)
   config.local.toml               # this machine's settings (see §7)
   blueprints.json                 # blueprints made on the page (§8)
@@ -306,7 +320,8 @@ A node renders the global view by reading every `nodes/*/` directory.
 
 ### Media layout
 
-The library (`paths.library`, `~/Downloads/arfabit` itself by default) is one
+The library (`paths.library`, `~/Downloads/arfabit` itself by default; for the
+Linux service, `/var/lib/arfabit/library`, see `docs/RELEASE.md` §3) is one
 folder per film, named for Plex. The original and everything made from it
 share it, each an edition of its own; the original's is `Original`, so to Plex
 it is one more version of the film:
@@ -403,9 +418,10 @@ Last one wins. The UI shows provenance next to every setting
 ("5.1 E-AC-3 · inherited from shared config") so it is never a mystery which
 file to edit.
 
-No environment variables of our own. They exist to serve Docker and systemd; we use
-neither. (The platform's own `APPDATA` / `XDG_CONFIG_HOME` are honoured when finding
-the default data directory.)
+No environment variables of our own. What a shell or a systemd unit needs to tell
+ARFABIT, it says with flags, such as `-no-open` and `-shell`. (The platform's own
+`APPDATA` / `XDG_CONFIG_HOME` are honoured when finding the default data
+directory.)
 
 ---
 
@@ -999,17 +1015,28 @@ Not built: the page uses that. The Plan shows a single figure either way.
 
 ## 13. Running as a service
 
-Autostart is a toggle in the web UI. The binary writes the right thing per platform.
+Starting at login is a toggle in the web UI on macOS and Windows. ARFABIT keeps
+the setting in its own state; the shell (`docs/RELEASE.md` §1) applies it and
+reports back what the system did, so the page never disagrees with the system.
+ARFABIT itself holds no login-item code.
 
-| Platform | Mechanism                                        | Note                                                                       |
-| -------- | ------------------------------------------------ | -------------------------------------------------------------------------- |
-| macOS    | LaunchAgent in `~/Library/LaunchAgents`          | **Agent, not Daemon** — needs the user session for drive and folder access |
-| Windows  | Task Scheduler, at-logon                         | More reliable than a Run key, and visible where a person can find it       |
-| Linux    | systemd **user** unit + `loginctl enable-linger` | Lingering is what survives logout                                          |
+| Platform | Mechanism | Note |
+| -------- | --------- | ---- |
+| macOS    | The shell registers itself with `SMAppService` (macOS 13 and later) | Runs in the person's session, which drive and folder access need. Listed in System Settings → Login Items |
+| Windows  | The shell makes a Task Scheduler entry at logon, pointing at itself | Whether a Run key would serve better is open (`docs/RELEASE.md` §10) |
+| Linux    | A systemd **system** service, as its own `arfabit` account, set up by the package | Runs from boot, whether anyone is logged in or not. No toggle: the page says how to turn it off |
 
-None of them restarts ARFABIT when it exits, deliberately: otherwise Stop would
-appear not to work. The toggle says which mechanism it set up. Restart and Stop buttons sit beside it
-in Settings. Not built: live status such as "Running, started 3 days ago".
+None of them restarts ARFABIT unless it asks to be, deliberately: otherwise Stop
+would appear not to work. Under a shell, ARFABIT exits with 0 for Stop and 75 for
+Restart, and the shell starts it again only on 75 (`docs/RELEASE.md` §1). On
+Linux and in development builds, Restart is ARFABIT replacing itself in place.
+Restart and Stop buttons sit beside the toggle in Settings. Not built: live
+status such as "Running, started 3 days ago".
+
+**Built today, and to be replaced:** ARFABIT writes the login item itself — a
+LaunchAgent on macOS, a scheduled task on Windows, and a systemd user unit with
+`loginctl enable-linger` on Linux (`internal/autostart`). It stays until the
+shells and the Linux package take its place (`docs/RELEASE.md` §12).
 
 ---
 
@@ -1026,7 +1053,7 @@ section keeps running whichever is showing, so switching loses nothing.
 | **Tasks** | Watching: Doctor, each drive, the queue, logs, parts compared, recent tasks |
 | **Projects** | Creating: what to start from, and what to make. Nothing finished is shown here; that is Tasks |
 | **Blueprints** | Recipes, applied from the start by a drive or by hand |
-| **Settings** | Autostart, restart and stop, the film list |
+| **Settings** | Autostart, restart and stop, the film list. Not built, for releases (`docs/RELEASE.md`): the version, updates, Show the icon, where the system's automatic login is, and on macOS possibly Remove ARFABIT from this computer; on Linux, no autostart toggle |
 
 Two workflows matter, and the page exists to serve them: **automatic**, where
 a disc goes in and, with nothing clicked, the film comes out with its
@@ -1129,9 +1156,67 @@ First screen on a fresh install. Checks `makemkvcon`, `ffmpeg`, the MakeMKV key,
 drive presence, free disk space, and the metadata index. Each failure gets a
 copy-pasteable fix.
 
-MakeMKV beta keys expire about every 60 days. Doctor looks for a key in MakeMKV's
-settings and warns within a week of expiry. Not built: fetching a fresh beta key
-automatically, and the Settings links to the purchase page, the forum and r/makemkv.
+Not built: on Linux, where ARFABIT runs as its own account, the first screen
+becomes a short welcome. It has one step for each thing that account still
+needs: write access to the library, the person's own access to it, the drive,
+and the MakeMKV key step below. Each step has its command written out for this
+computer and a **Check again** button (`docs/RELEASE.md` §3).
+
+### The MakeMKV key
+
+ARFABIT uses only `makemkvcon`, never MakeMKV's own window, so it cannot rely on
+anyone having typed a key into that window. On Linux, where ARFABIT runs as its
+own account (`docs/RELEASE.md` §3), nobody ever could. The key is simply a line,
+`app_Key = "…"`, in MakeMKV's `settings.conf`, in the home folder of whichever
+account runs `makemkvcon`:
+
+| Platform | File |
+|---|---|
+| macOS | `~/Library/MakeMKV/settings.conf` |
+| Windows | `%APPDATA%\MakeMKV\settings.conf` |
+| Linux | `~/.MakeMKV/settings.conf`; for the service, `/var/lib/arfabit/.MakeMKV/settings.conf` |
+
+**Built:** Doctor reads that file for the account ARFABIT runs as, and reports
+whether an `app_Key` line is there. It does not read the key's value.
+
+**Not built: the key step.** Doctor's MakeMKV key check gets a way to put a key
+in place, on every platform, with two choices:
+
+- **Use the free beta key.** ARFABIT fetches the current one (below).
+- **Enter a key**, for a purchased key or one copied by hand. A field to paste
+  it into.
+
+Either way ARFABIT writes the `app_Key` line into `settings.conf` for its own
+account, and nothing else:
+
+- The rest of the file is kept exactly as it was; only the `app_Key` line is
+  added or replaced. The directory and file are made if missing.
+- Written atomically (§6), like every other write.
+- **The key is kept nowhere else.** Not in ARFABIT's settings or state, not in
+  any log, not in the live events, not in an error message. The page shows only
+  its last four characters, to tell one key from another.
+- Whether MakeMKV accepts the key is MakeMKV's to say. ARFABIT shows what
+  `makemkvcon` reports, verbatim (§15), and does not judge the key itself.
+
+**Not built: fetching the current beta key.** MakeMKV publishes a free beta key
+on its forum, in a post it updates when the key changes, about every two
+months. Blu-ray and UHD need a key; DVDs do not.
+
+- **Get the current beta key** fetches that post and reads the key from it.
+  If no key can be read — the page is unreachable, or its layout changed —
+  nothing is written, and the page says so and links to the post. It never
+  guesses at a key.
+- **Keep the beta key current** is a setting, on when the person chose the
+  beta key and off otherwise. When on, ARFABIT fetches the post once a week,
+  and whenever `makemkvcon` reports a problem with the key, and writes a newer
+  key if there is one. It never replaces a key the person entered themselves.
+- Expiry is known only when the post states it; the page then shows it. For a
+  key entered by hand, ARFABIT knows no expiry and shows none.
+- This is contact with makemkv.com that the person did not ask for each time,
+  so Settings says so beside the setting, as it does for the update check.
+
+Settings also links to MakeMKV's purchase page, the forum post, and r/makemkv.
+Not built.
 
 ### Projects page
 
@@ -1237,8 +1322,9 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Projects: line items copied or converted, blueprints as recipes, parts compared with the whole | built, tested (no VMAF) |
 | Offline IMDb index: download, lookup, suggestions on the Plan | built, tested |
 | Jobs left behind by a restart; running a stopped job again from its own Plans | built, tested |
-| Doctor | built |
-| Autostart on all three platforms | built |
+| Doctor | built; the MakeMKV key step and fetching the beta key are not (§14) |
+| Autostart on all three platforms | built; to be replaced by the shells and the Linux package (§13) |
+| Releases: version number, shells, packages, updates (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 
@@ -1267,7 +1353,9 @@ A disc's Plan made before projects still logs that its subtitles are not read.
 **Next**
 Measuring OCR
 on more discs, on Windows and with Tesseract · the encoder's own observed frame
-rate rather than an assumed 24 · VMAF in the lab.
+rate rather than an assumed 24 · VMAF in the lab · the MakeMKV key step and
+fetching the current beta key (§14) · releases, in the order of
+`docs/RELEASE.md` §12.
 
 **Later**
 Blueprint matchers (§8) · multichannel E-AC-3 · OS-level disc detection ·
