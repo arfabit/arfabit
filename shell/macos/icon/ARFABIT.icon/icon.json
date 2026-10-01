@@ -1,76 +1,78 @@
 {
-  "fill" : {
-    "linear-gradient" : [
-      "srgb:0.98039,0.98431,0.99216,1.00000",
-      "srgb:0.86667,0.88627,0.91373,1.00000"
-    ]
-  },
+  "fill-specializations" : [
+    {
+      "value" : {
+        "linear-gradient" : [
+          "extended-gray:1.00000,1.00000",
+          "extended-gray:0.75000,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 1
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 0
+          }
+        }
+      }
+    },
+    {
+      "appearance" : "dark",
+      "value" : {
+        "linear-gradient" : [
+          "extended-gray:0.50000,1.00000",
+          "extended-gray:0.25000,1.00000"
+        ],
+        "orientation" : {
+          "start" : {
+            "x" : 0.5,
+            "y" : 1
+          },
+          "stop" : {
+            "x" : 0.5,
+            "y" : 0
+          }
+        }
+      }
+    }
+  ],
   "groups" : [
     {
-      "name" : "Shutter",
       "layers" : [
         {
-          "image-name" : "shutter.png",
-          "name" : "shutter"
-        }
-      ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
-      },
-      "translucency" : {
-        "enabled" : false,
-        "value" : 0.5
-      }
-    },
-    {
-      "name" : "Window",
-      "layers" : [
-        {
-          "image-name" : "window.png",
-          "name" : "window"
-        }
-      ],
-      "shadow" : {
-        "kind" : "none",
-        "opacity" : 0.5
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.6
-      }
-    },
-    {
-      "name" : "Disc",
-      "layers" : [
-        {
+          "blend-mode-specializations" : [
+            {
+              "value" : "normal"
+            },
+            {
+              "appearance" : "dark",
+              "value" : "normal"
+            }
+          ],
+          "fill" : "automatic",
+          "glass" : true,
+          "hidden" : false,
           "image-name" : "disc.png",
-          "name" : "disc"
+          "name" : "disc",
+          "opacity" : 0.9,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              53.39999999999998,
+              24
+            ]
+          }
         }
       ],
+      "name" : "Disc",
       "shadow" : {
         "kind" : "neutral",
         "opacity" : 0.4
       },
       "translucency" : {
         "enabled" : false,
-        "value" : 0.5
-      }
-    },
-    {
-      "name" : "Case",
-      "layers" : [
-        {
-          "image-name" : "case.png",
-          "name" : "case"
-        }
-      ],
-      "shadow" : {
-        "kind" : "none",
-        "opacity" : 0.5
-      },
-      "translucency" : {
-        "enabled" : true,
         "value" : 0.5
       }
     }
