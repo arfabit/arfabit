@@ -618,7 +618,8 @@ internal/update/               check, download, verify, stage
 internal/restart/              also restarts into a newly installed version
 internal/autostart/            removed: the shells and the Linux package take this over
 shell/
-  macos/                       the Swift menu bar app: icon, login item, Info.plist, .dmg layout
+  macos/                       the Swift menu bar app: icon, login item, Info.plist;
+                               build.sh makes the universal .app and the .dmg in dist/
   windows/                     the C# notification area app: icon, scheduled task
 packaging/
   windows/                     Inno Setup script
