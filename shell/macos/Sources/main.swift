@@ -27,8 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var loginSetting: Bool?
     private var sawLoginOn = false
 
+    /// This app was just installed as an update, and is waiting for its
+    /// ARFABIT to say it is ready before the update counts as done.
+    private var installing: Updater.Installing?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if MoveToApplications.offerIfNeeded() {
+        installing = Updater.finishing()
+        if installing == nil && MoveToApplications.offerIfNeeded() {
             NSApp.terminate(nil)
             return
         }
@@ -46,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onStop = { [weak self] in
             self?.api?.post("api/quit") { self?.say($0) }
         }
+        menu.onUpdate = { [weak self] in
+            self?.api?.post("api/update/install") { self?.say($0) }
+        }
         menu.onMenuOpening = { [weak self] in self?.api?.refresh() }
 
         start()
@@ -55,6 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try core.start()
         } catch {
+            if let installing {
+                rollBack(installing, "ARFABIT \(installing.version) did not start: \(error.localizedDescription)")
+                return
+            }
             NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "ARFABIT did not start."
@@ -66,13 +78,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// ARFABIT is serving at url.
     private func ready(_ url: URL) {
+        // Just installed as an update: the page already open comes back by
+        // itself, so another is not opened.
+        let updated = installing != nil
+        if let installing {
+            Updater.succeeded(installing)
+            self.installing = nil
+        }
+
         let api = API(base: url)
         api.onShell = { [weak self] state in self?.follow(state) }
         api.onStatus = { [weak self] line in self?.menu.setStatus(line) }
         api.connect()
         self.api = api
 
-        if !startedOnce {
+        if !startedOnce && updated {
+            startedOnce = true
+        } else if !startedOnce {
             startedOnce = true
             // Without an answer, the page opens as it always has.
             api.fetch { [weak self] state in
@@ -94,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func follow(_ state: ShellState) {
         menu.setShown(state.showIcon)
         menu.setStatus(state.status)
+        menu.setUpdateReady(state.updateReady)
 
         switch loginSetting {
         case nil:
@@ -161,17 +184,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // A new version that stopped before it was ready: the old one goes
+        // back.
+        if let installing {
+            rollBack(installing, "ARFABIT \(installing.version) stopped before it was ready, with exit code \(status). What it said is in \(Core.logURL.path).")
+            return
+        }
+
         switch (reason, status) {
         case (.exit, 0):
             menu.setShown(false)
             NSApp.terminate(nil)
         case (.exit, 75):
-            // Installing a staged update comes here, before starting again
-            // (docs/RELEASE.md §6). Not built yet.
+            // Start me again: with a new version first, if one is staged.
             menu.setStatus("Starting")
-            start()
+            Updater.installStaged { [weak self] opened in
+                if opened {
+                    self?.menu.setShown(false)
+                    NSApp.terminate(nil)
+                } else {
+                    self?.start()
+                }
+            }
         default:
             stoppedUnexpectedly()
+        }
+    }
+
+    /// Puts the previous version back and opens it, then quits. It says what
+    /// happened on its page, from failed.json.
+    private func rollBack(_ installing: Updater.Installing, _ detail: String) {
+        self.installing = nil
+        menu.setShown(false)
+        Updater.rollBack(installing, detail: detail) {
+            NSApp.terminate(nil)
         }
     }
 

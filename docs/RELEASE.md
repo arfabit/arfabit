@@ -565,6 +565,26 @@ With no paid signing, the check is ARFABIT's own:
 
 Paid signing, if added, becomes a second check alongside this one.
 
+### The staging folder
+
+Staged updates live in ARFABIT's own folder on the computer, never on a NAS:
+`~/Library/Application Support/arfabit/update` on macOS,
+`%APPDATA%\arfabit\update` on Windows. ARFABIT and its app find each other's
+files there by name:
+
+| File | Written by | Says |
+|---|---|---|
+| `staged.json`, and the download it names | ARFABIT | a version checked against `latest.json` and waiting |
+| `installing.json` | the old app | an install under way, for the new app to finish or undo |
+| `failed.json` | the new app | a version that did not start, verbatim; ARFABIT does not install it again by itself, and **Update and restart** tries it again |
+| `checked.json` | ARFABIT | when it last asked, so a restart does not ask again the same day |
+
+On macOS the download is the app as a `.zip`, which the old app unpacks beside
+itself and swaps in with renames, keeping the old one as
+`ARFABIT (previous version).app` until the new ARFABIT is ready, then putting
+it in the Trash. On Windows it is the installer, which every install also
+copies into its own `setup` folder, so the one before is there to put back.
+
 ### Things an update has to get right
 
 - **State made by the last version opens in the new one:** jobs, projects,

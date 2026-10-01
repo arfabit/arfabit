@@ -266,7 +266,7 @@ arfabit/
                                and the Linux package do this (docs/RELEASE.md)
     restart/                   restarting ARFABIT in place, from the page; on Linux,
                                also into a newly installed version
-    update/                    not built: check, download, verify, stage (docs/RELEASE.md §6)
+    update/                    check, download, verify, stage; public.key (docs/RELEASE.md §6)
     web/
       server.go  pages.go  events.go  drives.go
       templates/  static/
@@ -1331,7 +1331,8 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
 | The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built and run on a Mac; signing with the self-made certificate not yet tried |
 | The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | written; never built or run |
-| Releases: Linux packages, updates (`docs/RELEASE.md`) | not built |
+| Updates on macOS and Windows: signed `latest.json`, staging, installing by the app, putting the old version back (`docs/RELEASE.md` §6) | built; checking and staging tested, installing not yet run; Windows untested |
+| Releases: Linux packages, the release workflow (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 

@@ -26,7 +26,7 @@ esac
 DIST="$ROOT/dist"
 WORK="$DIST/macos"
 APP="$DIST/ARFABIT.app"
-rm -rf "$WORK" "$APP" "$DIST/ARFABIT.dmg"
+rm -rf "$WORK" "$APP" "$DIST/ARFABIT.dmg" "$DIST/ARFABIT-macOS.zip"
 mkdir -p "$WORK"
 
 echo "ARFABIT $VERSION"
@@ -80,6 +80,11 @@ codesign --force --sign "$IDENTITY" --identifier com.arfabit.arfabit.core "$APP/
 codesign --force --sign "$IDENTITY" "$APP"
 codesign --verify --strict "$APP"
 
+# The app as a .zip, which is what an update downloads and unpacks
+# (docs/RELEASE.md §6). ditto keeps the signature and the bundle whole.
+rm -f "$DIST/ARFABIT-macOS.zip"
+ditto -c -k --keepParent "$APP" "$DIST/ARFABIT-macOS.zip"
+
 # The disk image: the app and a shortcut to Applications, so installing is
 # one drag.
 STAGE="$WORK/dmg"
@@ -89,4 +94,5 @@ ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname ARFABIT -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DIST/ARFABIT.dmg"
 
 echo "Made $APP"
+echo "Made $DIST/ARFABIT-macOS.zip"
 echo "Made $DIST/ARFABIT.dmg"

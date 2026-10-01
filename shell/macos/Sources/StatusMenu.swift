@@ -7,12 +7,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var onStartAtLogin: ((Bool) -> Void)?
     var onRestart: (() -> Void)?
     var onStop: (() -> Void)?
+    var onUpdate: (() -> Void)?
     var onMenuOpening: (() -> Void)?
 
     private var item: NSStatusItem?
     private let menu = NSMenu()
     private let status = NSMenuItem(title: "Starting", action: nil, keyEquivalent: "")
     private let login = NSMenuItem(title: "Start at login", action: #selector(toggleLogin), keyEquivalent: "")
+    private let update = NSMenuItem(title: "Update and restart", action: #selector(installUpdate), keyEquivalent: "")
 
     override init() {
         super.init()
@@ -30,6 +32,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(entry("Restart ARFABIT", #selector(restart)))
         menu.addItem(entry("Stop ARFABIT", #selector(stop)))
+
+        // Only there when a new version is ready (docs/RELEASE.md §4).
+        update.target = self
+        update.isHidden = true
+        menu.addItem(update)
     }
 
     private func entry(_ title: String, _ action: Selector) -> NSMenuItem {
@@ -63,6 +70,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         login.state = on ? .on : .off
     }
 
+    /// Shows Update and restart when a version is ready, naming it.
+    func setUpdateReady(_ version: String?) {
+        update.isHidden = version == nil
+        if let version {
+            update.title = "Update to \(version) and restart"
+        }
+    }
+
     func menuWillOpen(_ menu: NSMenu) {
         onMenuOpening?()
     }
@@ -71,4 +86,5 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleLogin() { onStartAtLogin?(login.state != .on) }
     @objc private func restart() { onRestart?() }
     @objc private func stop() { onStop?() }
+    @objc private func installUpdate() { onUpdate?() }
 }

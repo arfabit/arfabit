@@ -8,10 +8,14 @@ struct ShellState: Decodable {
     var hideOnStart: Bool
     var status: String
 
+    /// A new version waiting to be installed, if there is one.
+    var updateReady: String?
+
     enum CodingKeys: String, CodingKey {
         case showIcon = "show_icon"
         case startAtLogin = "start_at_login"
         case hideOnStart = "hide_on_start"
+        case updateReady = "update_ready"
         case status
     }
 }
