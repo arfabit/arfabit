@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"syscall"
 	"time"
 
@@ -30,8 +30,19 @@ import (
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/restart"
 	"github.com/arfabit/arfabit/internal/store"
+	"github.com/arfabit/arfabit/internal/version"
 	"github.com/arfabit/arfabit/internal/web"
 )
+
+// Exit codes, which a shell reads to know what to do next (docs/RELEASE.md §1).
+// Anything else means ARFABIT stopped by itself.
+const (
+	exitStop    = 0
+	exitRestart = 75
+)
+
+// errRestart is how run says the shell should start ARFABIT again.
+var errRestart = errors.New("restart")
 
 func main() {
 	var (
@@ -39,16 +50,31 @@ func main() {
 		addr       = flag.String("addr", "", "address to serve on, overriding the settings file")
 		noOpen     = flag.Bool("no-open", false, "do not open the browser")
 		checkOnly  = flag.Bool("check", false, "run the checks and exit")
+		shell      = flag.Bool("shell", false, "started by the ARFABIT app, which starts it again when asked")
+		showVer    = flag.Bool("version", false, "say which version this is and exit")
 	)
 	flag.Parse()
 
-	if err := run(*configPath, *addr, *noOpen, *checkOnly); err != nil {
+	if *showVer {
+		fmt.Println(version.Version)
+		return
+	}
+
+	err := run(*configPath, *addr, *noOpen, *checkOnly, *shell)
+	switch {
+	case errors.Is(err, errRestart):
+		os.Exit(exitRestart)
+	case err != nil:
 		fmt.Fprintf(os.Stderr, "\n%v\n\n", err)
 		os.Exit(1)
 	}
+	os.Exit(exitStop)
 }
 
-func run(configPath, addr string, noOpen, checkOnly bool) error {
+func run(configPath, addr string, noOpen, checkOnly, shell bool) error {
+	// The first line of every log says which ARFABIT wrote it.
+	fmt.Printf("ARFABIT %s\n", version.Version)
+
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
@@ -84,11 +110,19 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		CacheMB:   cfg.Drive.ReadCacheMB,
 	}
 
+	// What would otherwise only be printed also goes on the page: a copy
+	// started by the shell or by the system has nobody watching a terminal.
+	var notices []web.Notice
+
 	// A missing film list is not a problem: without it a disc's own name is
 	// used, which on many discs is already right.
 	index, err := meta.LoadIndex(cfg.Paths.Data)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "The film list could not be read, so disc names will be used: %v\n", err)
+		notices = append(notices, web.Notice{
+			Message: "The film list could not be read, so disc names will be used. Downloading it again in Settings replaces it.",
+			Detail:  err.Error(),
+		})
 	}
 
 	runner := &pipeline.Runner{
@@ -115,6 +149,10 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	blueprintStore, err := blueprints.Open(cfg.Paths.Data)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "The saved blueprints could not be read, so only the ones in your settings file are available: %v\n", err)
+		notices = append(notices, web.Notice{
+			Message: "The saved blueprints could not be read, so only the ones in your settings file are available.",
+			Detail:  err.Error(),
+		})
 	}
 
 	server, err := web.New(cfg, st, runner, backend)
@@ -122,6 +160,8 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		return err
 	}
 	server.Blueprints = blueprintStore
+	server.Notices = notices
+	server.Shell = shell
 
 	// A new Plan starts from the blueprint used by default, or from the
 	// defaults when none is. Which one can be changed on the page while
@@ -131,18 +171,34 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	// Stopping from the page matters for anyone whose computer starts ARFABIT
 	// on its own: they have no terminal to press Ctrl+C in.
 	// One shutdown, one announcement. The reason is carried to the single
-	// place that prints it, rather than announced here and again below.
-	quit := make(chan struct{})
-	var quitReason atomic.Pointer[string]
-
-	server.Quit = func(reason string) {
-		quitReason.CompareAndSwap(nil, &reason)
-		close(quit)
+	// place that prints it, rather than announced here and again below. The
+	// first request wins; a second, from another tab, changes nothing.
+	var (
+		quit       = make(chan struct{})
+		quitOnce   sync.Once
+		quitReason string
+		startAgain bool
+	)
+	stopWith := func(reason string, again bool) {
+		quitOnce.Do(func() {
+			quitReason, startAgain = reason, again
+			close(quit)
+		})
 	}
+
+	server.Quit = func(reason string) { stopWith(reason, false) }
 
 	// Restarting is how most small problems get cleared, so the page offers
 	// it. Everything is put away first, exactly as Ctrl+C would.
+	//
+	// Under a shell, ARFABIT stops in the ordinary way and says with its exit
+	// code that it wants starting again; the shell does that, installing a
+	// staged update first if there is one (docs/RELEASE.md §1).
 	server.Restart = func() error {
+		if shell {
+			stopWith("restarting", true)
+			return nil
+		}
 		fmt.Println("\nRestarting.")
 		saveCalibration(st, cfg.Node.ID, calibration)
 		server.Close()
@@ -151,25 +207,33 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 
 	listener, err := net.Listen("tcp", cfg.Server.Addr)
 	if err != nil {
-		// Another copy already has the port. Ask it to stand down and take
-		// over: somebody who has just started ARFABIT wants the copy they
-		// started, which is very often one they have only now rebuilt.
-		if url, ok := alreadyRunning(cfg.Server.Addr); ok {
-			fmt.Printf("\nARFABIT was already running at %s. Taking over.\n", url)
+		url, ok := alreadyRunning(cfg.Server.Addr)
+		switch {
+		case !ok:
+			return explainListenFailure(cfg.Server.Addr, err)
 
-			if err := askToQuit(url, "a newer copy of ARFABIT was started"); err != nil {
-				return fmt.Errorf(
-					"ARFABIT is already running at %s and would not stand down.\n"+
-						"Stop it from that page, or run:\n\n  lsof -ti :%s -sTCP:LISTEN | xargs kill\n\n"+
-						"The underlying message was: %v",
-					url, portOf(cfg.Server.Addr), err)
-			}
+		case shell || !version.Dev():
+			// A person who opens ARFABIT twice wants the page, not a
+			// restart, so a release never asks the running copy to stand
+			// down. The shell opens the page of the copy already running.
+			return fmt.Errorf("ARFABIT is already running at %s.", url)
+		}
 
-			listener, err = waitForPort(cfg.Server.Addr, 10*time.Second)
-			if err != nil {
-				return explainListenFailure(cfg.Server.Addr, err)
-			}
-		} else {
+		// A development build takes over from the copy already running:
+		// somebody who has just started it wants the copy they started,
+		// which is very often one they have only now rebuilt.
+		fmt.Printf("\nARFABIT was already running at %s. Taking over.\n", url)
+
+		if err := askToQuit(url, "a newer copy of ARFABIT was started"); err != nil {
+			return fmt.Errorf(
+				"ARFABIT is already running at %s and would not stand down.\n"+
+					"Stop it from that page, or run:\n\n  lsof -ti :%s -sTCP:LISTEN | xargs kill\n\n"+
+					"The underlying message was: %v",
+				url, portOf(cfg.Server.Addr), err)
+		}
+
+		listener, err = waitForPort(cfg.Server.Addr, 10*time.Second)
+		if err != nil {
 			return explainListenFailure(cfg.Server.Addr, err)
 		}
 	}
@@ -177,7 +241,9 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	url := friendlyURL(listener.Addr())
 	fmt.Printf("\nARFABIT is running.\n\n  Open %s\n\n", url)
 	fmt.Printf("  Originals and films go in %s\n\n", cfg.Paths.Library)
-	fmt.Printf("Press Ctrl+C to stop.\n\n")
+	if !shell {
+		fmt.Printf("Press Ctrl+C to stop.\n\n")
+	}
 
 	if !noOpen {
 		openBrowser(url)
@@ -207,6 +273,10 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		}
 	}()
 
+	// The one line a shell waits for before it opens the page (docs/RELEASE.md
+	// §1). Its wording is a contract: change it and the shells with it.
+	fmt.Printf("%s %s\n", readyPrefix, url)
+
 	select {
 	case err := <-errs:
 		return err
@@ -214,9 +284,12 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 	case <-ctx.Done():
 	}
 
-	if reason := quitReason.Load(); reason != nil {
-		fmt.Printf("\nStopping: %s.\n", *reason)
-	} else {
+	switch {
+	case startAgain:
+		fmt.Println("\nRestarting.")
+	case quitReason != "":
+		fmt.Printf("\nStopping: %s.\n", quitReason)
+	default:
 		fmt.Println("\nStopping.")
 	}
 	saveCalibration(st, cfg.Node.ID, calibration)
@@ -233,8 +306,15 @@ func run(configPath, addr string, noOpen, checkOnly bool) error {
 		// the port occupied, which would stop ARFABIT starting again.
 		_ = httpServer.Close()
 	}
+	if startAgain {
+		return errRestart
+	}
 	return nil
 }
+
+// readyPrefix begins the line that says ARFABIT is serving, followed by its
+// address.
+const readyPrefix = "ARFABIT ready"
 
 // alreadyRunning reports whether the occupied port is ARFABIT itself.
 //

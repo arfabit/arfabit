@@ -24,6 +24,7 @@ let queueFilter = "all";
 let focusedJob = "";
 let resumable = {};
 let driveSettings = {}; // what each drive does when a disc goes in, by name
+let startedByApp = false; // ARFABIT's app started it, and opening the app starts it again
 let blueprintNames = []; // for "When a disc goes in"
 let editing = null;  // what on the Plan shown can still be changed
 let copies = {};   // how each film's SRTs stand, by the task that made them
@@ -1721,10 +1722,35 @@ async function refreshOnce() {
   renderActive(state.active || []);
   renderJob(state.job, state.existing || []);
   renderRecent(state.recent || []);
+  renderNotices(state.notices || []);
+  startedByApp = Boolean(state.shell);
 
   // The drive is free to be asked again, and a disc has just been through
   // it, so the measured speed has probably changed.
   if (wasBusy && !driveBusy) loadDriveHealth();
+}
+
+// renderNotices shows what ARFABIT found when it started, which a copy started
+// by its app or by the system would otherwise have said to nobody.
+function renderNotices(notices) {
+  const list = $("notice-list");
+  list.replaceChildren(...notices.map((n) => {
+    const item = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = n.message;
+    item.append(p);
+    if (n.detail) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Technical details";
+      const pre = document.createElement("pre");
+      pre.textContent = n.detail;
+      details.append(summary, pre);
+      item.append(details);
+    }
+    return item;
+  }));
+  show("notices", notices.length > 0);
 }
 
 // --- doctor ---------------------------------------------------------------
@@ -3379,7 +3405,9 @@ function wireButtons() {
     if (result) {
       $("restart-detail").textContent = $("autostart").checked
         ? "ARFABIT has stopped. It will start again the next time you log in, or you can start it yourself."
-        : "ARFABIT has stopped. Start it again from where you launched it.";
+        : startedByApp
+          ? "ARFABIT has stopped. Open ARFABIT again to start it."
+          : "ARFABIT has stopped. Start it again from where you launched it.";
       $("restart").disabled = true;
       $("quit").disabled = true;
     }

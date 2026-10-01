@@ -22,6 +22,11 @@
   <!-- Tasks: what is happening now. -->
   <div class="view" data-view="tasks">
 
+    <section id="notices" class="card" hidden>
+      <h2>When ARFABIT started</h2>
+      <div id="notice-list"></div>
+    </section>
+
     <section id="doctor" class="card">
       <h2 id="doctor-heading">Checking your computer</h2>
       <p id="doctor-status" class="muted">One moment.</p>
@@ -262,6 +267,7 @@
 
       <div class="setting">
         <div>ARFABIT itself</div>
+        <p class="muted small">{{if eq .Version "dev"}}A development copy, built from the source.{{else}}Version {{.Version}}.{{end}}</p>
         <p id="restart-detail" class="muted small">Restarting clears most small problems. Nothing already saved is touched.</p>
         <div class="button-row">
           <button id="restart">Restart ARFABIT</button>

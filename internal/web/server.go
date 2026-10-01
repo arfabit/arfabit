@@ -28,6 +28,7 @@ import (
 	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
+	"github.com/arfabit/arfabit/internal/version"
 )
 
 //go:embed static/*
@@ -54,6 +55,14 @@ type Server struct {
 	// standing aside for a newer one does not read as a mystery shutdown.
 	Quit func(reason string)
 
+	// Notices are what ARFABIT found when it started and would otherwise
+	// only have printed, where nobody may be looking.
+	Notices []Notice
+
+	// Shell says ARFABIT was started by its app, which starts it again on
+	// Restart and is how it is opened after a Stop (docs/RELEASE.md §1).
+	Shell bool
+
 	tmpl    *template.Template
 	events  *eventStream
 	drives  driveWatcher
@@ -67,6 +76,14 @@ type Server struct {
 	// the server is where "once" has to be true. Projects need no such guard:
 	// they are jobs, and the queue decides when they run.
 	building atomic.Bool
+}
+
+// Notice is something worth saying that is not about any one task.
+type Notice struct {
+	Message string `json:"message"`
+
+	// Detail is the raw reason, shown behind "Technical details" (§15).
+	Detail string `json:"detail,omitempty"`
 }
 
 // New prepares the server.
@@ -175,6 +192,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		"NodeName": s.Config.Node.Name,
 		"Started":  s.started.Format("3:04 PM"),
 		"Library":  s.Config.Paths.Library,
+		"Version":  version.Version,
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -236,6 +254,13 @@ type state struct {
 	// (§10), and OCRNote says so plainly when it cannot.
 	OCR     bool   `json:"ocr"`
 	OCRNote string `json:"ocr_note,omitempty"`
+
+	Notices []Notice `json:"notices,omitempty"`
+
+	// Version is which ARFABIT this is, and Shell whether its app started
+	// it.
+	Version string `json:"version"`
+	Shell   bool   `json:"shell,omitempty"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +317,9 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		NodeName:      s.Config.Node.Name,
 		Paths:         s.Config.Paths,
 		OCR:           s.Runner.OCR != nil,
+		Notices:       s.Notices,
+		Version:       version.Version,
+		Shell:         s.Shell,
 	}
 	if !reply.OCR {
 		reply.OCRNote = ocr.NotAvailable

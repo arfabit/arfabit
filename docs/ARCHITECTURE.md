@@ -1324,7 +1324,8 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Jobs left behind by a restart; running a stopped job again from its own Plans | built, tested |
 | Doctor | built; the MakeMKV key step and fetching the beta key are not (§14) |
 | Autostart on all three platforms | built; to be replaced by the shells and the Linux package (§13) |
-| Releases: version number, shells, packages, updates (`docs/RELEASE.md`) | not built |
+| Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
+| Releases: shells, packages, updates (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 

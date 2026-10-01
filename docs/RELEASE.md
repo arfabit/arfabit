@@ -4,8 +4,9 @@ How ARFABIT reaches a person's computer, starts, stops, and stays up to date.
 `ARCHITECTURE.md` is what ARFABIT does; this is how it is built, packaged,
 installed, and updated.
 
-**Status: a draft. Nothing here is built yet.** There are no releases today, and
-the README says to build with Go. What is still open is gathered in §10.
+**Status: a draft, being built in the order of §12.** There are no releases
+today, and the README says to build with Go. What is still open is gathered in
+§10.
 
 ---
 

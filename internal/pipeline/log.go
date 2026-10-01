@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arfabit/arfabit/internal/store"
+	"github.com/arfabit/arfabit/internal/version"
 )
 
 // Entry is one line of a job's log.
@@ -68,6 +69,11 @@ func NewLog(path string, watcher func(Entry)) (*Log, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Which ARFABIT wrote what follows. A job started again after an update
+	// is written by a different one, so this goes in each time, not only once.
+	_, _ = fmt.Fprintf(f, "%s  ARFABIT %s\n", time.Now().Format("2006-01-02 15:04:05"), version.Version)
+
 	return &Log{file: f, watcher: watcher}, nil
 }
 
