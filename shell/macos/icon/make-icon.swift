@@ -1,4 +1,4 @@
-// Draws ARFABIT's app icon, a disc on a dark tile, as AppIcon.icns. build.sh
+// Draws ARFABIT's app icon, a disc in a clear case, as AppIcon.icns. build.sh
 // runs it:
 //
 //   swift shell/macos/icon/make-icon.swift AppIcon.icns
@@ -24,98 +24,213 @@ func gradient(_ colors: [CGColor], _ stops: [CGFloat]) -> CGGradient {
     CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB), colors: colors as CFArray, locations: stops)!
 }
 
-/// Draws the icon on a 1024-point canvas, origin at the bottom left.
+/// The colour of a disc's surface at an angle around it, in degrees: silver,
+/// with the faint rainbow a disc's surface throws back, brightest where the
+/// light catches it.
+func shine(_ degrees: CGFloat) -> CGColor {
+    let a = degrees * .pi / 180
+
+    // Two bright sweeps opposite each other, as on a real disc.
+    let light = pow(0.5 + 0.5 * cos(2 * (a - 0.7)), 1.6)
+
+    // Hue goes round twice, so each sweep has its own rainbow.
+    let hue = (2 * a / (2 * .pi)).truncatingRemainder(dividingBy: 1)
+    let (hr, hg, hb) = rainbow(hue)
+
+    // Darker silver between the sweeps, nearly white in them, and the
+    // rainbow strongest at their edges.
+    let silver = 0.60 + 0.38 * light
+    let tint = 0.08 + 1.5 * light * (1 - light)
+
+    // Cool, slightly blue silver between the sweeps, never brown.
+    let cool = 0.05 * (1 - light)
+    return CGColor(
+        srgbRed: silver * (1 - tint) + hr * tint - cool,
+        green: silver * (1 - tint) + hg * tint,
+        blue: silver * (1 - tint) + hb * tint + cool,
+        alpha: 1)
+}
+
+/// A soft rainbow: cyan, violet, pink, gold, green, and round again.
+func rainbow(_ t: CGFloat) -> (CGFloat, CGFloat, CGFloat) {
+    let stops: [(CGFloat, CGFloat, CGFloat)] = [
+        (0.35, 0.80, 1.00), (0.62, 0.45, 1.00), (1.00, 0.45, 0.80),
+        (1.00, 0.85, 0.55), (0.50, 0.95, 0.85), (0.35, 0.80, 1.00),
+    ]
+    let x = t * CGFloat(stops.count - 1)
+    let i = min(Int(x), stops.count - 2)
+    let f = x - CGFloat(i)
+    let (a, b) = (stops[i], stops[i + 1])
+    return (a.0 + (b.0 - a.0) * f, a.1 + (b.1 - a.1) * f, a.2 + (b.2 - a.2) * f)
+}
+
+/// Draws the icon on a 1024-point canvas, origin at the bottom left: a disc in
+/// a clear plastic case with a metal shutter.
 func draw(_ c: CGContext) {
-    // The tile, on Apple's icon grid: 824 points square, inset 100.
-    let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
-    let tilePath = CGPath(roundedRect: tile, cornerWidth: 185, cornerHeight: 185, transform: nil)
-    let background = gradient([color(0x33415C), color(0x111722)], [0, 1])
-
-    c.saveGState()
-    c.setShadow(offset: CGSize(width: 0, height: -10), blur: 24, color: color(0x000000, 0.35))
-    c.addPath(tilePath)
-    c.setFillColor(color(0x111722))
-    c.fillPath()
-    c.restoreGState()
-
-    c.saveGState()
-    c.addPath(tilePath)
-    c.clip()
-    c.drawLinearGradient(background, start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 100), options: [])
-    c.restoreGState()
-
-    let centre = CGPoint(x: 512, y: 512)
-    func circle(_ r: CGFloat) -> CGPath {
-        CGPath(ellipseIn: CGRect(x: centre.x - r, y: centre.y - r, width: 2 * r, height: 2 * r), transform: nil)
+    func circle(_ p: CGPoint, _ r: CGFloat) -> CGPath {
+        CGPath(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r), transform: nil)
     }
-    let discR: CGFloat = 330
-    let hubR: CGFloat = 100
-    let holeR: CGFloat = 40
 
-    // The disc, with a shadow beneath it.
+    // The case, on Apple's icon grid: 824 points square, inset 100.
+    let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
+    let casePath = CGPath(roundedRect: tile, cornerWidth: 150, cornerHeight: 150, transform: nil)
+
     c.saveGState()
-    c.setShadow(offset: CGSize(width: 0, height: -12), blur: 30, color: color(0x000000, 0.45))
-    c.addPath(circle(discR))
-    c.setFillColor(color(0xB9C1CC))
+    c.setShadow(offset: CGSize(width: 0, height: -10), blur: 24, color: color(0x000000, 0.18))
+    c.addPath(casePath)
+    c.setFillColor(color(0xF4F6FA, 0.35))
     c.fillPath()
     c.restoreGState()
 
-    // Its silver face, lit from the top left.
+    // Clear plastic with a white frost: what is behind the icon shows
+    // through, a little more at the bottom.
     c.saveGState()
-    c.addPath(circle(discR))
+    c.addPath(casePath)
     c.clip()
     c.drawLinearGradient(
-        gradient([color(0xF3F5F8), color(0xC5CCD6), color(0x9AA4B2)], [0, 0.55, 1]),
-        start: CGPoint(x: 280, y: 760), end: CGPoint(x: 744, y: 264), options: [])
+        gradient([color(0xFFFFFF, 0.55), color(0xEEF1F5, 0.35), color(0xE2E7EE, 0.30)], [0, 0.6, 1]),
+        start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 100), options: [])
+    c.restoreGState()
 
-    // Light catching the surface: two opposite wedges, faintly coloured at
-    // their edges as a real disc is.
-    func wedge(_ from: CGFloat, _ to: CGFloat, _ fill: CGColor) {
+    // The moulded ridge just inside the edge, and the case's small round marks.
+    let ridge = CGPath(roundedRect: tile.insetBy(dx: 26, dy: 26), cornerWidth: 126, cornerHeight: 126, transform: nil)
+    c.addPath(ridge)
+    c.setLineWidth(5)
+    c.setStrokeColor(color(0xAAB3C0, 0.55))
+    c.strokePath()
+    for p in [CGPoint(x: 190, y: 834), CGPoint(x: 834, y: 834), CGPoint(x: 190, y: 190), CGPoint(x: 834, y: 190)] {
+        c.addPath(circle(p, 16))
+        c.setLineWidth(4)
+        c.setStrokeColor(color(0xAAB3C0, 0.6))
+        c.strokePath()
+    }
+
+    // The disc.
+    let centre = CGPoint(x: 476, y: 528)
+    let discR: CGFloat = 300
+
+    c.saveGState()
+    c.setShadow(offset: CGSize(width: 0, height: -4), blur: 10, color: color(0x000000, 0.25))
+    c.addPath(circle(centre, discR))
+    c.setFillColor(color(0xC8CDD5))
+    c.fillPath()
+    c.restoreGState()
+
+    // Its surface, in thin slices round the centre: CoreGraphics has no fill
+    // that changes colour round a point.
+    c.saveGState()
+    c.addPath(circle(centre, discR))
+    c.clip()
+    let slices = 720
+    for i in 0..<slices {
+        let a0 = CGFloat(i) / CGFloat(slices) * 2 * .pi
+        let a1 = CGFloat(i + 1) / CGFloat(slices) * 2 * .pi + 0.003
         c.move(to: centre)
-        c.addArc(center: centre, radius: discR, startAngle: from * .pi / 180, endAngle: to * .pi / 180, clockwise: false)
+        c.addArc(center: centre, radius: discR, startAngle: a0, endAngle: a1, clockwise: false)
         c.closePath()
-        c.setFillColor(fill)
+        c.setFillColor(shine(a0 * 180 / .pi))
         c.fillPath()
     }
-    for base in [CGFloat(35), 215] {
-        wedge(base - 14, base - 6, color(0x6FD3FF, 0.22))
-        wedge(base - 6, base + 10, color(0xFFFFFF, 0.55))
-        wedge(base + 10, base + 18, color(0xFF8AD8, 0.18))
-    }
+    // A soft brightening across the middle, as from a light above.
+    c.drawRadialGradient(
+        gradient([color(0xFFFFFF, 0.35), color(0xFFFFFF, 0)], [0, 1]),
+        startCenter: CGPoint(x: centre.x - 60, y: centre.y + 90), startRadius: 0,
+        endCenter: CGPoint(x: centre.x - 60, y: centre.y + 90), endRadius: 260, options: [])
+    c.restoreGState()
 
-    // Faint rings where the data is.
-    c.setLineWidth(1.5)
-    for r in stride(from: CGFloat(150), through: 320, by: 14) {
-        c.addPath(circle(r))
-        c.setStrokeColor(color(0x000000, 0.035))
+    c.addPath(circle(centre, discR - 1))
+    c.setLineWidth(2)
+    c.setStrokeColor(color(0x7E8794, 0.5))
+    c.strokePath()
+
+    // The clear ring round the hub, and its printed edge.
+    c.addPath(circle(centre, 128))
+    c.setFillColor(color(0xE9EDF2, 0.75))
+    c.fillPath()
+    c.addPath(circle(centre, 128))
+    c.setLineWidth(10)
+    c.setStrokeColor(color(0x3A4048, 0.55))
+    c.strokePath()
+
+    // The metal hub, rings within rings.
+    c.saveGState()
+    c.addPath(circle(centre, 82))
+    c.clip()
+    c.drawLinearGradient(
+        gradient([color(0xE4E7EB), color(0x9AA1AB), color(0xC9CED5)], [0, 0.5, 1]),
+        start: CGPoint(x: centre.x - 82, y: centre.y + 82), end: CGPoint(x: centre.x + 82, y: centre.y - 82), options: [])
+    c.restoreGState()
+    for (r, alpha) in [(CGFloat(82), CGFloat(0.5)), (60, 0.35), (40, 0.4)] {
+        c.addPath(circle(centre, r))
+        c.setLineWidth(3)
+        c.setStrokeColor(color(0x4C535C, alpha))
+        c.strokePath()
+    }
+    c.addPath(circle(centre, 13))
+    c.setFillColor(color(0xFFFFFF))
+    c.fillPath()
+
+    // The case's clear window over the disc.
+    let window = CGPath(roundedRect: CGRect(x: 214, y: 236, width: 360, height: 584), cornerWidth: 24, cornerHeight: 24, transform: nil)
+    c.addPath(window)
+    c.setFillColor(color(0xFFFFFF, 0.06))
+    c.fillPath()
+    c.addPath(window)
+    c.setLineWidth(3)
+    c.setStrokeColor(color(0xFFFFFF, 0.55))
+    c.strokePath()
+
+    // The metal shutter, slid across from the right.
+    let shutter = CGRect(x: 588, y: 400, width: 306, height: 280)
+    let shutterPath = CGPath(roundedRect: shutter, cornerWidth: 14, cornerHeight: 14, transform: nil)
+    c.saveGState()
+    c.setShadow(offset: CGSize(width: -4, height: -6), blur: 14, color: color(0x000000, 0.3))
+    c.addPath(shutterPath)
+    c.setFillColor(color(0xB4BAC2))
+    c.fillPath()
+    c.restoreGState()
+    c.saveGState()
+    c.addPath(shutterPath)
+    c.clip()
+    c.drawLinearGradient(
+        gradient([color(0xD9DDE2), color(0xA9B0B9), color(0xC4C9D0)], [0, 0.55, 1]),
+        start: CGPoint(x: shutter.minX, y: shutter.maxY), end: CGPoint(x: shutter.maxX, y: shutter.minY), options: [])
+    // Brushed lines.
+    c.setLineWidth(1)
+    for y in stride(from: shutter.minY + 4, to: shutter.maxY, by: 5) {
+        c.move(to: CGPoint(x: shutter.minX, y: y))
+        c.addLine(to: CGPoint(x: shutter.maxX, y: y))
+        c.setStrokeColor(color(0xFFFFFF, (y.truncatingRemainder(dividingBy: 10) < 5) ? 0.10 : 0.04))
         c.strokePath()
     }
     c.restoreGState()
-
-    // The rim.
-    c.addPath(circle(discR - 1.5))
+    let inset = CGPath(roundedRect: shutter.insetBy(dx: 18, dy: 18), cornerWidth: 8, cornerHeight: 8, transform: nil)
+    c.addPath(inset)
     c.setLineWidth(3)
-    c.setStrokeColor(color(0x5F6977, 0.6))
+    c.setStrokeColor(color(0x7D8590, 0.45))
     c.strokePath()
 
-    // The clear hub, and its edge.
-    c.addPath(circle(hubR))
-    c.setFillColor(color(0xD9DEE5))
+    // The arrow that says which way the disc goes in.
+    c.move(to: CGPoint(x: 476, y: 884))
+    c.addLine(to: CGPoint(x: 452, y: 842))
+    c.addLine(to: CGPoint(x: 500, y: 842))
+    c.closePath()
+    c.setFillColor(color(0x1E2228))
     c.fillPath()
-    c.addPath(circle(hubR))
-    c.setLineWidth(4)
-    c.setStrokeColor(color(0x7D8795, 0.55))
-    c.strokePath()
 
-    // The hole, through to the tile behind.
+    // Light along the case's top edge.
     c.saveGState()
-    c.addPath(circle(holeR))
+    c.addPath(casePath)
+    c.setLineWidth(6)
+    c.replacePathWithStrokedPath()
     c.clip()
-    c.drawLinearGradient(background, start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 100), options: [])
+    c.drawLinearGradient(
+        gradient([color(0xFFFFFF, 0.9), color(0xFFFFFF, 0.1)], [0, 1]),
+        start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 500), options: [])
     c.restoreGState()
-    c.addPath(circle(holeR))
-    c.setLineWidth(4)
-    c.setStrokeColor(color(0x5F6977, 0.7))
+    c.addPath(casePath)
+    c.setLineWidth(2)
+    c.setStrokeColor(color(0x8C96A3, 0.6))
     c.strokePath()
 }
 
