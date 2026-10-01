@@ -209,9 +209,13 @@ The same pattern as macOS:
 - **Show the icon**, **Stop**, and **Restart** behave as on macOS, through the
   same exit codes. ARFABIT's own way of restarting on Windows, starting a fresh
   copy and exiting, is kept for development builds only.
-- **Start at login** is a Task Scheduler entry at logon, as today, but created
-  and removed by the shell, pointing at the shell. It follows the same setting
-  in ARFABIT's state as on macOS, and has no restart on exit.
+- **Start at login** is a value under the person's own Run key
+  (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`), written and removed
+  by the shell, pointing at the shell. It follows the same setting in
+  ARFABIT's state as on macOS, and has no restart on exit. It is what Task
+  Manager → Startup apps and Settings → Apps → Startup show and switch off,
+  the Windows counterpart of macOS's Login Items: switched off there, the
+  shell sees it and reports it, so the page never disagrees with Windows.
 
 Written in C# against **.NET Framework 4.8, with WinForms' `NotifyIcon`**:
 
@@ -518,7 +522,7 @@ Replacing the program:
   programs and starts the new shell. The update is the same installer as a
   first install, so there is one way files get onto the computer, not two.
 
-The login item and the scheduled task point at a path that does not change, so
+The login item and the Run key point at a path that does not change, so
 starting at login keeps working. Neither platform shows its first-open warning
 again, because the download did not come through a browser.
 
@@ -599,7 +603,7 @@ installing again carries on where it left off.
 | | How |
 |---|---|
 | macOS | Settings → **Remove ARFABIT from this computer**, which removes the login item and moves the app to the Trash |
-| Windows | Installed apps, as for any other program. The installer's uninstaller removes the scheduled task |
+| Windows | Installed apps, as for any other program. The installer's uninstaller removes the Run key value |
 | Linux | `sudo apt remove arfabit`, or `sudo dnf remove arfabit`, which stops and disables the service |
 
 On Linux, `/var/lib/arfabit` and the `arfabit` account stay, even on
@@ -620,7 +624,7 @@ internal/autostart/            removed: the shells and the Linux package take th
 shell/
   macos/                       the Swift menu bar app: icon, login item, Info.plist;
                                build.sh makes the universal .app and the .dmg in dist/
-  windows/                     the C# notification area app: icon, scheduled task
+  windows/                     the C# notification area app: icon, Run key
 packaging/
   windows/                     Inno Setup script
   linux/                       arfabit.service, app menu entry, account and group setup, nfpm config
@@ -644,7 +648,8 @@ served from ARFABIT's domain.
 | Linux | no shell and no icon; a system service as its own `arfabit` account, set up and started by the package, as Plex does |
 | Linux permissions | the person's to give; ARFABIT checks and shows the command, in a welcome on the first screen and in the install instructions |
 | Linux library | `/var/lib/arfabit/library`, readable by everyone, changeable by the `arfabit` group |
-| Starting at login | the shell: `SMAppService` on macOS (13 and later), a scheduled task on Windows; `internal/autostart` removed |
+| Starting at login | the shell: `SMAppService` on macOS (13 and later), the person's Run key on Windows; `internal/autostart` removed |
+| The page on the network | stays open to every network with no password, said plainly in the Linux install instructions |
 | Settings that refuse unsigned programs | the person's choice; not worked around |
 | Signing | none paid for now; a free self-made certificate on macOS; `latest.json`, holding each download's checksum, signed with Ed25519 |
 | ARFABIT and its shell | a `-shell` flag, a ready line, and exit codes 0, 75, and anything else (§1); the shell installs updates |
@@ -667,16 +672,8 @@ To be tested on a real machine before it is relied on:
 - **Inno Setup** on GitHub's Windows runners: already there, or installed in
   the job (§7).
 
-To decide:
-
-- **Windows login item.** A scheduled task, as now, or the per-person Run key.
-  The Run key is what Task Manager → Startup apps and Settings → Apps → Startup
-  show and switch off, which is the Windows counterpart of the macOS Login
-  Items switch (§3). It reverses `ARCHITECTURE.md` §13.
-- **The page on the network.** ARFABIT listens on every network with no
-  password. On a Linux server started at boot, anyone on the network can use
-  the page. Either that stays, said plainly in the install instructions, or
-  the default changes.
+To decide: nothing at present. The Windows login item (the Run key, not a
+scheduled task) and the page on the network (it stays open) were decided here.
 
 The MakeMKV key step and fetching the current beta key, which the Linux
 welcome relies on, are app work, described in `ARCHITECTURE.md` §14.
@@ -711,7 +708,7 @@ A change to anything here that touches those sections changes both documents.
    the exit codes (§1). All are needed by everything after.
 2. The macOS app: the Swift shell, its login item, the bundle, moving to
    Applications, the self-made certificate, the `.dmg`.
-3. Windows: the C# shell, its scheduled task, the installer.
+3. Windows: the C# shell, its Run key, the installer.
 4. Updates on macOS and Windows, with the signed `latest.json`.
 5. Linux: the `arfabit` account and service, `systemctl status`, packages, the
    repository, `install-service` for the `.tar.gz`, restarting on reload.

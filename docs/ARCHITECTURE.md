@@ -182,7 +182,7 @@ keeps the drive spinning.
 | OCR       | A reader the computer already has     | Vision on macOS, Windows.Media.Ocr on Windows, Tesseract elsewhere if installed. See §10.       |
 | Metadata  | **Offline IMDb index**                | No network at rip time. See §11.                                                                |
 | Shell     | Swift on macOS, C# on Windows, none on Linux | Packaging around the Go binary: icon, starting at login, installing updates. Talks to ARFABIT as the page does. See `docs/RELEASE.md`. |
-| Autostart | The shell; on Linux, the package      | `SMAppService` / a scheduled task / a systemd system service. See §13.                          |
+| Autostart | The shell; on Linux, the package      | `SMAppService` / the Run key / a systemd system service. See §13.                          |
 | Release   | `.dmg`, Inno Setup installer, `.deb` and `.rpm` | Built by GitHub Actions on a tag. See `docs/RELEASE.md`.                             |
 | Docker    | **Not used**                          | Cannot pass an optical drive through Docker Desktop on macOS or Windows.                        |
 
@@ -1025,7 +1025,7 @@ ARFABIT itself holds no login-item code.
 | Platform | Mechanism | Note |
 | -------- | --------- | ---- |
 | macOS    | The shell registers itself with `SMAppService` (macOS 13 and later) | Runs in the person's session, which drive and folder access need. Listed in System Settings → Login Items |
-| Windows  | The shell makes a Task Scheduler entry at logon, pointing at itself | Whether a Run key would serve better is open (`docs/RELEASE.md` §10) |
+| Windows  | The shell writes a value under the person's Run key, pointing at itself | Listed in Task Manager → Startup apps and Settings → Apps → Startup |
 | Linux    | A systemd **system** service, as its own `arfabit` account, set up by the package | Runs from boot, whether anyone is logged in or not. No toggle: the page says how to turn it off |
 
 None of them restarts ARFABIT unless it asks to be, deliberately: otherwise Stop
