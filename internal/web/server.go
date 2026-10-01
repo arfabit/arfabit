@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -72,6 +73,12 @@ type Server struct {
 	// about, until they change.
 	hashes pipeline.Hashes
 
+	// login is the app's latest report on Start at login, and status the
+	// last status line sent to it (shell.go).
+	shellMu sync.Mutex
+	login   *LoginReport
+	status  string
+
 	// building guards the film list download. A button can be clicked twice;
 	// the server is where "once" has to be true. Projects need no such guard:
 	// they are jobs, and the queue decides when they run.
@@ -107,6 +114,7 @@ func New(cfg config.Config, st *store.Store, runner *pipeline.Runner, backend *m
 	// reloads underneath the reader (§14).
 	runner.OnUpdate = func(job *pipeline.Job) {
 		s.events.send("job", job)
+		s.sendStatus()
 
 		// A disc that has been ejected or a job that has ended changes what
 		// is in the drive, and is the moment to look rather than a timer.
@@ -180,6 +188,10 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("POST /api/restart", s.handleRestart)
 	mux.HandleFunc("POST /api/quit", s.handleQuit)
+
+	mux.HandleFunc("GET /api/shell", s.handleShell)
+	mux.HandleFunc("POST /api/shell/settings", s.handleShellSettings)
+	mux.HandleFunc("POST /api/shell/login", s.handleLoginReport)
 
 	mux.HandleFunc("GET /api/autostart", s.handleAutostart)
 	mux.HandleFunc("POST /api/autostart", s.handleSetAutostart)

@@ -3137,11 +3137,78 @@ async function loadConversionLimit() {
 }
 
 async function loadAutostart() {
+  // Started by ARFABIT's app, the app keeps the login item, and this page
+  // only changes the setting it follows.
+  const shell = await fetch("/api/shell").then((r) => r.json());
+  if (shell.shell) {
+    renderShell(shell);
+    return;
+  }
+
   const status = await fetch("/api/autostart").then((r) => r.json());
   $("autostart").checked = !!status.enabled;
   $("autostart-detail").textContent = status.enabled
     ? `Set up through your computer's ${status.mechanism}.`
     : "";
+}
+
+// renderShell shows the settings ARFABIT's app follows, and what the
+// computer did with Start at login as the app last found it, so this page
+// never disagrees with the computer's own settings.
+function renderShell(shell) {
+  if (!shell.shell) return;
+  const mac = shell.platform === "darwin";
+
+  const login = shell.login;
+  $("autostart").checked = login ? Boolean(login.enabled) : Boolean(shell.start_at_login);
+  $("autostart-detail").replaceChildren(document.createTextNode(loginWords(shell, mac)));
+  if (login && login.detail) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = "Technical details";
+    const pre = document.createElement("pre");
+    pre.textContent = login.detail;
+    details.append(summary, pre);
+    $("autostart-detail").append(details);
+  }
+
+  show("icon-setting", true);
+  $("show-icon").checked = Boolean(shell.show_icon);
+  $("show-icon-label").textContent = mac
+    ? "Show ARFABIT in the menu bar"
+    : "Show ARFABIT's icon in the notification area";
+  $("show-icon-detail").textContent = shell.show_icon
+    ? ""
+    : "To come back to this page, open ARFABIT again.";
+}
+
+// loginWords says what the computer did with Start at login, in its own
+// settings' words. States not listed here are shown as the computer named
+// them, rather than guessed at.
+function loginWords(shell, mac) {
+  const login = shell.login;
+  const away = mac
+    ? " To keep ARFABIT running with nobody at this Mac, turn on automatic login in System Settings → Users & Groups."
+    : "";
+  if (!login) {
+    return shell.start_at_login ? "Setting this up." : "";
+  }
+
+  if (!mac) {
+    return login.enabled ? "ARFABIT starts when you log in." : "";
+  }
+  switch (login.state) {
+    case "enabled":
+      return "ARFABIT starts when you log in. It is also listed in System Settings → General → Login Items." + away;
+    case "requiresApproval":
+      return "Your Mac is waiting for you to allow this. Turn ARFABIT on in System Settings → General → Login Items.";
+    case "notRegistered":
+      return shell.start_at_login ? "Your Mac did not add ARFABIT to its login items." : "";
+    case "notFound":
+      return "Your Mac could not find ARFABIT to add it to its login items.";
+    default:
+      return `Your Mac reports: ${login.state}.`;
+  }
 }
 
 async function loadIndexStatus() {
@@ -3285,6 +3352,7 @@ function connect() {
       case "log": appendLog([JSON.parse(data)]); break;
       case "index": renderIndexStatus(JSON.parse(data)); break;
       case "drives": renderDrives(JSON.parse(data)); break;
+      case "shell": renderShell(JSON.parse(data)); break;
       case "connection": $("connection").hidden = data; break;
     }
   };
@@ -3299,7 +3367,7 @@ function connect() {
       handle(name, data);
       if (channel) channel.postMessage({ name, data });
     };
-    for (const name of ["job", "log", "index", "drives"]) {
+    for (const name of ["job", "log", "index", "drives", "shell"]) {
       events.addEventListener(name, (e) => pass(name, e.data));
     }
     // EventSource reconnects on its own; a brief drop is not worth reporting.
@@ -3383,7 +3451,19 @@ function wireButtons() {
     $("log").scrollTop = $("log").scrollHeight;
   });
 
+  on("show-icon", "change", async (e) => {
+    const shell = await post("/api/shell/settings", { show_icon: e.target.checked });
+    if (shell) renderShell(shell);
+  });
+
   on("autostart", "change", async (e) => {
+    // The app answers with what the computer did, as a "shell" event.
+    if (startedByApp) {
+      const shell = await post("/api/shell/settings", { start_at_login: e.target.checked });
+      if (shell) renderShell(shell);
+      return;
+    }
+
     const status = await post("/api/autostart", { enabled: e.target.checked });
     if (status) {
       $("autostart").checked = !!status.enabled;

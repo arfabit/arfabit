@@ -270,8 +270,9 @@ arfabit/
     web/
       server.go  pages.go  events.go  drives.go
       templates/  static/
-  shell/                       not built: the macOS and Windows shells
-    macos/  windows/
+  shell/                       the macOS and Windows shells
+    macos/                     the Swift menu bar app, Info.plist, build.sh for the .app and .dmg
+    windows/                   not built
   packaging/                   not built: Inno Setup script; systemd unit and nfpm config
     windows/  linux/
   docs/
@@ -298,6 +299,7 @@ No locking, no SQLite-over-NFS corruption, no coordination.
     <node-id>/
       calibration.json            # estimator model (§12)
       drives.json                 # what each drive does when a disc goes in (§14)
+      shell.json                  # Show the icon and Start at login, which the app follows
       jobs/<job-id>.json
       log/<job-id>.txt
   library/
@@ -1325,7 +1327,8 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Doctor | built; the MakeMKV key step and fetching the beta key are not (§14) |
 | Autostart on all three platforms | built; to be replaced by the shells and the Linux package (§13) |
 | Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
-| Releases: shells, packages, updates (`docs/RELEASE.md`) | not built |
+| The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built, signed ad hoc; not yet run, and not signed with the self-made certificate |
+| Releases: the Windows shell, packages, updates (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
 
