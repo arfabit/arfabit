@@ -623,6 +623,7 @@ internal/restart/              also restarts into a newly installed version
 internal/autostart/            removed: the shells and the Linux package take this over
 shell/
   macos/                       the Swift menu bar app: icon, login item, Info.plist;
+                               icon/make-icon.swift draws the app's icon;
                                build.sh makes the universal .app and the .dmg in dist/
   windows/                     the C# notification area app: icon, Run key
 packaging/

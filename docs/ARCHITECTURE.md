@@ -271,7 +271,7 @@ arfabit/
       server.go  pages.go  events.go  drives.go
       templates/  static/
   shell/                       the macOS and Windows shells
-    macos/                     the Swift menu bar app, Info.plist, build.sh for the .app and .dmg
+    macos/                     the Swift menu bar app, Info.plist, its icon, build.sh for the .app and .dmg
     windows/                   the C# notification area app (.NET Framework 4.8)
   packaging/
     windows/                   Inno Setup script, build.ps1 for the shell and installer
@@ -1328,7 +1328,7 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Doctor | built; the MakeMKV key step and fetching the beta key are not (§14) |
 | Autostart on all three platforms | built; to be replaced by the shells and the Linux package (§13) |
 | Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
-| The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built, signed ad hoc; not yet run, and not signed with the self-made certificate |
+| The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built and run on a Mac; signing with the self-made certificate not yet tried |
 | The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | written; never built or run |
 | Releases: Linux packages, updates (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |

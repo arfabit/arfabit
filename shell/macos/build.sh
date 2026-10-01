@@ -55,6 +55,10 @@ sed -e "s/__VERSION__/$VERSION/g" -e "s/__SHORT_VERSION__/$SHORT/g" \
   shell/macos/Info.plist > "$APP/Contents/Info.plist"
 cp "$WORK/shell" "$APP/Contents/MacOS/ARFABIT"
 cp "$WORK/core" "$APP/Contents/Resources/arfabit"
+
+# The icon, drawn by a small program of its own.
+swiftc -O -module-cache-path "$WORK/module-cache" -o "$WORK/make-icon" shell/macos/icon/make-icon.swift
+"$WORK/make-icon" "$APP/Contents/Resources/AppIcon.icns"
 plutil -lint "$APP/Contents/Info.plist" > /dev/null
 
 # Signing: ARFABIT inside first, then the app around it.
