@@ -44,6 +44,12 @@ namespace Arfabit.Shell
         LoginItem.Report lastReport;
         readonly Timer loginTimer = new Timer { Interval = 30000 };
 
+        // Start at login as this app last acted on it, and whether Windows has
+        // had it on since. The app acts only when the setting changes: a change
+        // made in Startup apps is the person's, and is followed, never undone.
+        bool? loginSetting;
+        bool sawLoginOn;
+
         public Shell()
         {
             ui.CreateControl();
@@ -69,7 +75,7 @@ namespace Arfabit.Shell
 
             // Turned off in Startup apps rather than on the page: noticed here
             // and reported, so the page never disagrees with Windows.
-            loginTimer.Tick += (s, e) => Report(LoginItem.Current());
+            loginTimer.Tick += (s, e) => Observe(LoginItem.Current());
 
             Start();
         }
@@ -172,7 +178,51 @@ namespace Arfabit.Shell
             icon.Visible = Flag(state, "show_icon");
             object line;
             if (state.TryGetValue("status", out line) && line is string) status.Text = (string)line;
-            Report(LoginItem.Apply(Flag(state, "start_at_login")));
+
+            var wanted = Flag(state, "start_at_login");
+            if (loginSetting == null)
+            {
+                // The first word since the app opened. On in the setting but
+                // not in Windows means it was taken off meanwhile, and the
+                // setting follows.
+                loginSetting = wanted;
+                var now = LoginItem.Current();
+                if (wanted && !now.Enabled)
+                {
+                    FollowSystem();
+                    Report(now);
+                }
+                else
+                {
+                    Report(LoginItem.Apply(wanted));
+                }
+            }
+            else if (loginSetting.Value == wanted)
+            {
+                // Not a change: an echo of a report, a refresh, or the other
+                // setting changing.
+                Observe(LoginItem.Current());
+            }
+            else
+            {
+                // Changed on the page or in the menu: the person asked.
+                loginSetting = wanted;
+                Report(LoginItem.Apply(wanted));
+            }
+        }
+
+        // Observe notices the login item being removed or switched off in
+        // Startup apps, and turns the setting off to match.
+        void Observe(LoginItem.Report now)
+        {
+            if (loginSetting == true && sawLoginOn && !now.Enabled) FollowSystem();
+            Report(now);
+        }
+
+        void FollowSystem()
+        {
+            loginSetting = false;
+            if (api != null) api.Post("api/shell/settings", new Dictionary<string, object> { { "start_at_login", false } }, null);
         }
 
         static bool Flag(Dictionary<string, object> state, string name)
@@ -186,6 +236,7 @@ namespace Arfabit.Shell
         void Report(LoginItem.Report report)
         {
             login.Checked = report.Enabled;
+            sawLoginOn = report.Enabled;
             if (report.Same(lastReport)) return;
             lastReport = report;
             if (api != null) api.Post("api/shell/login", report.Body(), null);

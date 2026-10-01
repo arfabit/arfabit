@@ -20,10 +20,10 @@ enum LoginItem {
     }
 
     /// Makes the login item match the setting, and says what macOS made of it.
+    /// Called only when the person has just changed the setting.
     ///
-    /// A login item the person has turned off in System Settings is waiting
-    /// for their approval there. It is left as it is: turning it back on is
-    /// theirs to do, and the page says where.
+    /// A login item switched off in System Settings can only be switched on
+    /// there, so asking for it opens that page.
     static func apply(_ wanted: Bool) -> Report {
         let service = SMAppService.mainApp
         var detail: String?
@@ -31,6 +31,8 @@ enum LoginItem {
             switch (wanted, service.status) {
             case (true, .notRegistered), (true, .notFound):
                 try service.register()
+            case (true, .requiresApproval):
+                SMAppService.openSystemSettingsLoginItems()
             case (false, .enabled), (false, .requiresApproval):
                 try service.unregister()
             default:

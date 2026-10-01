@@ -41,12 +41,21 @@ namespace Arfabit.Shell
         }
 
         // Apply makes the Run key match the setting, and says what Windows made
-        // of it.
+        // of it. Called only when the person has just changed the setting.
+        //
+        // An app switched off in Startup apps can only be switched on there,
+        // so asking for it opens that page.
         public static Report Apply(bool wanted)
         {
             string detail = null;
             try
             {
+                if (wanted && Current().State == "disabled")
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ms-settings:startupapps") { UseShellExecute = true });
+                    return Current();
+                }
+
                 using (var key = Registry.CurrentUser.CreateSubKey(RunKey))
                 {
                     if (wanted)

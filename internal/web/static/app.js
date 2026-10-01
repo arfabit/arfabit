@@ -3199,7 +3199,9 @@ function loginWords(shell, mac) {
       case "enabled":
         return "ARFABIT starts when you log in. It is also listed in Task Manager → Startup apps.";
       case "disabled":
-        return "ARFABIT is switched off in Windows's startup apps. Switch it on in Task Manager → Startup apps.";
+        return shell.start_at_login
+          ? "ARFABIT is switched off in Windows's startup apps. Switch it on in Task Manager → Startup apps."
+          : "";
       case "notRegistered":
         return shell.start_at_login ? "Windows did not add ARFABIT to its startup apps." : "";
       default:
@@ -3210,7 +3212,11 @@ function loginWords(shell, mac) {
     case "enabled":
       return "ARFABIT starts when you log in. It is also listed in System Settings → General → Login Items." + away;
     case "requiresApproval":
-      return "Your Mac is waiting for you to allow this. Turn ARFABIT on in System Settings → General → Login Items.";
+      // Off on the page too: switched off in System Settings, as the
+      // person wanted.
+      return shell.start_at_login
+        ? "Your Mac is waiting for you to allow this. Turn ARFABIT on in System Settings → General → Login Items."
+        : "";
     case "notRegistered":
       return shell.start_at_login ? "Your Mac did not add ARFABIT to its login items." : "";
     case "notFound":

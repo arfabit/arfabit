@@ -20,6 +20,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastReport: LoginItem.Report?
     private var loginTimer: Timer?
 
+    /// Start at login as this app last acted on it, and whether macOS has
+    /// had it on since. The app acts only when the setting changes: a change
+    /// made in System Settings is the person's, and is followed, never undone.
+    private var loginSetting: Bool?
+    private var sawLoginOn = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         if MoveToApplications.offerIfNeeded() {
             NSApp.terminate(nil)
@@ -74,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and reported, so the page never disagrees with macOS.
         loginTimer?.invalidate()
         loginTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.report(LoginItem.current())
+            self?.observe(LoginItem.current())
         }
     }
 
@@ -82,12 +88,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func follow(_ state: ShellState) {
         menu.setShown(state.showIcon)
         menu.setStatus(state.status)
-        report(LoginItem.apply(state.startAtLogin))
+
+        switch loginSetting {
+        case nil:
+            // The first word since the app opened. A login item that is on
+            // in the setting but not in macOS was taken off in System
+            // Settings meanwhile, and the setting follows.
+            loginSetting = state.startAtLogin
+            let now = LoginItem.current()
+            if state.startAtLogin && !now.enabled {
+                followSystem()
+                report(now)
+            } else {
+                report(LoginItem.apply(state.startAtLogin))
+            }
+        case state.startAtLogin:
+            // Not a change: this is an echo of a report, a refresh, or the
+            // other setting changing.
+            observe(LoginItem.current())
+        default:
+            // Changed on the page or in the menu: the person asked.
+            loginSetting = state.startAtLogin
+            report(LoginItem.apply(state.startAtLogin))
+        }
+    }
+
+    /// Notices the login item being removed or switched off in System
+    /// Settings, and turns the setting off to match.
+    private func observe(_ now: LoginItem.Report) {
+        if loginSetting == true && sawLoginOn && !now.enabled {
+            followSystem()
+        }
+        report(now)
+    }
+
+    private func followSystem() {
+        loginSetting = false
+        api?.post("api/shell/settings", ["start_at_login": false])
     }
 
     /// Tells ARFABIT what macOS did with Start at login, when that has changed.
     private func report(_ report: LoginItem.Report) {
         menu.setStartsAtLogin(report.enabled)
+        sawLoginOn = report.enabled
         guard report != lastReport else { return }
         lastReport = report
         api?.post("api/shell/login", report.body)
