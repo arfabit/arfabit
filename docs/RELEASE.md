@@ -420,9 +420,13 @@ signing can be added later without changing anything else here.
 ### Linux
 
 - **A package repository** for apt (Debian, Ubuntu, Mint) and dnf (Fedora),
-  served as static files from ARFABIT's own domain through Cloudflare, from a
-  repository of its own. It is signed with ARFABIT's own key, which is free;
-  apt and dnf refuse a repository that is not. Updates come with the rest of
+  served as static files by GitHub Pages from a repository of its own,
+  `arfabit/packages`, at `https://arfabit.github.io/packages/`. It keeps the
+  last five versions; every version stays on GitHub Releases. It is signed
+  with ARFABIT's own GPG key, which is free; apt and dnf refuse a repository
+  that is not. Pages allows about 1 GB and 100 GB of downloads a month; past
+  that, the same files move to ARFABIT's own domain, and GitHub forwards the
+  old address there. Updates come with the rest of
   the system's updates, which is goal 2 done the Linux way.
 - **Installing is opening one file.** The `.deb` and `.rpm` are also on GitHub
   Releases. Opened from the browser, the system's Software app installs it,
@@ -482,8 +486,9 @@ nothing is running, as the existing restart does.
 ### Finding out
 
 Once a day, and when **Check for updates** is pressed in Settings, ARFABIT asks
-ARFABIT's own domain what the newest version is: one small file,
-`latest.json`, naming the version, what changed, and where each platform's
+GitHub Releases what the newest version is: one small file, `latest.json`,
+attached to every release and fetched from
+`https://github.com/arfabit/arfabit/releases/latest/download/latest.json`, naming the version, what changed, and where each platform's
 download is, with each download's checksum. The daily check is on by default
 and can be turned off. It is the only contact ARFABIT makes that the person did
 not ask for, and Settings says so beside it. Nothing is sent except the request
@@ -492,8 +497,10 @@ itself.
 A copy installed by apt or dnf makes no such check: the system's own updates
 already do it (Linux, below).
 
-A file on ARFABIT's own domain, rather than GitHub's API, so that where releases
-are kept can change without changing what older versions ask.
+A file, rather than GitHub's API, so that it is one plain fetch, and signed, so
+that where it is kept does not matter to whether it can be trusted. That
+address is built into every copy: if releases ever move from GitHub, a last
+release there points onward.
 
 ### macOS and Windows
 
@@ -639,8 +646,21 @@ packaging/
 .github/workflows/release.yml
 ```
 
-The package repository and `latest.json` live in a repository of their own,
-served from ARFABIT's domain.
+`latest.json` is attached to each release on GitHub. The package repository
+lives in `arfabit/packages`, served by GitHub Pages.
+
+Keys, each made once by a script and kept out of git, in GitHub secrets and in
+a copy the maintainer keeps:
+
+```
+packaging/keys/updatekey/      Ed25519 key for latest.json; public half in
+                               internal/update/public.key, private in
+                               ARFABIT_UPDATE_KEY
+packaging/keys/make-repo-key.sh  GPG key for the repository; public half in
+                               packaging/linux/arfabit.asc, private in
+                               ARFABIT_REPO_KEY
+shell/macos/make-certificate.sh  the Mac's self-made signing certificate
+```
 
 ---
 
@@ -663,7 +683,8 @@ served from ARFABIT's domain.
 | ARFABIT and its shell | a `-shell` flag, a ready line, and exit codes 0, 75, and anything else (§1); the shell installs updates |
 | Linux packages | on GitHub Releases as well as the repository, adding the repository when installed; no `latest.json` check; `systemctl reload` after an upgrade |
 | Windows installer | Inno Setup |
-| Linux repository | its own domain and repository, through Cloudflare |
+| Linux repository | `arfabit/packages`, on GitHub Pages; ARFABIT's own domain only if Pages' limits are reached |
+| `latest.json` | attached to each GitHub release, fetched from `releases/latest/download/latest.json` |
 | Updates | daily check on; installing by themselves when nothing is running, on |
 | Version | semantic, from `v0.1.0` |
 

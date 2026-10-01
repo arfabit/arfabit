@@ -7,6 +7,11 @@ temp/
 /dist/
 /build/
 
+# Private keys never belong here; the scripts write them to ~/arfabit-keys
+*private*.key
+*private*.asc
+*.p12
+
 # Local state and configuration
 config.toml
 /data/
