@@ -10,9 +10,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let menu = StatusMenu()
     private var api: API?
 
-    /// The page is opened once per run of the app, not again after a restart:
-    /// a page already open reconnects by itself.
-    private var openedPage = false
+    /// The page is opened once per run of the app, unless Hide on startup is
+    /// on, and not again after a restart: a page already open reconnects by
+    /// itself. Opening the app again while it runs always opens it.
+    private var startedOnce = false
 
     /// The app is quitting, and waiting for ARFABIT to finish first.
     private var quitting = false
@@ -71,9 +72,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         api.connect()
         self.api = api
 
-        if !openedPage {
-            openedPage = true
-            openPage()
+        if !startedOnce {
+            startedOnce = true
+            // Without an answer, the page opens as it always has.
+            api.fetch { [weak self] state in
+                if state?.hideOnStart != true {
+                    self?.openPage()
+                }
+            }
         }
 
         // Turned off in System Settings rather than on the page: noticed here

@@ -25,8 +25,8 @@ func readShell(t *testing.T, rec *httptest.ResponseRecorder) shellState {
 func TestShellSettingsStartShownAndNotAtLogin(t *testing.T) {
 	state := readShell(t, get(t, newTestServer(t), "/api/shell"))
 
-	if !state.ShowIcon || state.StartAtLogin {
-		t.Errorf("settings = %+v, want the icon shown and nothing at login", state.ShellSettings)
+	if !state.ShowIcon || state.StartAtLogin || state.HideOnStart {
+		t.Errorf("settings = %+v, want the icon shown, nothing at login, and the page opened on start", state.ShellSettings)
 	}
 	if state.Login != nil {
 		t.Errorf("login = %+v before the app has reported", state.Login)
@@ -40,10 +40,11 @@ func TestShellSettingsChangeOneAtATime(t *testing.T) {
 	s := newTestServer(t)
 
 	readShell(t, post(t, s, "/api/shell/settings", `{"start_at_login":true}`))
+	readShell(t, post(t, s, "/api/shell/settings", `{"hide_on_start":true}`))
 	state := readShell(t, post(t, s, "/api/shell/settings", `{"show_icon":false}`))
 
-	if state.ShowIcon || !state.StartAtLogin {
-		t.Errorf("settings = %+v, want the icon hidden and started at login", state.ShellSettings)
+	if state.ShowIcon || !state.StartAtLogin || !state.HideOnStart {
+		t.Errorf("settings = %+v, want the icon hidden, started at login, and the page not opened on start", state.ShellSettings)
 	}
 
 	// Kept in the node's own state, so a restart finds them.

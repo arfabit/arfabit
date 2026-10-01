@@ -3174,6 +3174,7 @@ function renderShell(shell) {
 
   show("icon-setting", true);
   $("show-icon").checked = Boolean(shell.show_icon);
+  $("hide-on-start").checked = Boolean(shell.hide_on_start);
   $("show-icon-label").textContent = mac
     ? "Show ARFABIT in the menu bar"
     : "Show ARFABIT's icon in the notification area";
@@ -3464,6 +3465,11 @@ function wireButtons() {
     $("log-follow").checked = true;
     $("log-jump").hidden = true;
     $("log").scrollTop = $("log").scrollHeight;
+  });
+
+  on("hide-on-start", "change", async (e) => {
+    const shell = await post("/api/shell/settings", { hide_on_start: e.target.checked });
+    if (shell) renderShell(shell);
   });
 
   on("show-icon", "change", async (e) => {

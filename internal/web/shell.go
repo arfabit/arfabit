@@ -68,12 +68,14 @@ func (s *Server) handleShell(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.shellState())
 }
 
-// handleShellSettings changes Show the icon or Start at login, from the page
-// or from the app's own menu. Either may be left out to leave it as it is.
+// handleShellSettings changes Show the icon, Start at login or Hide on
+// startup, from the page or from the app's own menu. Any may be left out to
+// leave it as it is.
 func (s *Server) handleShellSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ShowIcon     *bool `json:"show_icon"`
 		StartAtLogin *bool `json:"start_at_login"`
+		HideOnStart  *bool `json:"hide_on_start"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, "ARFABIT could not read that change.", err)
@@ -86,6 +88,9 @@ func (s *Server) handleShellSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.StartAtLogin != nil {
 			c.StartAtLogin = *req.StartAtLogin
+		}
+		if req.HideOnStart != nil {
+			c.HideOnStart = *req.HideOnStart
 		}
 	})
 	if err != nil {

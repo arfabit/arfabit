@@ -5,11 +5,13 @@ import Foundation
 struct ShellState: Decodable {
     var showIcon: Bool
     var startAtLogin: Bool
+    var hideOnStart: Bool
     var status: String
 
     enum CodingKeys: String, CodingKey {
         case showIcon = "show_icon"
         case startAtLogin = "start_at_login"
+        case hideOnStart = "hide_on_start"
         case status
     }
 }
@@ -59,11 +61,19 @@ final class API: NSObject, URLSessionDataDelegate {
 
     /// Asks for the settings and status line again.
     func refresh() {
+        fetch { [weak self] state in
+            if let state { self?.onShell?(state) }
+        }
+    }
+
+    /// Fetches the settings and status line, and calls back on the main queue
+    /// with them, or nil if ARFABIT did not answer.
+    func fetch(_ done: @escaping (ShellState?) -> Void) {
         var request = URLRequest(url: base.appendingPathComponent("api/shell"))
         request.timeoutInterval = 5
-        session.dataTask(with: request) { [weak self] data, _, _ in
-            guard let data, let state = try? JSONDecoder().decode(ShellState.self, from: data) else { return }
-            DispatchQueue.main.async { self?.onShell?(state) }
+        session.dataTask(with: request) { data, _, _ in
+            let state = data.flatMap { try? JSONDecoder().decode(ShellState.self, from: $0) }
+            DispatchQueue.main.async { done(state) }
         }.resume()
     }
 

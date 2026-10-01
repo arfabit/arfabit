@@ -353,6 +353,10 @@ The status line comes from the same live events the page uses.
 own state. Both shells follow it. Hidden, ARFABIT keeps running, and opening
 ARFABIT again (the app, or the Start menu entry) opens the page.
 
+**Hide on startup** is beside it, off by default. On, the shell does not open
+the page when it starts, whether opened by hand or at login. Opening ARFABIT
+again while it runs still opens the page.
+
 "Stop", not "Quit", to match the page's own button. `ARCHITECTURE.md` §15's
 word list already makes it *stop* for abort and kill.
 

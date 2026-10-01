@@ -300,7 +300,7 @@ No locking, no SQLite-over-NFS corruption, no coordination.
     <node-id>/
       calibration.json            # estimator model (§12)
       drives.json                 # what each drive does when a disc goes in (§14)
-      shell.json                  # Show the icon and Start at login, which the app follows
+      shell.json                  # Show the icon, Start at login, Hide on startup: what the app follows
       jobs/<job-id>.json
       log/<job-id>.txt
   library/

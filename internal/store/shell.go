@@ -17,10 +17,15 @@ type ShellSettings struct {
 
 	// StartAtLogin has the app start when the person logs in.
 	StartAtLogin bool `json:"start_at_login"`
+
+	// HideOnStart keeps the page closed when the app starts. Opening the app
+	// again while it runs still opens the page.
+	HideOnStart bool `json:"hide_on_start"`
 }
 
-// DefaultShellSettings are a new computer's: the icon shown, and nothing
-// started at login until the person asks for it.
+// DefaultShellSettings are a new computer's: the icon shown, the page opened
+// when the app starts, and nothing started at login until the person asks for
+// it.
 var DefaultShellSettings = ShellSettings{ShowIcon: true}
 
 var shellMu sync.Mutex

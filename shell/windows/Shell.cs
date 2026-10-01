@@ -37,9 +37,11 @@ namespace Arfabit.Shell
         string url;
         Api api;
 
-        // The page is opened once per run of the app, not again after a
-        // restart: a page already open reconnects by itself.
-        bool openedPage;
+        // The page is opened once per run of the app, unless Hide on startup
+        // is on, and not again after a restart: a page already open reconnects
+        // by itself. Opening the app again while it runs always opens it.
+        bool startedOnce;
+        bool deciding;
 
         LoginItem.Report lastReport;
         readonly Timer loginTimer = new Timer { Interval = 30000 };
@@ -163,10 +165,11 @@ namespace Arfabit.Shell
             api.Status += line => ui.BeginInvoke(new Action(() => status.Text = line));
             api.Connect();
 
-            if (!openedPage)
+            if (!startedOnce)
             {
-                openedPage = true;
-                OpenPage();
+                // Decided once the settings arrive, in Follow.
+                startedOnce = true;
+                deciding = true;
             }
             loginTimer.Start();
         }
@@ -176,6 +179,11 @@ namespace Arfabit.Shell
         {
             if (state == null) return;
             icon.Visible = Flag(state, "show_icon");
+            if (deciding)
+            {
+                deciding = false;
+                if (!Flag(state, "hide_on_start")) OpenPage();
+            }
             object line;
             if (state.TryGetValue("status", out line) && line is string) status.Text = (string)line;
 
