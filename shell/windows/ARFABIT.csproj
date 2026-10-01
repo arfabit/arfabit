@@ -17,12 +17,20 @@
     <Product>ARFABIT</Product>
     <Version>0.0.0</Version>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Made by packaging/icon, which build.ps1 runs first. -->
+    <ApplicationIcon>..\..\dist\windows\icons\ARFABIT.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Lets the SDK build for .NET Framework 4.8 without Visual Studio. -->
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <Reference Include="System.Web.Extensions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The plain disc in the notification area, for dark and light taskbars. -->
+    <EmbeddedResource Include="..\..\dist\windows\icons\tray-light.ico" LogicalName="tray-light.ico" />
+    <EmbeddedResource Include="..\..\dist\windows\icons\tray-dark.ico" LogicalName="tray-dark.ico" />
   </ItemGroup>
 
 </Project>

@@ -27,6 +27,10 @@ New-Item -ItemType Directory -Force (Join-Path $dist "core") | Out-Null
 
 Write-Host "ARFABIT $Version"
 
+# The icons, from the picture exported from Icon Composer.
+go run ./packaging/icon -out (Join-Path $dist "icons")
+if ($LASTEXITCODE) { throw "The icons were not made." }
+
 # ARFABIT itself, cgo off.
 $env:CGO_ENABLED = "0"
 $env:GOOS = "windows"

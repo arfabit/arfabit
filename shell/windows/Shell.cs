@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace Arfabit.Shell
 {
@@ -69,8 +71,10 @@ namespace Arfabit.Shell
             login.Click += (s, e) => Post("api/shell/settings",
                 new Dictionary<string, object> { { "start_at_login", !login.Checked } });
 
-            // No icon of ARFABIT's own yet.
-            icon.Icon = SystemIcons.Application;
+            // A plain disc, light or dark to stand out on the taskbar, as the
+            // Mac's menu bar shows one. It changes when the taskbar does.
+            icon.Icon = TrayIcon();
+            SystemEvents.UserPreferenceChanged += TaskbarMayHaveChanged;
             icon.Text = "ARFABIT";
             icon.ContextMenuStrip = menu;
             icon.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenPage(); };
@@ -80,6 +84,35 @@ namespace Arfabit.Shell
             loginTimer.Tick += (s, e) => Observe(LoginItem.Current());
 
             Start();
+        }
+
+        // TrayIcon is the disc that stands out on the taskbar as it is now:
+        // dark unless the person has chosen a light one.
+        static Icon TrayIcon()
+        {
+            var light = false;
+            using (var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+            {
+                var value = key == null ? null : key.GetValue("SystemUsesLightTheme");
+                light = value is int && (int)value == 1;
+            }
+
+            var name = light ? "tray-dark.ico" : "tray-light.ico";
+            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
+            {
+                return new Icon(stream, SystemInformation.SmallIconSize);
+            }
+        }
+
+        void TaskbarMayHaveChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            if (e.Category != UserPreferenceCategory.General) return;
+            ui.BeginInvoke(new Action(() =>
+            {
+                var old = icon.Icon;
+                icon.Icon = TrayIcon();
+                if (old != null) old.Dispose();
+            }));
         }
 
         void Start()
@@ -318,6 +351,7 @@ namespace Arfabit.Shell
         {
             if (disposing)
             {
+                SystemEvents.UserPreferenceChanged -= TaskbarMayHaveChanged;
                 icon.Dispose();
                 loginTimer.Dispose();
                 ui.Dispose();

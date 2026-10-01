@@ -38,6 +38,7 @@ Compression=lzma2
 SolidCompression=yes
 OutputDir={#Dist}
 OutputBaseFilename=ARFABIT-setup
+SetupIconFile={#Dist}\icons\ARFABIT.ico
 
 [Messages]
 SetupAppRunningError=ARFABIT is running. Stop it from its icon or from Settings on its page, then press OK.

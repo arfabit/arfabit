@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ARFABIT
+Comment=Put a disc in, get a film your Apple TV plays
+Exec=xdg-open http://localhost:7847
+Icon=arfabit
+Terminal=false
+Categories=AudioVideo;Video;

@@ -274,8 +274,9 @@ arfabit/
     macos/                     the Swift menu bar app, Info.plist, its Icon Composer icon, build.sh for the .app and .dmg
     windows/                   the C# notification area app (.NET Framework 4.8)
   packaging/
+    icon/                      ARFABIT.png exported from Icon Composer; makes the Windows and Linux icons
     windows/                   Inno Setup script, build.ps1 for the shell and installer
-    linux/                     not built: systemd unit and nfpm config
+    linux/                     the app menu entry; not built: systemd unit and nfpm config
   docs/
   temp/                        reference clones (gitignored)
 ```

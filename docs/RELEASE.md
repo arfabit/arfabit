@@ -631,6 +631,9 @@ shell/
                                build.sh makes the universal .app and the .dmg in dist/
   windows/                     the C# notification area app: icon, Run key
 packaging/
+  icon/                        ARFABIT.png, exported from Icon Composer, and the Go program
+                               that makes from it the Windows .ico files, a plain disc for
+                               the notification area, and the Linux app menu icon
   windows/                     Inno Setup script
   linux/                       arfabit.service, app menu entry, account and group setup, nfpm config
 .github/workflows/release.yml
