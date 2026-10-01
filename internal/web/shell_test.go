@@ -8,6 +8,7 @@ import (
 
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
+	"github.com/arfabit/arfabit/internal/update"
 )
 
 func readShell(t *testing.T, rec *httptest.ResponseRecorder) shellState {
@@ -88,5 +89,47 @@ func TestStatusLine(t *testing.T) {
 		if got := statusLine(c.active); got != c.want {
 			t.Errorf("statusLine = %q, want %q", got, c.want)
 		}
+	}
+}
+
+func TestUpdatesSayWhyTheyAreOff(t *testing.T) {
+	s := newTestServer(t)
+	s.UpdatesOff = "This is a development copy, built from the source. It does not update itself."
+
+	var state updateState
+	_ = json.Unmarshal(get(t, s, "/api/update").Body.Bytes(), &state)
+	if state.Off != s.UpdatesOff || state.Status != nil {
+		t.Errorf("state = %+v", state)
+	}
+
+	if rec := post(t, s, "/api/update/check", ""); rec.Code == http.StatusOK {
+		t.Error("a copy that does not update itself checked")
+	}
+}
+
+func TestUpdateSettingsChange(t *testing.T) {
+	s := newTestServer(t)
+	s.SetUpdater(&update.Updater{Dir: t.TempDir(), Current: "v0.1.0"})
+
+	rec := post(t, s, "/api/update/settings", `{"install_by_themselves":false}`)
+	var state updateState
+	_ = json.Unmarshal(rec.Body.Bytes(), &state)
+
+	if state.Settings == nil || !state.Settings.CheckDaily || state.Settings.InstallByThemselves {
+		t.Errorf("settings = %+v, want daily checks on and installing by themselves off", state.Settings)
+	}
+	if got := s.Store.UpdateSettings(); got != *state.Settings {
+		t.Errorf("saved = %+v", got)
+	}
+}
+
+func TestUpdateAndRestartNeedsSomethingStaged(t *testing.T) {
+	s := newTestServer(t)
+	s.SetUpdater(&update.Updater{Dir: t.TempDir(), Current: "v0.1.0"})
+	restarted := false
+	s.Restart = func() error { restarted = true; return nil }
+
+	if rec := post(t, s, "/api/update/install", ""); rec.Code == http.StatusOK || restarted {
+		t.Errorf("restarted with nothing to install: %d", rec.Code)
 	}
 }

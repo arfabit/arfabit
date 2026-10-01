@@ -584,6 +584,13 @@ func expand(path string) string {
 }
 
 // DefaultLocalPath is where this machine's own settings file lives.
+// DefaultDir is ARFABIT's own folder on this computer, where
+// config.local.toml lives. Unlike paths.data it is never on a NAS, so what
+// belongs to this computer alone, such as a staged update, is kept here.
+func DefaultDir() string {
+	return defaultDataDir()
+}
+
 func DefaultLocalPath() string {
 	return filepath.Join(defaultDataDir(), "config.local.toml")
 }

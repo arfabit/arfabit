@@ -290,6 +290,28 @@
       </div>
 
       <div class="setting">
+        <div>Updates</div>
+        <p id="update-status" class="muted small"></p>
+        <div id="update-ready" hidden>
+          <p id="update-notes" class="small"></p>
+          <button id="update-install" class="primary">Update and restart</button>
+        </div>
+        <div id="update-controls" hidden>
+          <button id="update-check">Check for updates</button>
+          <label class="track">
+            <input id="update-daily" type="checkbox">
+            <span>Check once a day</span>
+          </label>
+          <p class="muted small">This is the only time ARFABIT contacts anything you did not ask it to. It asks GitHub for the newest version, and sends nothing else.</p>
+          <label class="track">
+            <input id="update-auto" type="checkbox">
+            <span>Install updates by themselves</span>
+          </label>
+          <p class="muted small">Only when nothing is running. ARFABIT restarts, and this page comes back on its own.</p>
+        </div>
+      </div>
+
+      <div class="setting">
         <div>Film list</div>
         <p id="index-detail" class="muted small">Used to confirm a movie's name and find its year.</p>
         <button id="index-build">Download the film list</button>

@@ -203,6 +203,10 @@ func (s *Store) AppendLibrary(entry LibraryEntry) error {
 	return err
 }
 
+// WriteAtomic writes a file the way every state file is written here, for
+// packages that keep files of their own outside the store.
+func WriteAtomic(path string, data []byte) error { return writeAtomic(path, data) }
+
 // writeAtomic writes a file by writing a temporary one and renaming it.
 //
 // Rename is atomic on every filesystem worth using, so a reader sees either

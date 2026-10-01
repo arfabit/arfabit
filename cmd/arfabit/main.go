@@ -30,6 +30,7 @@ import (
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/restart"
 	"github.com/arfabit/arfabit/internal/store"
+	"github.com/arfabit/arfabit/internal/update"
 	"github.com/arfabit/arfabit/internal/version"
 	"github.com/arfabit/arfabit/internal/web"
 )
@@ -266,6 +267,31 @@ func run(configPath, addr string, noOpen, checkOnly, shell bool) error {
 	defer stopWatching()
 	go server.WatchDrives(watchCtx)
 
+	// New versions are found, checked and staged here, and installed by the
+	// app when nothing is running (docs/RELEASE.md §6).
+	if why := updatesOff(shell); why != "" {
+		server.UpdatesOff = why
+	} else {
+		updater := &update.Updater{
+			Dir:      filepath.Join(config.DefaultDir(), "update"),
+			Current:  version.Version,
+			Platform: runtime.GOOS,
+			URL:      update.LatestURL,
+			Key:      update.PublicKey(),
+			Client:   &http.Client{},
+		}
+		updater.Load()
+		server.SetUpdater(updater)
+
+		idle := func() bool { return len(runner.Active()) == 0 && runner.Editable() == nil }
+		go updater.Run(watchCtx, st.UpdateSettings, idle, func() {
+			if ready := updater.Status().Ready; ready != nil {
+				fmt.Printf("\nVersion %s is ready, and nothing is running.\n", ready.Version)
+			}
+			_ = server.Restart()
+		})
+	}
+
 	errs := make(chan error, 1)
 	go func() {
 		if err := httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -310,6 +336,19 @@ func run(configPath, addr string, noOpen, checkOnly, shell bool) error {
 		return errRestart
 	}
 	return nil
+}
+
+// updatesOff says why this copy does not update itself, or nothing when it
+// does. Only a release started by its app on macOS or Windows does: the app
+// is what installs an update.
+func updatesOff(shell bool) string {
+	switch {
+	case version.Dev():
+		return "This is a development copy, built from the source. It does not update itself."
+	case !shell || (runtime.GOOS != "darwin" && runtime.GOOS != "windows"):
+		return "This copy was not started by ARFABIT's app, which is what installs updates."
+	}
+	return ""
 }
 
 // readyPrefix begins the line that says ARFABIT is serving, followed by its

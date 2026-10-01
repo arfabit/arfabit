@@ -3227,6 +3227,67 @@ function loginWords(shell, mac) {
   }
 }
 
+async function loadUpdates() {
+  const state = await fetch("/api/update").then((r) => r.json());
+  renderUpdates(state);
+}
+
+// renderUpdates says whether a new version is out, ready, or did not start,
+// and what was reported when a check did not finish.
+function renderUpdates(state) {
+  const status = $("update-status");
+  status.replaceChildren();
+
+  if (state.off) {
+    status.textContent = state.off;
+    show("update-controls", false);
+    show("update-ready", false);
+    return;
+  }
+
+  const st = state.status || {};
+  const settings = state.settings || {};
+  show("update-controls", true);
+  $("update-daily").checked = Boolean(settings.check_daily);
+  $("update-auto").checked = Boolean(settings.install_by_themselves);
+  $("update-check").disabled = Boolean(st.working);
+
+  const said = (text, detail) => {
+    status.append(document.createTextNode(text));
+    if (detail) {
+      const details = document.createElement("details");
+      const summary = document.createElement("summary");
+      summary.textContent = "Technical details";
+      const pre = document.createElement("pre");
+      pre.textContent = detail;
+      details.append(summary, pre);
+      status.append(details);
+    }
+  };
+
+  const ready = st.ready;
+  const didNotStart = st.failed && ready && st.failed.version === ready.version;
+  if (st.working) {
+    said(`${st.working}…`);
+  } else if (didNotStart) {
+    said(`Version ${ready.version} did not start, so ARFABIT went back to version ${st.current}. ` +
+      "Update and restart tries it again.", st.failed.detail);
+  } else if (ready) {
+    said(settings.install_by_themselves
+      ? `Version ${ready.version} is ready. It installs by itself once nothing is running.`
+      : `Version ${ready.version} is ready.`);
+  } else if (st.problem) {
+    said(st.problem, st.detail);
+  } else if (st.checked_at) {
+    said(`ARFABIT is up to date: version ${st.current}. Last checked ${describeAge(st.checked_at)}.`);
+  } else {
+    said(`This is version ${st.current}. ARFABIT has not checked for a new one yet.`);
+  }
+
+  show("update-ready", Boolean(ready));
+  if (ready) $("update-notes").textContent = ready.notes || "";
+}
+
 async function loadIndexStatus() {
   const status = await fetch("/api/index").then((r) => r.json());
   renderIndexStatus(status);
@@ -3369,6 +3430,7 @@ function connect() {
       case "index": renderIndexStatus(JSON.parse(data)); break;
       case "drives": renderDrives(JSON.parse(data)); break;
       case "shell": renderShell(JSON.parse(data)); break;
+      case "update": renderUpdates(JSON.parse(data)); break;
       case "connection": $("connection").hidden = data; break;
     }
   };
@@ -3383,7 +3445,7 @@ function connect() {
       handle(name, data);
       if (channel) channel.postMessage({ name, data });
     };
-    for (const name of ["job", "log", "index", "drives", "shell"]) {
+    for (const name of ["job", "log", "index", "drives", "shell", "update"]) {
       events.addEventListener(name, (e) => pass(name, e.data));
     }
     // EventSource reconnects on its own; a brief drop is not worth reporting.
@@ -3465,6 +3527,30 @@ function wireButtons() {
     $("log-follow").checked = true;
     $("log-jump").hidden = true;
     $("log").scrollTop = $("log").scrollHeight;
+  });
+
+  on("update-check", "click", async (e) => {
+    e.target.disabled = true;
+    const state = await post("/api/update/check");
+    if (state) renderUpdates(state);
+  });
+
+  on("update-daily", "change", async (e) => {
+    const state = await post("/api/update/settings", { check_daily: e.target.checked });
+    if (state) renderUpdates(state);
+  });
+
+  on("update-auto", "change", async (e) => {
+    const state = await post("/api/update/settings", { install_by_themselves: e.target.checked });
+    if (state) renderUpdates(state);
+  });
+
+  on("update-install", "click", async (e) => {
+    const result = await busy(e.target, "Restarting…", null, () => post("/api/update/install"));
+    if (result) {
+      $("update-status").textContent = "Installing. This page will come back on its own.";
+      waitForRestart();
+    }
   });
 
   on("hide-on-start", "change", async (e) => {
@@ -3594,6 +3680,7 @@ function start() {
   loadLog();
   runDoctor();
   loadAutostart();
+  loadUpdates();
   loadIndexStatus();
   loadConversionLimit();
   recallStretch();

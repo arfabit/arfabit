@@ -46,6 +46,10 @@ type shellState struct {
 	// Platform is runtime.GOOS, so the page can name the menu bar or the
 	// notification area, and the right settings app.
 	Platform string `json:"platform"`
+
+	// UpdateReady is a new version waiting to be installed, for Update and
+	// restart in the app's menu.
+	UpdateReady string `json:"update_ready,omitempty"`
 }
 
 func (s *Server) shellState() shellState {
@@ -59,6 +63,7 @@ func (s *Server) shellState() shellState {
 		Status:        statusLine(s.Runner.Active()),
 		Shell:         s.Shell,
 		Platform:      runtime.GOOS,
+		UpdateReady:   s.updateReady(),
 	}
 }
 

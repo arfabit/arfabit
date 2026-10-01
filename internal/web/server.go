@@ -29,6 +29,7 @@ import (
 	"github.com/arfabit/arfabit/internal/ocr"
 	"github.com/arfabit/arfabit/internal/pipeline"
 	"github.com/arfabit/arfabit/internal/store"
+	"github.com/arfabit/arfabit/internal/update"
 	"github.com/arfabit/arfabit/internal/version"
 )
 
@@ -63,6 +64,11 @@ type Server struct {
 	// Shell says ARFABIT was started by its app, which starts it again on
 	// Restart and is how it is opened after a Stop (docs/RELEASE.md §1).
 	Shell bool
+
+	// Updater finds and stages new versions, set with SetUpdater. When this
+	// copy does not update itself it is nil, and UpdatesOff says why.
+	Updater    *update.Updater
+	UpdatesOff string
 
 	tmpl    *template.Template
 	events  *eventStream
@@ -192,6 +198,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/shell", s.handleShell)
 	mux.HandleFunc("POST /api/shell/settings", s.handleShellSettings)
 	mux.HandleFunc("POST /api/shell/login", s.handleLoginReport)
+
+	mux.HandleFunc("GET /api/update", s.handleUpdate)
+	mux.HandleFunc("POST /api/update/check", s.handleCheckForUpdate)
+	mux.HandleFunc("POST /api/update/settings", s.handleUpdateSettings)
+	mux.HandleFunc("POST /api/update/install", s.handleInstallUpdate)
 
 	mux.HandleFunc("GET /api/autostart", s.handleAutostart)
 	mux.HandleFunc("POST /api/autostart", s.handleSetAutostart)
