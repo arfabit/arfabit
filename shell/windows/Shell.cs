@@ -45,6 +45,13 @@ namespace Arfabit.Shell
         bool startedOnce;
         bool deciding;
 
+        // This app was just installed as an update, and is waiting for its
+        // ARFABIT to say it is ready before the update counts as done.
+        Updater.Installing installing = Updater.Finishing();
+
+        // Only there when a new version is ready (docs/RELEASE.md §4).
+        readonly ToolStripMenuItem update = new ToolStripMenuItem("Update and restart") { Visible = false };
+
         LoginItem.Report lastReport;
         readonly Timer loginTimer = new Timer { Interval = 30000 };
 
@@ -66,6 +73,8 @@ namespace Arfabit.Shell
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("Restart ARFABIT", null, (s, e) => Post("api/restart", null));
             menu.Items.Add("Stop ARFABIT", null, (s, e) => Post("api/quit", null));
+            update.Click += (s, e) => Post("api/update/install", null);
+            menu.Items.Add(update);
             menu.Opening += (s, e) => { if (api != null) api.Refresh(); };
 
             login.Click += (s, e) => Post("api/shell/settings",
@@ -149,6 +158,12 @@ namespace Arfabit.Shell
             }
             catch (Exception e)
             {
+                if (installing != null)
+                {
+                    Updater.RollBack(installing, "ARFABIT " + installing.Version + " did not start: " + e);
+                    ui.BeginInvoke(new Action(ExitThread));
+                    return;
+                }
                 MessageBox.Show(e.Message, "ARFABIT did not start", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 // Posted rather than called: on the first start the app's
@@ -193,6 +208,15 @@ namespace Arfabit.Shell
             if (url != null) return;
             url = found;
 
+            // Just installed as an update: the page already open comes back
+            // by itself, so another is not opened.
+            var updated = installing != null;
+            if (updated)
+            {
+                Updater.Succeeded();
+                installing = null;
+            }
+
             api = new Api(found);
             api.Shell += state => ui.BeginInvoke(new Action(() => Follow(state)));
             api.Status += line => ui.BeginInvoke(new Action(() => status.Text = line));
@@ -202,7 +226,7 @@ namespace Arfabit.Shell
             {
                 // Decided once the settings arrive, in Follow.
                 startedOnce = true;
-                deciding = true;
+                deciding = !updated;
             }
             loginTimer.Start();
         }
@@ -219,6 +243,11 @@ namespace Arfabit.Shell
             }
             object line;
             if (state.TryGetValue("status", out line) && line is string) status.Text = (string)line;
+
+            object ready;
+            var version = state.TryGetValue("update_ready", out ready) ? ready as string : null;
+            update.Visible = !string.IsNullOrEmpty(version);
+            if (update.Visible) update.Text = "Update to " + version + " and restart";
 
             var wanted = Flag(state, "start_at_login");
             if (loginSetting == null)
@@ -317,6 +346,17 @@ namespace Arfabit.Shell
             loginTimer.Stop();
             lastReport = null;
 
+            // A new version that stopped before it was ready: the old one goes
+            // back.
+            if (installing != null)
+            {
+                icon.Visible = false;
+                Updater.RollBack(installing, "ARFABIT " + installing.Version +
+                    " stopped before it was ready, with exit code " + code + ". What it said is in " + LogPath + ".");
+                ExitThread();
+                return;
+            }
+
             switch (code)
             {
                 case ExitStop:
@@ -325,8 +365,14 @@ namespace Arfabit.Shell
                     return;
 
                 case ExitRestart:
-                    // Installing a staged update comes here, before starting
-                    // again (docs/RELEASE.md §6). Not built yet.
+                    // Start me again: with a new version first, if one is
+                    // staged. Its installer waits for this app to quit.
+                    if (Updater.InstallStaged())
+                    {
+                        icon.Visible = false;
+                        ExitThread();
+                        return;
+                    }
                     status.Text = "Starting";
                     Start();
                     return;

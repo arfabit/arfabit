@@ -31,8 +31,6 @@ UninstallDisplayName=ARFABIT
 UninstallDisplayIcon={app}\ARFABIT.exe
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-; The shell holds this while it runs. Nothing is replaced until it is gone.
-AppMutex=ARFABIT-shell
 WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
@@ -40,13 +38,12 @@ OutputDir={#Dist}
 OutputBaseFilename=ARFABIT-setup
 SetupIconFile={#Dist}\icons\ARFABIT.ico
 
-[Messages]
-SetupAppRunningError=ARFABIT is running. Stop it from its icon or from Settings on its page, then press OK.
-UninstallAppRunningError=ARFABIT is running. Stop it from its icon or from Settings on its page, then press OK.
-
 [Files]
 Source: "{#Dist}\ARFABIT.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Dist}\core\arfabit.exe"; DestDir: "{app}\core"; Flags: ignoreversion
+; This installer, kept so a later update that does not start can put this
+; version back (docs/RELEASE.md §6).
+Source: "{srcexe}"; DestDir: "{app}\setup"; DestName: "ARFABIT-setup.exe"; Flags: external ignoreversion
 
 [Icons]
 Name: "{autoprograms}\ARFABIT"; Filename: "{app}\ARFABIT.exe"
@@ -56,6 +53,46 @@ Name: "{autoprograms}\ARFABIT"; Filename: "{app}\ARFABIT.exe"
 Filename: "{app}\ARFABIT.exe"; Description: "Open ARFABIT"; Flags: nowait postinstall
 
 [Code]
+// The app holds the mutex ARFABIT-shell while it runs, and nothing is
+// replaced or removed until it is gone. An update is run silently by the app
+// as it quits, so a silent run waits for it; anyone running this by hand is
+// asked to stop ARFABIT first.
+function ShellGone(Silent: Boolean; Text: String): Boolean;
+var
+  Tries: Integer;
+begin
+  Tries := 0;
+  while CheckForMutexes('ARFABIT-shell') do
+  begin
+    if Silent then
+    begin
+      if Tries >= 60 then
+      begin
+        Result := False;
+        exit;
+      end;
+      Sleep(500);
+      Tries := Tries + 1;
+    end
+    else if MsgBox(Text, mbInformation, MB_OKCANCEL) = IDCANCEL then
+    begin
+      Result := False;
+      exit;
+    end;
+  end;
+  Result := True;
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := ShellGone(WizardSilent(), 'ARFABIT is running. Stop it from its icon or from Settings on its page, then press OK.');
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  Result := ShellGone(UninstallSilent(), 'ARFABIT is running. Stop it from its icon or from Settings on its page, then press OK.');
+end;
+
 // The shell writes this value when Start at login is on. It goes with the
 // programs; nothing else of ARFABIT's is touched.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
