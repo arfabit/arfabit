@@ -764,3 +764,43 @@ A change to anything here that touches those sections changes both documents.
 6. Removing `internal/autostart`, once both shells and the Linux service start
    ARFABIT by themselves.
 7. Homebrew and winget, if still wanted.
+
+### Where this stands
+
+As of 2026-10-01. Update this list as steps finish; it is the hand-over
+between sessions.
+
+| Step | State |
+|---|---|
+| 1. Version, the shell contract | done, and run on a Mac by the maintainer |
+| 2. The macOS app | done, and run on a Mac. Signed ad hoc so far: `shell/macos/make-certificate.sh` exists but signing with it is not yet confirmed. The icon is `shell/macos/icon/ARFABIT.icon` from Icon Composer; that `build.sh` compiles it with `actool` is not yet confirmed. Hide on startup, and leaving a login item alone once removed in System Settings, not yet confirmed on a Mac |
+| 3. Windows | written, never built or run: there is no Windows machine yet |
+| 4. Updates | written. Checking, verifying and staging are tested in Go; installing on a Mac is not yet run (see below). Windows untested |
+| 5. Linux | not started. Decided: the package repository is `arfabit/packages` on GitHub Pages, at `https://arfabit.github.io/packages/`, keeping five versions; Arch through the AUR as `arfabit-bin`, which needs the maintainer's AUR account and SSH key, not yet asked for. Already in place: `packaging/linux/arfabit.desktop`, the repository's public key `packaging/linux/arfabit.asc`, and `go run ./packaging/icon` for its icon |
+| 6. Removing `internal/autostart` | after 5 |
+| 7. Homebrew and winget | not decided |
+| The release workflow (§7) | not written. It will need the Mac certificate exported as a secret, which is not done |
+
+**Keys and secrets.** Made once, on the maintainer's Mac, with private halves
+in `~/arfabit-keys` and backed up by the maintainer:
+
+| Secret in `arfabit/arfabit` | For | Public half |
+|---|---|---|
+| `ARFABIT_UPDATE_KEY` | signing `latest.json` | `internal/update/public.key` |
+| `ARFABIT_REPO_KEY` | signing the apt and dnf repository | `packaging/linux/arfabit.asc` |
+| `ARFABIT_PACKAGES_DEPLOY_KEY` | the workflow pushing to `arfabit/packages` | a deploy key with write access there |
+
+Never print, read or copy a private key in a session; give the maintainer
+the command to run instead.
+
+**Trying an update on a Mac without publishing.** Build and install
+`v0.1.0` from the `.dmg`, then build `v0.2.0`, run
+`shell/macos/stage-update.sh`, and choose Restart ARFABIT from the menu bar.
+The page should come back on v0.2.0, with `ARFABIT (previous version).app`
+in the Trash. `~/Library/Logs/arfabit.log` and
+`~/Library/Application Support/arfabit/update/` show what happened.
+
+**Working on this from a sandboxed session.** A sandboxed agent cannot listen
+on a port, use a keychain, make a disk image, or compile the icon, and so
+cannot run ARFABIT, the app, or `build.sh` to the end. Ask the maintainer to
+run those, with `!` before the command, and say what to look for.
