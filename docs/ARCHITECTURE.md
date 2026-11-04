@@ -1330,7 +1330,7 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Autostart on all three platforms | built; to be replaced by the shells and the Linux package (§13) |
 | Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
 | The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built and run on a Mac; signing with the self-made certificate not yet tried |
-| The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | written; never built or run |
+| The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | built and run on Windows; some of it not yet tried (`docs/RELEASE.md` §12) |
 | Updates on macOS and Windows: signed `latest.json`, staging, installing by the app, putting the old version back (`docs/RELEASE.md` §6) | built; checking and staging tested, installing not yet run; Windows untested |
 | Releases: Linux packages, the release workflow (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
