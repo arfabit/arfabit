@@ -860,8 +860,6 @@ its two:
 | `ARFABIT_UPDATE_KEY` | signing `latest.json` | `internal/update/public.key` |
 | `ARFABIT_REPO_KEY` | signing the apt and dnf repository | `packaging/linux/arfabit.asc` |
 | `ARFABIT_PACKAGES_DEPLOY_KEY` | the workflow pushing to `arfabit/packages` | a deploy key with write access there |
-| `ARFABIT_MAC_CERT` | signing the Mac app: the certificate from `shell/macos/make-certificate.sh`, exported as a `.p12` and base64-encoded | the certificate itself, which is in the app's signature |
-| `ARFABIT_MAC_CERT_PASSWORD` | the password that `.p12` was exported with | — |
 
 Never print, read or copy a private key in a session; give the maintainer
 the command to run instead.
