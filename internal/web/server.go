@@ -552,7 +552,7 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer s.building.Store(false)
 
-		path := meta.IndexPath(s.Config.Paths.Data)
+		path := meta.IndexPath(s.Config.IndexDir())
 		s.events.send("index", map[string]any{"state": "downloading", "read": 0, "path": path})
 
 		// Progress is reported as it arrives, but not on every read: the
@@ -568,7 +568,7 @@ func (s *Server) handleBuildIndex(w http.ResponseWriter, r *http.Request) {
 			s.events.send("index", map[string]any{"state": "downloading", "read": read, "path": path})
 		}
 
-		ix, err := meta.BuildIndex(s.Config.Paths.Data, false, onProgress)
+		ix, err := meta.BuildIndex(s.Config.IndexDir(), false, onProgress)
 		if err != nil {
 			s.events.send("index", map[string]any{
 				"state":  "stopped",
@@ -665,7 +665,7 @@ func (s *Server) handleQuit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleIndexStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]any{
 		"state": "missing",
-		"path":  meta.IndexPath(s.Config.Paths.Data),
+		"path":  meta.IndexPath(s.Config.IndexDir()),
 	}
 
 	if ix := s.Runner.Index; ix != nil {

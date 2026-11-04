@@ -161,16 +161,35 @@ func betterMatch(a, b Match) bool {
 }
 
 // IndexPath is where the built index lives.
-func IndexPath(dataDir string) string {
-	return filepath.Join(dataDir, "titles.json")
+func IndexPath(dir string) string {
+	return filepath.Join(dir, "titles.json")
+}
+
+// MoveIndex moves an index kept in an older place to where it now belongs,
+// when there is not one there already. Nothing happens when it cannot be moved:
+// the old one is left as it is, and downloading the list again makes a new one.
+func MoveIndex(from, to string) {
+	if from == to {
+		return
+	}
+	if _, err := os.Stat(IndexPath(to)); !os.IsNotExist(err) {
+		return
+	}
+	if _, err := os.Stat(IndexPath(from)); err != nil {
+		return
+	}
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		return
+	}
+	_ = os.Rename(IndexPath(from), IndexPath(to))
 }
 
 // LoadIndex reads a built index, returning nil when there is none.
 //
 // A missing index is not an error: ARFABIT falls back to the disc's own name,
 // which on many discs is already right.
-func LoadIndex(dataDir string) (*Index, error) {
-	data, err := os.ReadFile(IndexPath(dataDir))
+func LoadIndex(dir string) (*Index, error) {
+	data, err := os.ReadFile(IndexPath(dir))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -189,7 +208,7 @@ func LoadIndex(dataDir string) (*Index, error) {
 //
 // The download is about 200 MB because IMDb publishes the whole file; what is
 // kept is roughly 60 MB, being films only and five fields of each.
-func BuildIndex(dataDir string, includeTV bool, onProgress func(read int64)) (*Index, error) {
+func BuildIndex(dir string, includeTV bool, onProgress func(read int64)) (*Index, error) {
 	resp, err := http.Get(datasetURL)
 	if err != nil {
 		return nil, fmt.Errorf("the film list could not be downloaded: %w", err)
@@ -216,14 +235,18 @@ func BuildIndex(dataDir string, includeTV bool, onProgress func(read int64)) (*I
 		return nil, err
 	}
 
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	data, err := json.Marshal(ix)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(IndexPath(dataDir), data, 0o644); err != nil {
+	path := IndexPath(dir)
+	if err := os.WriteFile(path+".tmp", data, 0o644); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(path+".tmp", path); err != nil {
 		return nil, err
 	}
 

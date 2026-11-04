@@ -595,6 +595,21 @@ func DefaultLocalPath() string {
 	return filepath.Join(defaultDataDir(), "config.local.toml")
 }
 
+// IndexDir is where the film list is kept.
+//
+// On Windows that is %LOCALAPPDATA%\arfabit, never the roaming AppData that
+// holds the rest: the list is large, can always be downloaded again, and a
+// roaming profile would copy it at every sign-in. The uninstaller
+// removes it from there. Elsewhere it stays in the data directory.
+func (c Config) IndexDir() string {
+	if runtime.GOOS == "windows" {
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "arfabit")
+		}
+	}
+	return c.Paths.Data
+}
+
 func defaultDataDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

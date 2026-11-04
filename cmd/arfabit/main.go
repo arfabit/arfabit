@@ -117,7 +117,8 @@ func run(configPath, addr string, noOpen, checkOnly, shell bool) error {
 
 	// A missing film list is not a problem: without it a disc's own name is
 	// used, which on many discs is already right.
-	index, err := meta.LoadIndex(cfg.Paths.Data)
+	meta.MoveIndex(cfg.Paths.Data, cfg.IndexDir())
+	index, err := meta.LoadIndex(cfg.IndexDir())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "The film list could not be read, so disc names will be used: %v\n", err)
 		notices = append(notices, web.Notice{

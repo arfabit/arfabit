@@ -1,6 +1,8 @@
 package meta
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -121,5 +123,36 @@ func TestLookupWithoutAnIndex(t *testing.T) {
 	var ix *Index
 	if matches := ix.Lookup("ANYTHING", 100, 3); matches != nil {
 		t.Errorf("a missing index returned %+v", matches)
+	}
+}
+
+func TestMoveIndexMovesAnOldOne(t *testing.T) {
+	from, to := t.TempDir(), filepath.Join(t.TempDir(), "arfabit")
+	if err := os.WriteFile(IndexPath(from), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	MoveIndex(from, to)
+
+	if _, err := os.Stat(IndexPath(from)); !os.IsNotExist(err) {
+		t.Errorf("the old index is still there: %v", err)
+	}
+	if data, err := os.ReadFile(IndexPath(to)); err != nil || string(data) != "old" {
+		t.Errorf("the index did not arrive: %q, %v", data, err)
+	}
+}
+
+func TestMoveIndexKeepsANewerOne(t *testing.T) {
+	from, to := t.TempDir(), t.TempDir()
+	os.WriteFile(IndexPath(from), []byte("old"), 0o644)
+	os.WriteFile(IndexPath(to), []byte("new"), 0o644)
+
+	MoveIndex(from, to)
+
+	if data, _ := os.ReadFile(IndexPath(to)); string(data) != "new" {
+		t.Errorf("the newer index was replaced: %q", data)
+	}
+	if _, err := os.Stat(IndexPath(from)); err != nil {
+		t.Errorf("the old index was touched: %v", err)
 	}
 }
