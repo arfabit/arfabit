@@ -91,6 +91,12 @@ func TestCleanDiscLabel(t *testing.T) {
 		{"THE MANDALORIAN AND GROGU \u2013 BLU-RAY", "The Mandalorian and Grogu"},
 		// Small words stay lowercase, except first and last.
 		{"KING_OF_THE_HILL", "King of the Hill"},
+		// A disc's own name, in curly quotation marks, as one came on Windows.
+		{"\u201cAsteroid City\u201d", "Asteroid City"},
+		{`"Asteroid City"`, "Asteroid City"},
+		// Quotation marks inside the name stay; the letter after one is still
+		// the first.
+		{"THE \u201cWOLF\u201d", "The \u201cWolf\u201d"},
 	}
 	for _, tc := range tests {
 		if got := CleanDiscLabel(tc.in); got != tc.want {

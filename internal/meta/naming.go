@@ -149,7 +149,20 @@ func CleanDiscLabel(label string) string {
 	}
 
 	// A stripped suffix can leave a dangling dash behind.
-	return strings.Trim(titleCase(s), " -\u2013\u2014")
+	return unquote(strings.Trim(titleCase(s), " -\u2013\u2014"))
+}
+
+// quoteMarks are the quotation marks a disc's name can arrive wrapped in.
+const quoteMarks = "\"'\u201c\u201d\u2018\u2019\u00ab\u00bb"
+
+// unquote takes off quotation marks wrapped around the whole name, as some
+// discs name themselves, and leaves any inside it alone.
+func unquote(s string) string {
+	r := []rune(s)
+	if len(r) >= 2 && strings.ContainsRune(quoteMarks, r[0]) && strings.ContainsRune(quoteMarks, r[len(r)-1]) {
+		return strings.TrimSpace(string(r[1 : len(r)-1]))
+	}
+	return s
 }
 
 // smallWords stay lowercase inside a title, the way titles are normally set.
@@ -168,8 +181,15 @@ func titleCase(s string) string {
 		if i > 0 && i < len(words)-1 && smallWords[w] {
 			continue
 		}
+		// The first letter, which is not always the first character: a
+		// word can open with a quotation mark.
 		r := []rune(w)
-		r[0] = unicode.ToUpper(r[0])
+		for j := range r {
+			if unicode.IsLetter(r[j]) {
+				r[j] = unicode.ToUpper(r[j])
+				break
+			}
+		}
 		words[i] = string(r)
 	}
 	return strings.Join(words, " ")
