@@ -25,6 +25,7 @@ let focusedJob = "";
 let resumable = {};
 let driveSettings = {}; // what each drive does when a disc goes in, by name
 let startedByApp = false; // ARFABIT's app started it, and opening the app starts it again
+let serverStarted = ""; // when the ARFABIT this page was loaded from started
 let blueprintNames = []; // for "When a disc goes in"
 let editing = null;  // what on the Plan shown can still be changed
 let copies = {};   // how each film's SRTs stand, by the task that made them
@@ -1707,6 +1708,16 @@ async function loadLog() {
 
 async function refreshOnce() {
   const state = await fetch("/api/state").then((r) => r.json());
+
+  // A different start time is a different ARFABIT: restarted, or updated by
+  // itself while nobody pressed anything. Its page may have changed too, so
+  // the page is loaded again whole rather than filled in.
+  if (serverStarted && state.started && state.started !== serverStarted) {
+    location.reload();
+    return;
+  }
+  serverStarted = state.started || serverStarted;
+
   if (state.now) clockOffset = Date.now() - new Date(state.now).getTime();
 
   const wasBusy = driveBusy;
@@ -3369,16 +3380,48 @@ function renderIndexStatus(status) {
     `Not downloaded yet. About 200 MB, once. It would be saved in ${status.path}.`;
 }
 
-// waitForRestart holds the page until ARFABIT answers again, then reloads.
-async function waitForRestart() {
-  $("restart-detail").textContent = "Restarting. This page will come back on its own.";
+// restartWith presses a button that ends this ARFABIT. The button stays
+// pressed, since there is nothing more it can do, until the page reloads on
+// the ARFABIT that comes back; only a request that did not go through gives
+// it back.
+async function restartWith(button, path, detail, waiting) {
+  const original = button.textContent;
+  button.disabled = true;
+  button.classList.add("busy");
+  button.textContent = "Restarting\u2026";
 
-  const deadline = Date.now() + 30000;
+  let result = null;
+  try {
+    result = await post(path);
+  } catch (err) {
+    showProblem(String(err));
+  }
+  if (!result) {
+    button.classList.remove("busy");
+    button.textContent = original;
+    button.disabled = false;
+    return;
+  }
+  waitForRestart(detail, waiting);
+}
+
+// waitForRestart holds the page until a new ARFABIT answers, then reloads.
+//
+// The one asked to restart goes on answering for a moment after it agrees,
+// so an answer alone is not enough: it has to come from a copy that started
+// after this page was loaded. Installing an update takes longer than a plain
+// restart, so the wait is generous.
+async function waitForRestart(detail, waiting) {
+  $(detail).textContent = waiting;
+
+  const deadline = Date.now() + 120000;
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     try {
       const res = await fetch("/api/state", { cache: "no-store" });
-      if (res.ok) {
+      if (!res.ok) continue;
+      const state = await res.json();
+      if (!serverStarted || state.started !== serverStarted) {
         location.reload();
         return;
       }
@@ -3387,7 +3430,7 @@ async function waitForRestart() {
     }
   }
 
-  $("restart-detail").textContent =
+  $(detail).textContent =
     "ARFABIT has not come back yet. Reload this page, or start it again from where you launched it.";
 }
 
@@ -3548,13 +3591,8 @@ function wireButtons() {
     if (state) renderUpdates(state);
   });
 
-  on("update-install", "click", async (e) => {
-    const result = await busy(e.target, "Restarting…", null, () => post("/api/update/install"));
-    if (result) {
-      $("update-status").textContent = "Installing. This page will come back on its own.";
-      waitForRestart();
-    }
-  });
+  on("update-install", "click", (e) =>
+    restartWith(e.target, "/api/update/install", "update-status", "Installing. This page will come back on its own."));
 
   on("hide-on-start", "change", async (e) => {
     const shell = await post("/api/shell/settings", { hide_on_start: e.target.checked });
@@ -3585,8 +3623,7 @@ function wireButtons() {
 
   on("restart", "click", async (e) => {
     if (!(await askToEnd("Restart"))) return;
-    const result = await busy(e.target, "Restarting…", null, () => post("/api/restart"));
-    if (result) waitForRestart();
+    await restartWith(e.target, "/api/restart", "restart-detail", "Restarting. This page will come back on its own.");
   });
 
   on("quit", "click", async (e) => {

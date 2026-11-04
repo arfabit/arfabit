@@ -1331,7 +1331,7 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Releases: version number, `-shell`, the ready line and exit codes (`docs/RELEASE.md` §1) | built; run under a shell not yet tried |
 | The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built and run on a Mac; signing with the self-made certificate not yet tried |
 | The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | built and run on Windows; some of it not yet tried (`docs/RELEASE.md` §12) |
-| Updates on macOS and Windows: signed `latest.json`, staging, installing by the app, putting the old version back (`docs/RELEASE.md` §6) | built; checking and staging tested, installing not yet run; Windows untested |
+| Updates on macOS and Windows: signed `latest.json`, staging, installing by the app, putting the old version back (`docs/RELEASE.md` §6) | built; v0.1.0 to v0.2.0 installed by itself on macOS and Windows; putting the old version back not yet run |
 | Releases: Linux packages, making a release (`docs/RELEASE.md`) | making a release by hand, for macOS and Windows, written, not yet run; Linux packages not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films; Windows run on one (Asteroid City: 39 lines read as nothing, not yet looked at); Tesseract not yet run on real subtitles |

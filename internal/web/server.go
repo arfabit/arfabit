@@ -284,6 +284,10 @@ type state struct {
 	// it.
 	Version string `json:"version"`
 	Shell   bool   `json:"shell,omitempty"`
+
+	// Started tells one run of ARFABIT from the next, so the page can tell
+	// that it is talking to a new one, after a restart or an update.
+	Started time.Time `json:"started"`
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
@@ -343,6 +347,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		Notices:       s.Notices,
 		Version:       version.Version,
 		Shell:         s.Shell,
+		Started:       s.started,
 	}
 	if !reply.OCR {
 		reply.OCRNote = ocr.NotAvailable
