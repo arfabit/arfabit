@@ -1,0 +1,158 @@
+# Builds a release when a version tag is pushed (docs/RELEASE.md §7):
+#
+#   git tag -a v0.1.0 -m "What changed, in words for the person."
+#   git push origin v0.1.0
+#
+# The tag's message is what the page shows as what changed, so the tag must be
+# an annotated one. The release is left as a draft: nothing reaches anyone
+# until it is published on GitHub, because latest.json is only found on a
+# published release.
+#
+# Linux packages are not built here yet (docs/RELEASE.md §12, step 5).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      # Not relied on to be on the runner already; build.ps1 finds it in
+      # Program Files, where Chocolatey puts it.
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build
+        shell: powershell
+        run: packaging\windows\build.ps1 $env:GITHUB_REF_NAME
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/windows/ARFABIT-setup.exe
+          if-no-files-found: error
+
+  macos:
+    # Xcode 26, whose asset compiler reads the Icon Composer icon.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # The self-made certificate (shell/macos/make-certificate.sh), in a
+      # keychain of this run's own, trusted for signing code on this runner
+      # only. Every release is signed with the same one (docs/RELEASE.md §5).
+      - name: Load the signing certificate
+        env:
+          ARFABIT_MAC_CERT: ${{ secrets.ARFABIT_MAC_CERT }}
+          ARFABIT_MAC_CERT_PASSWORD: ${{ secrets.ARFABIT_MAC_CERT_PASSWORD }}
+        run: |
+          set -eu
+          if [ -z "$ARFABIT_MAC_CERT" ]; then
+            echo "The secret ARFABIT_MAC_CERT is not set, so the app cannot be signed." >&2
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          printf '%s' "$ARFABIT_MAC_CERT" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$KEYCHAIN" \
+            -P "$ARFABIT_MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          security find-certificate -c ARFABIT -p "$KEYCHAIN" > "$RUNNER_TEMP/certificate.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/certificate.pem"
+
+          # Named by its fingerprint, which is one identity whatever else the
+          # runner's keychains hold.
+          IDENTITY=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/"ARFABIT"/ { print $2; exit }')
+          if [ -z "$IDENTITY" ]; then
+            echo "The certificate in ARFABIT_MAC_CERT is not called ARFABIT, or cannot sign code:" >&2
+            security find-identity -p codesigning "$KEYCHAIN" >&2
+            exit 1
+          fi
+          echo "ARFABIT_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: shell/macos/build.sh "$GITHUB_REF_NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/ARFABIT.dmg
+            dist/ARFABIT-macOS.zip
+          if-no-files-found: error
+
+  release:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The checkout leaves the tag without its message, so it is fetched
+      # again whole.
+      - name: What changed
+        run: |
+          set -eu
+          git fetch --force --depth=1 origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ]; then
+            echo "$GITHUB_REF_NAME has no message. Make it with git tag -a, and say what changed." >&2
+            exit 1
+          fi
+          git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$GITHUB_REF_NAME" > dist/notes.txt
+          cat dist/notes.txt
+
+      - name: Write and sign latest.json
+        env:
+          ARFABIT_UPDATE_KEY: ${{ secrets.ARFABIT_UPDATE_KEY }}
+        run: |
+          go run ./packaging/release/latest \
+            -version "$GITHUB_REF_NAME" -notes dist/notes.txt \
+            -darwin dist/ARFABIT-macOS.zip -windows dist/ARFABIT-setup.exe \
+            -out dist/latest.json
+
+      - name: Make the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "ARFABIT $GITHUB_REF_NAME" --notes-file dist/notes.txt \
+            dist/ARFABIT.dmg dist/ARFABIT-macOS.zip dist/ARFABIT-setup.exe dist/latest.json

@@ -616,12 +616,30 @@ copies into its own `setup` folder, so the one before is there to put back.
     Windows amd64, Linux amd64 and arm64;
   - the macOS shell and `.app`, on a macOS runner, as one universal app;
   - the Windows shell and installer, on a Windows runner, which carries the
-    .NET SDK. Whether it carries Inno Setup too, or it is installed in the
-    job, is open (§10).
+    .NET SDK. Inno Setup is installed in the job, with Chocolatey, rather
+    than relied on to be there.
 - **Then**, in the same run: signing with the self-made macOS certificate,
   making the `.dmg`, the installer, `.deb` and `.rpm`; publishing the release;
   writing and signing `latest.json`; and updating the package repository.
 - **Signing keys** live only in CI secrets.
+
+`.github/workflows/release.yml` does this for macOS and Windows; the Linux
+packages and the repository join it with step 5 (§12). It makes the release
+as a **draft**. `latest.json` is only found on a published release, so
+publishing is what sends the version to every copy, and a draft is the
+chance to install it first.
+
+Making a release:
+
+```
+git tag -a v0.1.0 -m "What changed, in words for the person."
+git push origin v0.1.0
+```
+
+The tag's message becomes what changed, on the release and on the page, so
+the tag must be annotated; the workflow stops on one without a message. When
+the run finishes, the draft is under Releases with `ARFABIT.dmg`,
+`ARFABIT-macOS.zip`, `ARFABIT-setup.exe` and `latest.json`.
 
 ---
 
@@ -721,8 +739,6 @@ To be tested on a real machine before it is relied on:
   version to the next (§5).
 - **Dragging the app to the Trash** removes its `SMAppService` login item. If
   it does, Settings → **Remove ARFABIT from this computer** (§8) is not needed.
-- **Inno Setup** on GitHub's Windows runners: already there, or installed in
-  the job (§7).
 
 To decide: nothing at present. The Windows login item (the Run key, not a
 scheduled task) and the page on the network (it stays open) were decided here.
@@ -782,7 +798,7 @@ between sessions.
 | 5. Linux | not started. Decided: the package repository is `arfabit/packages` on GitHub Pages, at `https://arfabit.github.io/packages/`, keeping five versions; Arch through the AUR as `arfabit-bin`, which needs the maintainer's AUR account and SSH key, not yet asked for. Already in place: `packaging/linux/arfabit.desktop`, the repository's public key `packaging/linux/arfabit.asc`, and `go run ./packaging/icon` for its icon |
 | 6. Removing `internal/autostart` | after 5 |
 | 7. Homebrew and winget | not decided |
-| The release workflow (§7) | not written. It will need the Mac certificate exported as a secret, which is not done |
+| The release workflow (§7) | written for macOS and Windows, making a draft release; not yet run. Needs the secrets `ARFABIT_MAC_CERT` and `ARFABIT_MAC_CERT_PASSWORD`, not yet set. The macOS job runs on `macos-26` for Xcode 26's asset compiler, and trusts the certificate on the runner with `sudo security add-trusted-cert`; neither is yet seen working there |
 
 **Keys and secrets.** Made once, on the maintainer's Mac, with private halves
 in `~/arfabit-keys` and backed up by the maintainer:
@@ -792,6 +808,8 @@ in `~/arfabit-keys` and backed up by the maintainer:
 | `ARFABIT_UPDATE_KEY` | signing `latest.json` | `internal/update/public.key` |
 | `ARFABIT_REPO_KEY` | signing the apt and dnf repository | `packaging/linux/arfabit.asc` |
 | `ARFABIT_PACKAGES_DEPLOY_KEY` | the workflow pushing to `arfabit/packages` | a deploy key with write access there |
+| `ARFABIT_MAC_CERT` | signing the Mac app: the certificate from `shell/macos/make-certificate.sh`, exported as a `.p12` and base64-encoded | the certificate itself, which is in the app's signature |
+| `ARFABIT_MAC_CERT_PASSWORD` | the password that `.p12` was exported with | — |
 
 Never print, read or copy a private key in a session; give the maintainer
 the command to run instead.
