@@ -66,7 +66,8 @@ if [ "$STEP" = start ]; then
   echo
   echo "  git fetch --tags"
   echo "  git checkout $VERSION"
-  echo "  packaging\\windows\\build.ps1 $VERSION -Upload"
+  # printf, not echo: the Mac's sh reads "\b" in an echo as a backspace.
+  printf '  packaging\\windows\\build.ps1 %s -Upload\n' "$VERSION"
   echo
   echo "Then here: packaging/release/release.sh finish $VERSION"
   exit 0

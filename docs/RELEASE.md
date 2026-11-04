@@ -657,6 +657,12 @@ Once, on each machine: the GitHub CLI, signed in as the maintainer
    git checkout main
    ```
 
+   A PowerShell window left at Windows' default refuses to run any script
+   ("running scripts is disabled on this system"). Run it as
+   `powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1 v0.1.0 -Upload`,
+   or allow scripts made on this computer once with
+   `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
 4. **Mac: finish.** Downloads the three files from the draft, writes and signs
    `latest.json` over them, uploads it, then downloads it all again and checks
    it as a copy of ARFABIT would:
@@ -837,13 +843,13 @@ between sessions.
 | Step | State |
 |---|---|
 | 1. Version, the shell contract | done, and run on a Mac by the maintainer |
-| 2. The macOS app | done, and run on a Mac. Signed ad hoc so far: `shell/macos/make-certificate.sh` exists but signing with it is not yet confirmed. The icon is `shell/macos/icon/ARFABIT.icon` from Icon Composer; that `build.sh` compiles it with `actool` is not yet confirmed. Hide on startup, and leaving a login item alone once removed in System Settings, not yet confirmed on a Mac |
+| 2. The macOS app | done, and run on a Mac. Signed with the self-made certificate from `shell/macos/make-certificate.sh` since v0.1.0, its signature pinned to that certificate; that it keeps folder permissions across an update is not yet confirmed. The icon is `shell/macos/icon/ARFABIT.icon` from Icon Composer; that `build.sh` compiles it with `actool` is not yet confirmed. Hide on startup, and leaving a login item alone once removed in System Settings, not yet confirmed on a Mac |
 | 3. Windows | built and run on Windows 11 by the maintainer, with the .NET SDK 10 and Inno Setup 6.7.3 (winget installs it for the user alone, in `%LOCALAPPDATA%\Programs`). Confirmed: `build.ps1` to the end, the installer, the icon and its menu as in §4, the page opening, Start at login across a restart, Stop, Show the icon, Hide on startup, Restart (a new ARFABIT under the same app), switching Start at login off in Task Manager (the page follows within the 30-second check), uninstalling, the film list moving to `%LOCALAPPDATA%\arfabit` and being removed on uninstall, and Installed apps counting it. Windows Firewall asks about `arfabit.exe` on first start, because the page listens on every network. The installer asks for no administrator password, with User Account Control at its default. First rip, 2026-11-04: Asteroid City on Blu-ray, on the same BU40N drive as the Mac, through LibreDrive (v06.3), with When a disc goes in set to Copy and no film list. It copied (a 28.1 GB original) and its English subtitles were read by `Windows.Media.Ocr`, the first time on real subtitles; 39 came back empty and are listed to check. That build predates two fixes since pushed: the folder came out as “asteroid City” from the disc's curly quotes, and `makemkvcon` ran as the 32-bit exe. Still to explain: the drive page said the drive was not yet timed after the copy, and the disc showed as still in the drive. Not yet confirmed: updates (step 4) |
 | 4. Updates | written. Checking, verifying and staging are tested in Go; installing on a Mac is not yet run (see below). Windows untested |
 | 5. Linux | not started. Decided: the package repository is `arfabit/packages` on GitHub Pages, at `https://arfabit.github.io/packages/`, keeping five versions; Arch through the AUR as `arfabit-bin`, which needs the maintainer's AUR account and SSH key, not yet asked for. Already in place: `packaging/linux/arfabit.desktop`, the repository's public key `packaging/linux/arfabit.asc`, and `go run ./packaging/icon` for its icon |
 | 6. Removing `internal/autostart` | after 5 |
 | 7. Homebrew and winget | not decided |
-| Making a release (§7) | by hand, decided 2026-11-04 in place of GitHub Actions: `packaging/release/release.sh` on the Mac, `build.ps1 -Upload` on Windows, onto one draft release. Written, not yet run. No release yet |
+| Making a release (§7) | by hand, decided 2026-11-04 in place of GitHub Actions: `packaging/release/release.sh` on the Mac, `build.ps1 -Upload` on Windows, onto one draft release. Run end to end for v0.1.0 on 2026-11-04: `start`, `build.ps1 -Upload`, and `finish`, whose read-back check passed. v0.1.0 is a draft, not yet installed from or published |
 
 **Keys and secrets.** Made once, on the maintainer's Mac, with private halves
 in `~/arfabit-keys` and backed up by the maintainer. They were also put into
