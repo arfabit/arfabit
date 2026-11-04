@@ -1334,7 +1334,7 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | Updates on macOS and Windows: signed `latest.json`, staging, installing by the app, putting the old version back (`docs/RELEASE.md` §6) | built; checking and staging tested, installing not yet run; Windows untested |
 | Releases: Linux packages, the release workflow (`docs/RELEASE.md`) | not built |
 | Eject on all three platforms | built |
-| Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films, Windows and Tesseract not yet run on real subtitles |
+| Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films; Windows run on one (Asteroid City: 39 lines read as nothing, not yet looked at); Tesseract not yet run on real subtitles |
 
 **Subtitles.** A Blu-ray's picture subtitles are read into SRT on macOS, on
 Windows, and wherever Tesseract is installed (§10), as tasks of their own once
