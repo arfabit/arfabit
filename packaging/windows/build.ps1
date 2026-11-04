@@ -22,6 +22,20 @@ if ($Version -eq "dev") {
 }
 
 $dist = Join-Path $root "dist\windows"
+
+# A copy of ARFABIT started from dist\windows holds its files, and Windows
+# will not remove a running program. Stop that copy, the app first so it does
+# not start ARFABIT again. An installed ARFABIT runs from elsewhere and is left
+# alone.
+$running = Get-Process -Name arfabit -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path.StartsWith($dist + "\", [StringComparison]::OrdinalIgnoreCase) } |
+    Sort-Object { $_.Path.Length }
+if ($running) {
+    Write-Host "Stopping the ARFABIT running from $dist"
+    $running | Stop-Process -Force
+    $running | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+}
+
 if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
 New-Item -ItemType Directory -Force (Join-Path $dist "core") | Out-Null
 
