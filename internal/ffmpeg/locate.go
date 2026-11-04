@@ -2,6 +2,8 @@ package ffmpeg
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"runtime"
 )
 
@@ -20,7 +22,11 @@ func candidateDirs() []string {
 	case "darwin":
 		return []string{"/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"}
 	case "windows":
+		// winget links what it installs into WinGet\Links and adds that to
+		// PATH, but only for programs started afterwards.
 		return []string{
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Microsoft", "WinGet", "Links"),
+			`C:\Program Files\WinGet\Links`,
 			`C:\Program Files\ffmpeg\bin`,
 			`C:\ffmpeg\bin`,
 		}
