@@ -394,7 +394,7 @@ signing can be added later without changing anything else here.
   This does nothing for the first-open step above. It keeps the app's identity
   the same from one version to the next, and macOS remembers folder
   permissions by that identity. Without it, every update would ask again for
-  access to Downloads. To be tested on a real update (§10).
+  access to Downloads. Confirmed from v0.1.0 to v0.2.0: the update did not ask again.
 
 ### Windows
 
@@ -786,8 +786,6 @@ To be tested on a real machine before it is relied on:
 
 - **`SMAppService` at login** starts the app as a double-click would, so
   opening it again reaches the running copy (§3).
-- **The self-made certificate** keeps macOS's folder permissions from one
-  version to the next (§5).
 - **Dragging the app to the Trash** removes its `SMAppService` login item. If
   it does, Settings → **Remove ARFABIT from this computer** (§8) is not needed.
 
@@ -843,9 +841,9 @@ between sessions.
 | Step | State |
 |---|---|
 | 1. Version, the shell contract | done, and run on a Mac by the maintainer |
-| 2. The macOS app | done, and run on a Mac. Signed with the self-made certificate from `shell/macos/make-certificate.sh` since v0.1.0, its signature pinned to that certificate; that it keeps folder permissions across an update is not yet confirmed. The icon is `shell/macos/icon/ARFABIT.icon` from Icon Composer; that `build.sh` compiles it with `actool` is not yet confirmed. Hide on startup, and leaving a login item alone once removed in System Settings, not yet confirmed on a Mac |
+| 2. The macOS app | done, and run on a Mac. Signed with the self-made certificate from `shell/macos/make-certificate.sh` since v0.1.0, its signature pinned to that certificate, which kept the Downloads permission from v0.1.0 to v0.2.0. The icon is `shell/macos/icon/ARFABIT.icon` from Icon Composer; that `build.sh` compiles it with `actool` is not yet confirmed. Hide on startup, and leaving a login item alone once removed in System Settings, not yet confirmed on a Mac |
 | 3. Windows | built and run on Windows 11 by the maintainer, with the .NET SDK 10 and Inno Setup 6.7.3 (winget installs it for the user alone, in `%LOCALAPPDATA%\Programs`). Confirmed: `build.ps1` to the end, the installer, the icon and its menu as in §4, the page opening, Start at login across a restart, Stop, Show the icon, Hide on startup, Restart (a new ARFABIT under the same app), switching Start at login off in Task Manager (the page follows within the 30-second check), uninstalling, the film list moving to `%LOCALAPPDATA%\arfabit` and being removed on uninstall, and Installed apps counting it. Windows Firewall asks about `arfabit.exe` on first start, because the page listens on every network. The installer asks for no administrator password, with User Account Control at its default. First rip, 2026-11-04: Asteroid City on Blu-ray, on the same BU40N drive as the Mac, through LibreDrive (v06.3), with When a disc goes in set to Copy and no film list. It copied (a 28.1 GB original) and its English subtitles were read by `Windows.Media.Ocr`, the first time on real subtitles; 39 came back empty and are listed to check. That build predates two fixes since pushed: the folder came out as “asteroid City” from the disc's curly quotes, and `makemkvcon` ran as the 32-bit exe. Still to explain: the drive page said the drive was not yet timed after the copy, and the disc showed as still in the drive. Updates: see step 4 |
-| 4. Updates | done, and run on both machines on 2026-11-04: v0.1.0, installed from its release, found v0.2.0 with Check for updates, downloaded and checked it, and installed it by itself, coming back on v0.2.0. On Windows the page came back on its own and no SmartScreen window showed. On the Mac the page had to be reloaded by hand: it reloaded as soon as anything answered, which was often the old ARFABIT still stopping, and the restart buttons came back to life meanwhile. Fixed after v0.2.0 (the page now waits for an ARFABIT with a different start time, and the buttons stay pressed), so first seen working from a page loaded from the release after v0.2.0. Not yet confirmed: putting the old version back when a new one does not start; the Mac keeping folder permissions across the update |
+| 4. Updates | done, and run on both machines on 2026-11-04: v0.1.0, installed from its release, found v0.2.0 with Check for updates, downloaded and checked it, and installed it by itself, coming back on v0.2.0. On Windows the page came back on its own and no SmartScreen window showed. On the Mac the page had to be reloaded by hand: it reloaded as soon as anything answered, which was often the old ARFABIT still stopping, and the restart buttons came back to life meanwhile. Fixed after v0.2.0 (the page now waits for an ARFABIT with a different start time, and the buttons stay pressed), so first seen working from a page loaded from the release after v0.2.0. The Mac did not ask for Downloads again after the update, so the self-made certificate keeps folder permissions as §5 hoped. Not yet confirmed: putting the old version back when a new one does not start |
 | 5. Linux | not started. Decided: the package repository is `arfabit/packages` on GitHub Pages, at `https://arfabit.github.io/packages/`, keeping five versions; Arch through the AUR as `arfabit-bin`, which needs the maintainer's AUR account and SSH key, not yet asked for. Already in place: `packaging/linux/arfabit.desktop`, the repository's public key `packaging/linux/arfabit.asc`, and `go run ./packaging/icon` for its icon |
 | 6. Removing `internal/autostart` | after 5 |
 | 7. Homebrew and winget | not decided |
