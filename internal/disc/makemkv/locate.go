@@ -40,8 +40,17 @@ func candidatePaths() []string {
 // Returns ErrNotInstalled when nothing is found, so Doctor can tell the user
 // how to install it rather than surfacing an exec error.
 func Locate() (string, error) {
-	if p, err := exec.LookPath("makemkvcon"); err == nil {
-		return p, nil
+	// On Windows the MakeMKV folder holds both makemkvcon64.exe and the
+	// 32-bit makemkvcon.exe, which works but warns that it will stop being
+	// supported. With that folder on PATH, the 64-bit one is preferred.
+	names := []string{"makemkvcon"}
+	if runtime.GOOS == "windows" {
+		names = []string{"makemkvcon64", "makemkvcon"}
+	}
+	for _, name := range names {
+		if p, err := exec.LookPath(name); err == nil {
+			return p, nil
+		}
 	}
 	for _, p := range candidatePaths() {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
