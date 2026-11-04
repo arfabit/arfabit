@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/arfabit/arfabit/internal/config"
@@ -161,47 +159,42 @@ const licenseWarningWindow = 7 * 24 * time.Hour
 // Beta keys expire about every two months, and a key that quietly ran out is
 // the failure people waste the most time on.
 func checkLicense() Check {
-	path, err := settingsPath()
+	s, err := readMakeMKVSettings()
 	if err != nil {
 		return Check{Name: "MakeMKV key", Status: StatusWarn, Message: "ARFABIT could not find MakeMKV's settings."}
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
+	if !s.opened {
 		return Check{
 			Name:    "MakeMKV key",
 			Status:  StatusWarn,
 			Message: "MakeMKV has not been opened yet. Open it once so it can set itself up.",
-			Detail:  path,
+			Detail:  s.where,
 		}
 	}
 
-	if !strings.Contains(string(data), "app_Key") {
+	if !s.hasKey {
 		return Check{
 			Name:    "MakeMKV key",
 			Status:  StatusWarn,
 			Message: "MakeMKV does not have a key yet. The free beta key works for Blu-ray discs.",
 			Fix:     "Get the current beta key from the MakeMKV forum, or buy one.",
-			Detail:  path,
+			Detail:  s.where,
 		}
 	}
 
-	return Check{Name: "MakeMKV key", Status: StatusOK, Message: "MakeMKV has a key.", Detail: path}
+	return Check{Name: "MakeMKV key", Status: StatusOK, Message: "MakeMKV has a key.", Detail: s.where}
 }
 
-func settingsPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		return filepath.Join(home, "Library", "MakeMKV", "settings.conf"), nil
-	case "windows":
-		return filepath.Join(os.Getenv("APPDATA"), "MakeMKV", "settings.conf"), nil
-	default:
-		return filepath.Join(home, ".MakeMKV", "settings.conf"), nil
-	}
+// makemkvSettings is what checkLicense needs to know from MakeMKV's settings.
+type makemkvSettings struct {
+	// where is the file or registry key, shown under Technical details.
+	where string
+
+	// opened means the settings exist, which MakeMKV makes on first open.
+	opened bool
+
+	hasKey bool
 }
 
 // checkFolders makes sure ARFABIT can write where it intends to.
