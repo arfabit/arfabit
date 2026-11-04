@@ -1,4 +1,4 @@
-; ARFABIT-setup.exe, built with Inno Setup 6 (docs/RELEASE.md §5).
+; ARFABIT-setup.exe, built with Inno Setup 6 or later (docs/RELEASE.md §5).
 ;
 ; Installs ARFABIT for the person running it, with no administrator password:
 ; the shell, ARFABIT.exe, and ARFABIT itself, core\arfabit.exe, in

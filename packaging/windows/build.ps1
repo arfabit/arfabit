@@ -1,6 +1,6 @@
 # Builds ARFABIT for Windows: core\arfabit.exe, the shell ARFABIT.exe, and
 # ARFABIT-setup.exe (docs/RELEASE.md §3, §5). Run on Windows with Go, the
-# .NET SDK and Inno Setup 6:
+# .NET SDK and Inno Setup 6 or later:
 #
 #   packaging\windows\build.ps1            a "dev" build
 #   packaging\windows\build.ps1 v0.1.0     a release
@@ -44,8 +44,18 @@ if ($LASTEXITCODE) { throw "dotnet build did not finish." }
 Copy-Item (Join-Path $dist "shell\ARFABIT.exe") $dist
 
 # The installer.
+# Inno Setup 6 or later, from PATH or wherever its installer put it.
 $iscc = Get-Command iscc -ErrorAction SilentlyContinue
-$iscc = if ($iscc) { $iscc.Source } else { Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe" }
+if ($iscc) {
+    $iscc = $iscc.Source
+} else {
+    $iscc = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA "Programs") -Filter "Inno Setup *" -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        ForEach-Object { Join-Path $_.FullName "ISCC.exe" } |
+        Where-Object { Test-Path $_ } |
+        Select-Object -First 1
+    if (-not $iscc) { throw "Inno Setup was not found. Install it with: winget install JRSoftware.InnoSetup" }
+}
 & $iscc "/DVersion=$short" "/DDist=$dist" "packaging\windows\arfabit.iss"
 if ($LASTEXITCODE) { throw "Inno Setup did not finish." }
 
