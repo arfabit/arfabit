@@ -1,11 +1,17 @@
 // Command latest writes latest.json for a release and signs it with the
-// update key (docs/RELEASE.md §6). The release workflow runs it once every
-// download is built:
+// update key (docs/RELEASE.md §6). packaging/release/release.sh runs it once
+// every download is on the draft release:
 //
 //	ARFABIT_UPDATE_KEY=... go run ./packaging/release/latest \
 //	  -version v0.2.0 -notes notes.txt \
 //	  -darwin dist/ARFABIT-macOS.zip -windows dist/ARFABIT-setup.exe \
 //	  -out dist/latest.json
+//
+// With -check, it reads a latest.json back instead, needing no key: it must
+// verify against the key built into ARFABIT, name -version, and match each
+// download in the same folder byte for byte.
+//
+//	go run ./packaging/release/latest -version v0.2.0 -check dist/latest.json
 //
 // The key is the private half's seed, as written by packaging/keys/updatekey,
 // read from the environment so it never appears in a command line or a log.
@@ -36,8 +42,17 @@ func main() {
 		windows = flag.String("windows", "", "the Windows installer")
 		base    = flag.String("base", "https://github.com/arfabit/arfabit/releases/download/", "where releases keep their files; the version is added")
 		out     = flag.String("out", "latest.json", "where to write latest.json")
+		check   = flag.String("check", "", "a latest.json to check against the downloads beside it, instead of writing one")
 	)
 	flag.Parse()
+
+	if *check != "" {
+		if err := checkLatest(*check, *ver); err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(*ver, *notes, *darwin, *windows, *base, *out); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -106,4 +121,35 @@ func describe(path, url string) (update.Download, error) {
 		return update.Download{}, err
 	}
 	return update.Download{URL: url, SHA256: hex.EncodeToString(hash.Sum(nil)), Size: n}, nil
+}
+
+// checkLatest reads back a latest.json and the downloads beside it, as a copy
+// of ARFABIT would: signature, version, then each download's size and SHA-256.
+func checkLatest(path, ver string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	release, err := update.Verify(data, update.PublicKey())
+	if err != nil {
+		return fmt.Errorf("%s does not verify against internal/update/public.key: %w", path, err)
+	}
+	if release.Version != ver {
+		return fmt.Errorf("%s is for %s, not %s", path, release.Version, ver)
+	}
+	if len(release.Downloads) == 0 {
+		return fmt.Errorf("%s names no downloads", path)
+	}
+	for platform, want := range release.Downloads {
+		name := want.URL[strings.LastIndex(want.URL, "/")+1:]
+		got, err := describe(filepath.Join(filepath.Dir(path), name), want.URL)
+		if err != nil {
+			return err
+		}
+		if got.SHA256 != want.SHA256 || got.Size != want.Size {
+			return fmt.Errorf("%s (%s) is not the file latest.json was signed with: it was replaced after signing", name, platform)
+		}
+		fmt.Printf("%s matches latest.json\n", name)
+	}
+	return nil
 }

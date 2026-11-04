@@ -183,7 +183,7 @@ keeps the drive spinning.
 | Metadata  | **Offline IMDb index**                | No network at rip time. See §11.                                                                |
 | Shell     | Swift on macOS, C# on Windows, none on Linux | Packaging around the Go binary: icon, starting at login, installing updates. Talks to ARFABIT as the page does. See `docs/RELEASE.md`. |
 | Autostart | The shell; on Linux, the package      | `SMAppService` / the Run key / a systemd system service. See §13.                          |
-| Release   | `.dmg`, Inno Setup installer, `.deb` and `.rpm` | Built by GitHub Actions on a tag. See `docs/RELEASE.md`.                             |
+| Release   | `.dmg`, Inno Setup installer, `.deb` and `.rpm` | Built by hand from a tag, onto a draft release. See `docs/RELEASE.md`.               |
 | Docker    | **Not used**                          | Cannot pass an optical drive through Docker Desktop on macOS or Windows.                        |
 
 ---
@@ -1332,7 +1332,7 @@ blueprints as recipes, and Projects (of all of a file, or part of it).
 | The macOS app: the Swift shell, its login item, moving to Applications, the `.app` and `.dmg` (`docs/RELEASE.md` §3, §5) | built and run on a Mac; signing with the self-made certificate not yet tried |
 | The Windows app: the C# shell, its Run key, the Inno Setup installer (`docs/RELEASE.md` §3, §5) | built and run on Windows; some of it not yet tried (`docs/RELEASE.md` §12) |
 | Updates on macOS and Windows: signed `latest.json`, staging, installing by the app, putting the old version back (`docs/RELEASE.md` §6) | built; checking and staging tested, installing not yet run; Windows untested |
-| Releases: Linux packages, the release workflow (`docs/RELEASE.md`) | the release workflow written for macOS and Windows, not yet run; Linux packages not built |
+| Releases: Linux packages, making a release (`docs/RELEASE.md`) | making a release by hand, for macOS and Windows, written, not yet run; Linux packages not built |
 | Eject on all three platforms | built |
 | Subtitles read into text by the computer's own reader, as OCR tasks into the SRT beside the original, with low confidence listed and tagged (§10) | built; macOS reader measured on two films; Windows run on one (Asteroid City: 39 lines read as nothing, not yet looked at); Tesseract not yet run on real subtitles |
 

@@ -560,7 +560,8 @@ With no paid signing, the check is ARFABIT's own:
   one fetch, one check: the version, what changed, and each download's
   checksum are all covered, so nothing in it can be changed in transit. The
   download must match its checksum.
-- The key is used for nothing else, and lives only in CI secrets.
+- The key is used for nothing else, and lives only on the maintainer's Mac,
+  with a copy the maintainer keeps elsewhere.
 - On Linux, apt and dnf check the repository's signature themselves.
 
 Paid signing, if added, becomes a second check alongside this one.
@@ -611,35 +612,76 @@ copies into its own `setup` folder, so the one before is there to put back.
   it requires the module path to repeat. The number is built in with
   `-ldflags -X`, and shown in Settings and at the top of every log. A build
   without a tag says `dev`, and never checks for updates.
-- **Built by GitHub Actions** when a tag is pushed:
-  - ARFABIT for every platform, cgo off, from any runner: macOS arm64 and amd64,
-    Windows amd64, Linux amd64 and arm64;
-  - the macOS shell and `.app`, on a macOS runner, as one universal app;
-  - the Windows shell and installer, on a Windows runner, which carries the
-    .NET SDK. Inno Setup is installed in the job, with Chocolatey, rather
-    than relied on to be there.
-- **Then**, in the same run: signing with the self-made macOS certificate,
-  making the `.dmg`, the installer, `.deb` and `.rpm`; publishing the release;
-  writing and signing `latest.json`; and updating the package repository.
-- **Signing keys** live only in CI secrets.
+- **Built by hand**, on the maintainer's Mac and Windows PC, from the tagged
+  commit. Releases are few, both machines already build, and the Mac already
+  holds the signing certificate and the update key, so neither has to leave
+  it. Both put their files on one **draft** release on GitHub, and the Mac
+  signs `latest.json` last, over what is on the draft.
+- **A draft until tried.** `latest.json` is only found on a published release,
+  so publishing is what sends a version to every copy, and the draft is the
+  chance to install it first.
+- **Keys** stay on the Mac (§9); the scripts read them and never print them.
+- The Linux packages and the repository join this with step 5 (§12).
 
-`.github/workflows/release.yml` does this for macOS and Windows; the Linux
-packages and the repository join it with step 5 (§12). It makes the release
-as a **draft**. `latest.json` is only found on a published release, so
-publishing is what sends the version to every copy, and a draft is the
-chance to install it first.
+### Making a release
 
-Making a release:
+Once, on each machine: the GitHub CLI, signed in as the maintainer
+(`brew install gh` on the Mac, `winget install GitHub.cli` on Windows, then
+`gh auth login`). The Mac also needs the certificate from
+`shell/macos/make-certificate.sh` and the update key in
+`~/arfabit-keys/update-private.key`.
 
-```
-git tag -a v0.1.0 -m "What changed, in words for the person."
-git push origin v0.1.0
-```
+1. **Mac: tag it.** On `main`, with everything committed and pushed:
 
-The tag's message becomes what changed, on the release and on the page, so
-the tag must be annotated; the workflow stops on one without a message. When
-the run finishes, the draft is under Releases with `ARFABIT.dmg`,
-`ARFABIT-macOS.zip`, `ARFABIT-setup.exe` and `latest.json`.
+   ```
+   git tag -a v0.1.0 -m "What changed, in words for the person."
+   ```
+
+   The tag's message is what changed, on the release and on the page, so the
+   tag must be annotated.
+
+2. **Mac: start.** Pushes the tag, builds and signs the app, and makes the
+   draft with `ARFABIT.dmg` and `ARFABIT-macOS.zip`:
+
+   ```
+   packaging/release/release.sh start v0.1.0
+   ```
+
+3. **Windows: build and upload.** Builds from the tag and adds
+   `ARFABIT-setup.exe` to the draft:
+
+   ```
+   git fetch --tags
+   git checkout v0.1.0
+   packaging\windows\build.ps1 v0.1.0 -Upload
+   git checkout main
+   ```
+
+4. **Mac: finish.** Downloads the three files from the draft, writes and signs
+   `latest.json` over them, uploads it, then downloads it all again and checks
+   it as a copy of ARFABIT would:
+
+   ```
+   packaging/release/release.sh finish v0.1.0
+   ```
+
+5. **Try it.** Install from the draft on both machines (`gh release view
+   v0.1.0 --web`). Windows shows "Windows protected your PC" and macOS asks for
+   Open Anyway, once each (§5).
+
+6. **Publish** the draft on GitHub. Every copy finds it within a day, or at
+   once with **Check for updates**.
+
+Both scripts refuse to run on a checkout that is not exactly the tag, or that
+has changes not committed, so the two halves are always the same commit.
+
+**A file replaced after step 4** (a rebuild uploaded again) no longer matches
+`latest.json`, and every copy would refuse the update. Run step 4 again before
+publishing.
+
+**Starting over** before publishing: remove the draft on GitHub, then
+`git push --delete origin v0.1.0` and `git tag -d v0.1.0`, and begin at step 1.
+Once published, a version is never changed; the next one fixes it.
 
 ---
 
@@ -682,16 +724,18 @@ packaging/
   icon/                        ARFABIT.png, exported from Icon Composer, and the Go program
                                that makes from it the Windows .ico files, a plain disc for
                                the notification area, and the Linux app menu icon
-  windows/                     Inno Setup script
+  windows/                     Inno Setup script; build.ps1, which with -Upload adds the
+                               installer to a draft release
   linux/                       arfabit.service, app menu entry, account and group setup, nfpm config
-.github/workflows/release.yml
+  release/                     release.sh, making a release by hand (§7); latest/, the Go
+                               program that writes, signs and checks latest.json
 ```
 
 `latest.json` is attached to each release on GitHub. The package repository
 lives in `arfabit/packages`, served by GitHub Pages.
 
-Keys, each made once by a script and kept out of git, in GitHub secrets and in
-a copy the maintainer keeps:
+Keys, each made once by a script and kept out of git, in `~/arfabit-keys` or
+the keychain on the maintainer's Mac and in a copy the maintainer keeps:
 
 ```
 packaging/keys/updatekey/      Ed25519 key for latest.json; public half in
@@ -728,6 +772,7 @@ shell/macos/make-certificate.sh  the Mac's self-made signing certificate
 | `latest.json` | attached to each GitHub release, fetched from `releases/latest/download/latest.json` |
 | Updates | daily check on; installing by themselves when nothing is running, on |
 | Version | semantic, from `v0.1.0` |
+| Building a release | by hand on the maintainer's Mac and Windows PC, onto one draft release; the Mac signs `latest.json` last (§7) |
 
 **Open**
 
@@ -798,10 +843,13 @@ between sessions.
 | 5. Linux | not started. Decided: the package repository is `arfabit/packages` on GitHub Pages, at `https://arfabit.github.io/packages/`, keeping five versions; Arch through the AUR as `arfabit-bin`, which needs the maintainer's AUR account and SSH key, not yet asked for. Already in place: `packaging/linux/arfabit.desktop`, the repository's public key `packaging/linux/arfabit.asc`, and `go run ./packaging/icon` for its icon |
 | 6. Removing `internal/autostart` | after 5 |
 | 7. Homebrew and winget | not decided |
-| The release workflow (§7) | written for macOS and Windows, making a draft release; not yet run. Needs the secrets `ARFABIT_MAC_CERT` and `ARFABIT_MAC_CERT_PASSWORD`, not yet set. The macOS job runs on `macos-26` for Xcode 26's asset compiler, and trusts the certificate on the runner with `sudo security add-trusted-cert`; neither is yet seen working there |
+| Making a release (§7) | by hand, decided 2026-11-04 in place of GitHub Actions: `packaging/release/release.sh` on the Mac, `build.ps1 -Upload` on Windows, onto one draft release. Written, not yet run. No release yet |
 
 **Keys and secrets.** Made once, on the maintainer's Mac, with private halves
-in `~/arfabit-keys` and backed up by the maintainer:
+in `~/arfabit-keys` and backed up by the maintainer. They were also put into
+GitHub secrets for a release workflow; releases are now made by hand (§7), so
+the secrets are unused, and step 5 decides whether the Linux repository needs
+its two:
 
 | Secret in `arfabit/arfabit` | For | Public half |
 |---|---|---|

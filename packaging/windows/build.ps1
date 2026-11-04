@@ -4,10 +4,13 @@
 #
 #   packaging\windows\build.ps1            a "dev" build
 #   packaging\windows\build.ps1 v0.1.0     a release
+#   packaging\windows\build.ps1 v0.1.0 -Upload
+#                                          a release, with the installer put
+#                                          on its draft on GitHub (docs/RELEASE.md §7)
 #
 # Everything goes in dist\windows.
 
-param([string]$Version = "dev")
+param([string]$Version = "dev", [switch]$Upload)
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
@@ -19,6 +22,24 @@ if ($Version -eq "dev") {
     $short = $Matches[1]
 } else {
     throw "The version must look like v0.1.0, or be left out for a dev build."
+}
+
+# A release's installer is built from exactly the tagged commit, the one the
+# Mac app on the same draft was built from.
+if ($Upload) {
+    if ($Version -eq "dev") { throw "Only a release can be uploaded. Give its version, such as v0.1.0." }
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        throw "The GitHub CLI is not installed: winget install GitHub.cli, then gh auth login."
+    }
+    # for-each-ref says nothing for a missing tag, where cat-file would write
+    # to stderr, which Windows PowerShell stops on.
+    if ((git for-each-ref --format="%(objecttype)" "refs/tags/$Version") -ne "tag") {
+        throw "There is no annotated tag $Version here. Run: git fetch --tags"
+    }
+    if (git status --porcelain) { throw "There are changes not committed. Commit or put them away first." }
+    if ((git rev-parse HEAD) -ne (git rev-parse "$Version^{commit}")) {
+        throw "This checkout is not at $Version. Run: git checkout $Version"
+    }
 }
 
 $dist = Join-Path $root "dist\windows"
@@ -74,3 +95,14 @@ if ($iscc) {
 if ($LASTEXITCODE) { throw "Inno Setup did not finish." }
 
 Write-Host "Made $(Join-Path $dist 'ARFABIT-setup.exe')"
+
+if ($Upload) {
+    gh release upload $Version (Join-Path $dist "ARFABIT-setup.exe") --clobber
+    if ($LASTEXITCODE) { throw "The installer was not uploaded to the draft release $Version." }
+    Write-Host ""
+    Write-Host "Put the installer on the draft release $Version. Then, on the Mac:"
+    Write-Host ""
+    Write-Host "  packaging/release/release.sh finish $Version"
+    Write-Host ""
+    Write-Host "And here, to carry on with main: git checkout main"
+}
