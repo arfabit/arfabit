@@ -629,7 +629,10 @@ copies into its own `setup` folder, so the one before is there to put back.
 
 Uninstalling removes ARFABIT's programs and its login item or service. It never
 removes the library, the originals, or ARFABIT's own settings and state, so
-installing again carries on where it left off.
+installing again carries on where it left off. On Windows it also removes the
+film list, kept apart from the rest in `%LOCALAPPDATA%\arfabit` for that
+reason: it is often the largest thing ARFABIT keeps, the size Installed apps
+shows includes it, and it can always be downloaded again.
 
 | | How |
 |---|---|

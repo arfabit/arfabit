@@ -92,6 +92,9 @@ namespace Arfabit.Shell
             // and reported, so the page never disagrees with Windows.
             loginTimer.Tick += (s, e) => Observe(LoginItem.Current());
 
+            // The film list can arrive at any time; the same check notices it.
+            loginTimer.Tick += (s, e) => InstalledSize.Update();
+
             Start();
         }
 
@@ -228,6 +231,7 @@ namespace Arfabit.Shell
                 startedOnce = true;
                 deciding = !updated;
             }
+            InstalledSize.Update();
             loginTimer.Start();
         }
 

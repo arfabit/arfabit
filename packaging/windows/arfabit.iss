@@ -3,8 +3,9 @@
 ; Installs ARFABIT for the person running it, with no administrator password:
 ; the shell, ARFABIT.exe, and ARFABIT itself, core\arfabit.exe, in
 ; %LOCALAPPDATA%\Programs\ARFABIT. The same installer, run silently, is the
-; update (§6). Uninstalling removes the programs and the login item, never
-; the library, the originals, or ARFABIT's own settings and state (§8).
+; update (§6). Uninstalling removes the programs, the login item, and the
+; film list, which can always be downloaded again; never the library, the
+; originals, or ARFABIT's own settings and state (§8).
 ;
 ; Built by packaging/windows/build.ps1, which passes Version and Dist.
 
@@ -44,6 +45,12 @@ Source: "{#Dist}\core\arfabit.exe"; DestDir: "{app}\core"; Flags: ignoreversion
 ; This installer, kept so a later update that does not start can put this
 ; version back (docs/RELEASE.md §6).
 Source: "{srcexe}"; DestDir: "{app}\setup"; DestName: "ARFABIT-setup.exe"; Flags: external ignoreversion
+
+[UninstallDelete]
+; The film list ARFABIT downloads, often the largest thing it keeps
+; (internal/config.IndexDir).
+Type: files; Name: "{localappdata}\arfabit\titles.json"
+Type: files; Name: "{localappdata}\arfabit\titles.json.tmp"
 
 [Icons]
 Name: "{autoprograms}\ARFABIT"; Filename: "{app}\ARFABIT.exe"
