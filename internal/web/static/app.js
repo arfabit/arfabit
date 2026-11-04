@@ -3221,7 +3221,9 @@ function loginWords(shell, mac) {
     case "notRegistered":
       return shell.start_at_login ? "Your Mac did not add ARFABIT to its login items." : "";
     case "notFound":
-      return "Your Mac could not find ARFABIT to add it to its login items.";
+      // macOS said this of v0.1.0 freshly installed, with Start at login
+      // never switched on, so it is only worth saying when it was.
+      return shell.start_at_login ? "Your Mac could not find ARFABIT to add it to its login items." : "";
     default:
       return `Your Mac reports: ${login.state}.`;
   }
@@ -3279,9 +3281,10 @@ function renderUpdates(state) {
   } else if (st.problem) {
     said(st.problem, st.detail);
   } else if (st.checked_at) {
-    said(`ARFABIT is up to date: version ${st.current}. Last checked ${describeAge(st.checked_at)}.`);
+    // The version is already shown under ARFABIT itself.
+    said(`ARFABIT is up to date. Last checked ${describeAge(st.checked_at)}.`);
   } else {
-    said(`This is version ${st.current}. ARFABIT has not checked for a new one yet.`);
+    said("ARFABIT has not checked for a new version yet.");
   }
 
   show("update-ready", Boolean(ready));

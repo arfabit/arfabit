@@ -246,3 +246,13 @@ func updater(t *testing.T, current string, file []byte, sha string, size int64) 
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestStatusLeavesOutACheckNeverMade(t *testing.T) {
+	data, err := json.Marshal(Status{Current: "v0.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "checked_at") {
+		t.Errorf("a copy that has never checked says when it last did: %s", data)
+	}
+}

@@ -57,8 +57,12 @@ type Failed struct {
 
 // Status is everything the page and the app's menu say about updates.
 type Status struct {
-	Current   string    `json:"current"`
-	CheckedAt time.Time `json:"checked_at,omitempty"`
+	Current string `json:"current"`
+
+	// CheckedAt is left out until a check has finished. omitempty would not
+	// leave it out: a zero time is a struct, and went to the page as the
+	// year 1, which it showed as a check made on 12/31/1.
+	CheckedAt time.Time `json:"checked_at,omitzero"`
 
 	// Latest is the newest version found at the last check.
 	Latest string `json:"latest,omitempty"`

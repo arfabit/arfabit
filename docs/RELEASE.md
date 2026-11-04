@@ -849,7 +849,7 @@ between sessions.
 | 5. Linux | not started. Decided: the package repository is `arfabit/packages` on GitHub Pages, at `https://arfabit.github.io/packages/`, keeping five versions; Arch through the AUR as `arfabit-bin`, which needs the maintainer's AUR account and SSH key, not yet asked for. Already in place: `packaging/linux/arfabit.desktop`, the repository's public key `packaging/linux/arfabit.asc`, and `go run ./packaging/icon` for its icon |
 | 6. Removing `internal/autostart` | after 5 |
 | 7. Homebrew and winget | not decided |
-| Making a release (§7) | by hand, decided 2026-11-04 in place of GitHub Actions: `packaging/release/release.sh` on the Mac, `build.ps1 -Upload` on Windows, onto one draft release. Run end to end for v0.1.0 on 2026-11-04: `start`, `build.ps1 -Upload`, and `finish`, whose read-back check passed. v0.1.0 is a draft, not yet installed from or published |
+| Making a release (§7) | by hand, decided 2026-11-04 in place of GitHub Actions: `packaging/release/release.sh` on the Mac, `build.ps1 -Upload` on Windows, onto one draft release. Run end to end for v0.1.0 on 2026-11-04: `start`, `build.ps1 -Upload`, and `finish`, whose read-back check passed. v0.1.0 published the same day, after installing from the draft on both machines. Windows showed "Windows protected your PC" ("Microsoft Defender SmartScreen prevented an unrecognized app from starting", Publisher: Unknown publisher) with **Run anyway**, as §5 expects. Until it was published, Check for updates got 404 for `latest.json`, as expected for a draft; once published, it found v0.1.0 and said up to date |
 
 **Keys and secrets.** Made once, on the maintainer's Mac, with private halves
 in `~/arfabit-keys` and backed up by the maintainer. They were also put into
