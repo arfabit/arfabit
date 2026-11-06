@@ -10,6 +10,10 @@ stop and say so rather than working around it.
 **Building, packaging, installing, starting at login, and updating** are in
 `docs/RELEASE.md`. Read its §0 goals before touching any of them.
 
+**Briefs for work not yet started** are in `docs/agents/`, one file per piece
+of work. If you were pointed at one, read it after this file. A brief records
+decisions not yet in the docs; once the docs say it, remove the brief.
+
 ---
 
 ## The short version
